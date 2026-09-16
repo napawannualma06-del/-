@@ -124,17 +124,19 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
           <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
             <Users className="w-4 h-4" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white whitespace-nowrap">
                 สรุปงานพนักงาน (ใครกำลังรับกี่เคส)
               </h3>
-              <span className="text-[11px] font-semibold px-2 py-0.2 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                ทำเคสอยู่ {totalBusy} คน
-              </span>
-              <span className="text-[11px] font-semibold px-2 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                ว่างงาน {totalIdle} คน
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 whitespace-nowrap">
+                  ทำเคสอยู่ {totalBusy} คน
+                </span>
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
+                  ว่างงาน {totalIdle} คน
+                </span>
+              </div>
             </div>
             <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500">
               กดที่ชื่อพนักงานเพื่อดูเฉพาะเคสของคนนั้นได้ทันที
