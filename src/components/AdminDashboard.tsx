@@ -331,25 +331,6 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* Admin Supervisor Status Banner */}
-      {adminProfile && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/90 dark:border-amber-800/80 rounded-2xl text-xs text-amber-900 dark:text-amber-200 shadow-2xs">
-          <div className="flex items-center gap-2">
-            <span className="p-1 rounded-lg bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 font-bold text-xs flex items-center">
-              <Crown className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-300" />
-              แอดมินระบบ
-            </span>
-            <span className="font-semibold text-slate-900 dark:text-white">{adminProfile.name} (@{adminProfile.username})</span>
-            <span className="text-amber-700 dark:text-amber-400 text-[11px] hidden sm:inline">
-              • ผู้ดูแลระบบ ไม่ถูกนับรวมในยอดพนักงานและไม่ขึ้นสถานะว่างงาน
-            </span>
-          </div>
-          <span className="text-[10px] sm:text-[11px] font-semibold text-amber-800 dark:text-amber-300 bg-amber-100/70 dark:bg-amber-900/60 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-700">
-            สิทธิ์ควบคุมสูงสุด
-          </span>
-        </div>
-      )}
-
       {/* Credit Check Duty Station (2-person duty roster visible to everyone) */}
       <CreditCheckDutyStation />
 

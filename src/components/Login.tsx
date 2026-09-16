@@ -234,28 +234,6 @@ export function Login() {
                 <LogIn className="w-4 h-4 mr-2" />
                 {loading ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ'}
               </button>
-
-              {/* Admin gametpl Quick Fill Card */}
-              <div className="mt-3 p-2.5 rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50/80 dark:bg-amber-950/30 flex items-center justify-between">
-                <div className="text-left">
-                  <div className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center">
-                    <span className="mr-1">👑</span> แอดมินสูงสุด (Super Admin):
-                  </div>
-                  <div className="text-[11px] text-amber-700 dark:text-amber-300 font-mono mt-0.5">
-                    ID: <strong>gametpl</strong> / Pass: <strong>gametpl</strong>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLoginUsername('gametpl');
-                    setLoginPin('gametpl');
-                  }}
-                  className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition cursor-pointer shrink-0 ml-2"
-                >
-                  กรอกข้อมูล
-                </button>
-              </div>
             </form>
           )}
 
@@ -312,59 +290,6 @@ export function Login() {
                 {loading ? 'กำลังบันทึก...' : 'ลงทะเบียนและเข้าสู่ระบบทันที'}
               </button>
             </form>
-          )}
-
-          {/* Quick Switch / Registered Users List */}
-          {registeredUsers.length > 0 && (
-            <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
-              <div className="flex items-center justify-between mb-2.5">
-                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 flex items-center">
-                  <UserCheck className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                  รายชื่อผู้ใช้ในระบบ (กดเพื่อเข้าใช้งาน):
-                </span>
-              </div>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                {registeredUsers.map((u) => {
-                  const isSuperAdmin = u.username === 'gametpl' || u.role === 'admin';
-                  return (
-                    <button
-                      key={u.uid}
-                      type="button"
-                      onClick={() => handleQuickSelect(u)}
-                      className={clsx(
-                        "w-full flex items-center justify-between p-2 rounded-xl transition text-left text-xs group cursor-pointer border",
-                        isSuperAdmin
-                          ? "bg-amber-50/70 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700/60 hover:bg-amber-100/70"
-                          : "bg-slate-50 dark:bg-slate-800 hover:bg-indigo-50/80 dark:hover:bg-slate-750 border-slate-200/70 dark:border-slate-700 hover:border-indigo-200"
-                      )}
-                    >
-                      <div className="flex items-center min-w-0">
-                        <div className={clsx(
-                          "w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] mr-2 shrink-0",
-                          isSuperAdmin 
-                            ? "bg-amber-400 text-amber-950" 
-                            : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 group-hover:bg-indigo-200 group-hover:text-indigo-800"
-                        )}>
-                          {isSuperAdmin ? '👑' : u.name.charAt(0)}
-                        </div>
-                        <div className="truncate">
-                          <span className="font-medium text-slate-800 dark:text-slate-200">{u.name}</span>
-                          <span className="text-slate-400 dark:text-slate-500 ml-1.5 text-[11px]">(@{u.username})</span>
-                          {isSuperAdmin && (
-                            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-200 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200">
-                              แอดมิน
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center shrink-0 ml-2">
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600" />
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           )}
 
         </div>
