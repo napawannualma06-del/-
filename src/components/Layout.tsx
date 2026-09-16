@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useStore } from '../store/useStore';
+import { Logo } from './Logo';
 import { 
   LogOut, 
   BarChart3, 
   ListTodo, 
   Bell, 
-  Building2, 
-  User,
   Sun,
   Moon
 } from 'lucide-react';
@@ -40,22 +39,20 @@ export function Layout() {
             
             {/* Logo & Navigation */}
             <div className="flex items-center space-x-6">
-              <Link to="/" className="flex items-center space-x-2.5">
-                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-                  <Building2 className="w-5 h-5" />
-                </div>
-                <div>
+              <Link to="/" className="flex items-center space-x-3">
+                <Logo size="sm" />
+                <div className="hidden sm:block border-l border-slate-200 dark:border-slate-800 pl-3">
                   <div className="flex items-center space-x-2">
-                    <span className="font-bold text-base text-slate-900 dark:text-white leading-none block">
+                    <span className="font-bold text-sm text-slate-900 dark:text-white leading-none block">
                       ระบบจัดการคิว
                     </span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse mr-1"></span>
                       ออนไลน์
                     </span>
                   </div>
                   <span className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-                    คิวงานพนักงาน
+                    ไทย พลัส+
                   </span>
                 </div>
               </Link>
@@ -124,15 +121,32 @@ export function Layout() {
 
               {/* Current Member Badge */}
               <div className="flex items-center pl-2 sm:pl-3 border-l border-slate-200 dark:border-slate-800">
-                <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold flex items-center justify-center text-xs mr-2">
-                  {user?.name?.charAt(0) || 'U'}
+                <div className={clsx(
+                  "w-8 h-8 rounded-xl font-bold flex items-center justify-center text-xs mr-2 transition-all",
+                  user?.role === 'admin'
+                    ? "bg-amber-400 text-amber-950 ring-2 ring-amber-300 dark:ring-amber-500 shadow-xs"
+                    : "bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300"
+                )}>
+                  {user?.role === 'admin' ? '👑' : (user?.name?.charAt(0) || 'U')}
                 </div>
                 <div className="hidden sm:block text-left mr-3">
-                  <div className="text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[130px]">
-                    {user?.name}
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[130px]">
+                      {user?.name}
+                    </span>
+                    {user?.role === 'admin' && (
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                        Admin
+                      </span>
+                    )}
                   </div>
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500">
-                    @{user?.username || 'member'}
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center">
+                    <span>@{user?.username || 'member'}</span>
+                    {user?.role === 'admin' ? (
+                      <span className="ml-1 text-amber-600 dark:text-amber-400 font-semibold">• ผู้ดูแลระบบสูงสุด</span>
+                    ) : (
+                      <span className="ml-1">• พนักงาน</span>
+                    )}
                   </div>
                 </div>
 

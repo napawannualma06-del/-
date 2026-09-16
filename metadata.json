@@ -1,6 +1,6 @@
 {
   "name": "Remix ระบบจัดการคิวพนักงาน",
-  "description": "ระบบจัดการคิวพนักงาน (Employee Task/Queue Management)",
+  "description": "ไทย พลัส+ ระบบจัดการคิวพนักงาน (Employee Task/Queue Management)",
   "requestFramePermissions": [
     "notifications"
   ],

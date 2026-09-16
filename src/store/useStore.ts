@@ -5,6 +5,10 @@ import { signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
 
 export type Role = 'employee' | 'admin';
 
+export const SUPER_ADMIN_USERNAME = 'gametpl';
+export const SUPER_ADMIN_PIN = 'gametpl';
+export const SUPER_ADMIN_NAME = 'คุณเกม (แอดมินสูงสุด)';
+
 export interface UserProfile {
   uid: string;
   username: string;
@@ -39,7 +43,8 @@ const initialDark = (() => {
   if (saved !== null) {
     return saved === 'dark';
   }
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  // Default to Light Mode on first visit as requested by user
+  return false;
 })();
 
 if (typeof document !== 'undefined') {
@@ -73,9 +78,42 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const snap = await getDocs(collection(db, 'users'));
       const list: UserProfile[] = [];
-      snap.forEach((doc) => {
-        list.push({ uid: doc.id, ...doc.data() } as UserProfile);
+      let foundAdmin = false;
+      snap.forEach((d) => {
+        const data = d.data() as UserProfile;
+        const isGametpl = data.username?.toLowerCase() === SUPER_ADMIN_USERNAME || d.id === 'admin_gametpl';
+        if (isGametpl) {
+          foundAdmin = true;
+          list.push({ 
+            ...data, 
+            uid: d.id, 
+            username: SUPER_ADMIN_USERNAME,
+            name: data.name || SUPER_ADMIN_NAME,
+            role: 'admin', 
+            pin: SUPER_ADMIN_PIN 
+          });
+        } else {
+          // Only gametpl is allowed to be admin as requested
+          list.push({ ...data, uid: d.id, role: 'employee' });
+        }
       });
+
+      // Ensure gametpl is always in the registered list for easy admin access
+      if (!foundAdmin) {
+        const adminProfile: UserProfile = {
+          uid: 'admin_gametpl',
+          username: SUPER_ADMIN_USERNAME,
+          name: SUPER_ADMIN_NAME,
+          pin: SUPER_ADMIN_PIN,
+          role: 'admin',
+          createdAt: 1710000000000,
+        };
+        list.unshift(adminProfile);
+        try {
+          await setDoc(doc(db, 'users', 'admin_gametpl'), adminProfile, { merge: true });
+        } catch (_) {}
+      }
+
       set({ registeredUsers: list });
     } catch (e) {
       console.warn('Failed to fetch registered users list', e);
@@ -90,8 +128,36 @@ export const useStore = create<AppState>((set, get) => ({
       return { success: false, message: 'กรุณากรอกชื่อผู้ใช้หรือรหัสพนักงาน' };
     }
 
+    // 1. Check for Super Admin gametpl / gametpl
+    if (cleanUsername === SUPER_ADMIN_USERNAME) {
+      if (cleanPin !== SUPER_ADMIN_PIN) {
+        return { success: false, message: 'รหัสผ่านสำหรับแอดมิน gametpl ไม่ถูกต้อง' };
+      }
+
+      const adminProfile: UserProfile = {
+        uid: 'admin_gametpl',
+        username: SUPER_ADMIN_USERNAME,
+        name: SUPER_ADMIN_NAME,
+        pin: SUPER_ADMIN_PIN,
+        role: 'admin',
+        createdAt: 1710000000000,
+      };
+
+      try {
+        const docRef = doc(db, 'users', 'admin_gametpl');
+        await setDoc(docRef, adminProfile, { merge: true });
+      } catch (e) {
+        console.warn('Could not sync admin to firestore', e);
+      }
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(adminProfile));
+      set({ user: adminProfile });
+      get().fetchRegisteredUsers();
+      return { success: true };
+    }
+
     try {
-      // 1. Try finding in Firestore
+      // 2. Try finding in Firestore for regular employees
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('username', '==', cleanUsername));
       const snap = await getDocs(q);
@@ -105,7 +171,12 @@ export const useStore = create<AppState>((set, get) => ({
           if (data.pin && data.pin !== cleanPin) {
             return { success: false, message: 'รหัสผ่านหรือ PIN ไม่ถูกต้อง' };
           }
-          const profile = { ...data, uid: directDoc.id };
+          // Only gametpl is admin
+          const profile: UserProfile = { 
+            ...data, 
+            uid: directDoc.id, 
+            role: 'employee' 
+          };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
           set({ user: profile });
           return { success: true };
@@ -119,9 +190,11 @@ export const useStore = create<AppState>((set, get) => ({
         return { success: false, message: 'รหัสผ่านหรือ PIN ไม่ถูกต้อง' };
       }
 
+      // Only gametpl is admin
       const profile: UserProfile = {
         ...data,
         uid: userDoc.id,
+        role: 'employee',
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
@@ -140,6 +213,10 @@ export const useStore = create<AppState>((set, get) => ({
 
     if (!cleanName || !cleanUsername) {
       return { success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน' };
+    }
+
+    if (cleanUsername === SUPER_ADMIN_USERNAME) {
+      return { success: false, message: 'ชื่อผู้ใช้ gametpl สงวนสิทธิ์สำหรับผู้ดูแลระบบ (แอดมิน) เท่านั้น กรุณาเข้าสู่ระบบ' };
     }
 
     try {
@@ -195,8 +272,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setUserDirectly: (profile: UserProfile) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-    set({ user: profile });
+    const isSuperAdmin = profile.username?.toLowerCase() === SUPER_ADMIN_USERNAME || profile.uid === 'admin_gametpl';
+    const enforcedProfile: UserProfile = {
+      ...profile,
+      role: isSuperAdmin ? 'admin' : 'employee'
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(enforcedProfile));
+    set({ user: enforcedProfile });
   },
 
   loginWithGoogle: async (role: Role = 'employee') => {
@@ -252,8 +334,14 @@ export const useStore = create<AppState>((set, get) => ({
       if (savedUserStr) {
         try {
           const parsed = JSON.parse(savedUserStr);
-          if (parsed && parsed.uid && parsed.name && parsed.role) {
-            set({ user: parsed, loading: false });
+          if (parsed && parsed.uid && parsed.name) {
+            const isSuperAdmin = parsed.username?.toLowerCase() === SUPER_ADMIN_USERNAME || parsed.uid === 'admin_gametpl';
+            const enforcedProfile: UserProfile = {
+              ...parsed,
+              role: isSuperAdmin ? 'admin' : 'employee',
+              name: isSuperAdmin ? SUPER_ADMIN_NAME : parsed.name,
+            };
+            set({ user: enforcedProfile, loading: false });
             get().fetchRegisteredUsers();
             return;
           }

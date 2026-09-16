@@ -48,6 +48,30 @@
           "enum": ["pending", "credit_check", "processing", "closed", "cancelled"],
           "description": "Case lifecycle statuses: pending, credit_check, processing, closed, cancelled"
         },
+        "contractNumber": {
+          "type": "string",
+          "description": "Contract number or agreement reference"
+        },
+        "contractUpdatedAt": {
+          "type": "number",
+          "description": "Timestamp when contract number was last updated"
+        },
+        "contractUpdatedBy": {
+          "type": "string",
+          "description": "Name of employee who entered or updated the contract number"
+        },
+        "remarks": {
+          "type": "string",
+          "description": "Note or reason why task is stuck, held, or special remarks"
+        },
+        "remarksUpdatedAt": {
+          "type": "number",
+          "description": "Timestamp when remark was last updated"
+        },
+        "remarksUpdatedBy": {
+          "type": "string",
+          "description": "Name of employee who entered or updated the remark"
+        },
         "assigneeId": {
           "type": "string",
           "description": "User ID of the employee who accepted the case"
