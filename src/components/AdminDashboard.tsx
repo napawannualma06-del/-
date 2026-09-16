@@ -354,124 +354,124 @@ export function AdminDashboard() {
       <CreditCheckDutyStation />
 
       {/* OVERVIEW STAT CARDS (TEAM & CASES) - High density & responsive on mobile */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-2 sm:gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-2 sm:gap-3">
         {/* Total Employees */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2.5 sm:p-4 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400">พนักงานทั้งหมด</span>
-            <span className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
-              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">พนักงานทั้งหมด</span>
+            <span className="p-1 sm:p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+              <Users className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="mt-1.5 sm:mt-2.5">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 dark:text-white">
-              {allEmployees.length} <span className="text-xs sm:text-sm font-normal text-slate-400">คน</span>
+          <div className="mt-1.5 sm:mt-2">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-900 dark:text-white">
+              {allEmployees.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">คน</span>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">ในระบบไทย พลัส+ (ไม่รวมแอดมิน)</p>
+            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">ในระบบ (ไม่รวมแอดมิน)</p>
           </div>
         </div>
 
         {/* Idle Employees (Free) */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl shadow-2xs border border-emerald-200/80 dark:border-emerald-900/60 p-2.5 sm:p-4 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-emerald-200/80 dark:border-emerald-900/60 p-2 sm:p-3 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-medium text-emerald-600 dark:text-emerald-400">พนักงานว่างงาน</span>
-            <span className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
-              <UserCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-[10px] sm:text-[11px] font-medium text-emerald-600 dark:text-emerald-400">พนักงานว่างงาน</span>
+            <span className="p-1 sm:p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+              <UserCheck className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="mt-1.5 sm:mt-2.5">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
-              {idleEmployees.length} <span className="text-xs sm:text-sm font-normal text-slate-400">คน</span>
+          <div className="mt-1.5 sm:mt-2">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              {idleEmployees.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">คน</span>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-emerald-600/70 dark:text-emerald-400/70 mt-0.5 font-medium">
+            <p className="text-[9px] sm:text-[10px] text-emerald-600/70 dark:text-emerald-400/70 mt-0.5 font-medium line-clamp-1">
               พร้อมกดรับเคสใหม่
             </p>
           </div>
         </div>
 
         {/* Busy Employees (Handling tasks) */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl shadow-2xs border border-amber-200/80 dark:border-amber-900/60 p-2.5 sm:p-4 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-amber-200/80 dark:border-amber-900/60 p-2 sm:p-3 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-medium text-amber-600 dark:text-amber-400">กำลังรับงานอยู่</span>
-            <span className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
-              <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-[10px] sm:text-[11px] font-medium text-amber-600 dark:text-amber-400">กำลังรับงานอยู่</span>
+            <span className="p-1 sm:p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
+              <Clock className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="mt-1.5 sm:mt-2.5">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-amber-600 dark:text-amber-400">
-              {busyEmployees.length} <span className="text-xs sm:text-sm font-normal text-slate-400">คน</span>
+          <div className="mt-1.5 sm:mt-2">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-amber-600 dark:text-amber-400">
+              {busyEmployees.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">คน</span>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-amber-600/70 dark:text-amber-400/70 mt-0.5 font-medium">
+            <p className="text-[9px] sm:text-[10px] text-amber-600/70 dark:text-amber-400/70 mt-0.5 font-medium line-clamp-1">
               มีเคสกำลังทำอยู่
             </p>
           </div>
         </div>
 
         {/* Total Cases (Excluding closed cases) */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2.5 sm:p-4 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400">เคสทั้งหมดในคิว</span>
-            <span className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
-              <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">เคสในคิว</span>
+            <span className="p-1 sm:p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+              <Calendar className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="mt-1.5 sm:mt-2.5">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 dark:text-white">
-              {totalOpenCases.length} <span className="text-xs sm:text-sm font-normal text-slate-400">เคส</span>
+          <div className="mt-1.5 sm:mt-2">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-900 dark:text-white">
+              {totalOpenCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">รอทำ (ไม่รวมเคสที่จบแล้ว)</p>
+            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">รอทำ (ไม่รวมจบแล้ว)</p>
           </div>
         </div>
 
         {/* Cases with Contract */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl shadow-2xs border border-blue-200/80 dark:border-blue-900/60 p-2.5 sm:p-4 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-blue-200/80 dark:border-blue-900/60 p-2 sm:p-3 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-medium text-blue-600 dark:text-blue-400">มีเลขสัญญา</span>
-            <span className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
-              <FileSignature className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-[10px] sm:text-[11px] font-medium text-blue-600 dark:text-blue-400">มีเลขสัญญา</span>
+            <span className="p-1 sm:p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+              <FileSignature className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="mt-1.5 sm:mt-2.5">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-blue-600 dark:text-blue-400">
-              {contractedCases.length} <span className="text-xs sm:text-sm font-normal text-slate-400">เคส</span>
+          <div className="mt-1.5 sm:mt-2">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-600 dark:text-blue-400">
+              {contractedCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-blue-600/70 dark:text-blue-400/70 mt-0.5">
+            <p className="text-[9px] sm:text-[10px] text-blue-600/70 dark:text-blue-400/70 mt-0.5 line-clamp-1">
               ระบุสัญญาเรียบร้อย
             </p>
           </div>
         </div>
 
         {/* Completed Cases */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2.5 sm:p-4 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400">จบเคสแล้ว</span>
-            <span className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
-              <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">จบเคสแล้ว</span>
+            <span className="p-1 sm:p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="mt-1.5 sm:mt-2.5">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
-              {closedCases.length} <span className="text-xs sm:text-sm font-normal text-slate-400">เคส</span>
+          <div className="mt-1.5 sm:mt-2">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              {closedCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">
               {filteredCases.length > 0 ? Math.round((closedCases.length / filteredCases.length) * 100) : 0}% สำเร็จ
             </p>
           </div>
         </div>
 
         {/* Cancelled Cases */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl sm:rounded-2xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2.5 sm:p-4 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400">ยกเลิกเคส</span>
-            <span className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
-              <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">ยกเลิกเคส</span>
+            <span className="p-1 sm:p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
+              <Ban className="w-3.5 h-3.5" />
             </span>
           </div>
-          <div className="mt-1.5 sm:mt-2.5">
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-rose-600 dark:text-rose-400">
-              {cancelledCases.length} <span className="text-xs sm:text-sm font-normal text-slate-400">เคส</span>
+          <div className="mt-1.5 sm:mt-2">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-rose-600 dark:text-rose-400">
+              {cancelledCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">เคสที่ถูกยกเลิก</p>
+            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">เคสที่ถูกยกเลิก</p>
           </div>
         </div>
       </div>
