@@ -45,8 +45,8 @@
         },
         "status": {
           "type": "string",
-          "enum": ["pending", "credit_check", "processing", "closed"],
-          "description": "pending means not accepted yet. credit_check, processing, closed are the actual statuses after accept."
+          "enum": ["pending", "credit_check", "processing", "closed", "cancelled"],
+          "description": "Case lifecycle statuses: pending, credit_check, processing, closed, cancelled"
         },
         "assigneeId": {
           "type": "string",

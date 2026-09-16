@@ -18,7 +18,7 @@ service cloud.firestore {
       return data.agentName is string && data.agentName.size() <= 128 &&
              data.iphoneModel is string && data.iphoneModel.size() <= 128 &&
              data.province is string && data.province.size() <= 128 &&
-             data.status in ['pending', 'credit_check', 'processing', 'closed'];
+             data.status in ['pending', 'credit_check', 'processing', 'closed', 'cancelled'];
     }
 
     match /users/{userId} {

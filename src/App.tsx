@@ -20,7 +20,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>
     );
@@ -33,10 +33,7 @@ export default function App() {
         
         <Route element={user ? <Layout /> : <Navigate to="/login" />}>
           <Route path="/" element={<Queue />} />
-          <Route 
-            path="/admin" 
-            element={user?.role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} 
-          />
+          <Route path="/admin" element={<AdminDashboard />} />
         </Route>
       </Routes>
     </HashRouter>

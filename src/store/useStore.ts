@@ -19,23 +19,55 @@ export interface UserProfile {
 interface AppState {
   user: UserProfile | null;
   loading: boolean;
+  isDarkMode: boolean;
   registeredUsers: UserProfile[];
+  toggleDarkMode: () => void;
   fetchRegisteredUsers: () => Promise<void>;
   loginWithUsername: (username: string, pin: string) => Promise<{ success: boolean; message?: string }>;
-  registerEmployee: (name: string, username: string, pin: string, role: Role) => Promise<{ success: boolean; message?: string }>;
-  loginWithDemo: (role: Role) => Promise<void>;
-  loginWithGoogle: (role?: Role) => Promise<void>;
+  registerEmployee: (name: string, username: string, pin?: string) => Promise<{ success: boolean; message?: string }>;
   setUserDirectly: (profile: UserProfile) => void;
   logout: () => Promise<void>;
   initAuth: () => Promise<void>;
 }
 
 const STORAGE_KEY = 'qmanage_current_user_v2';
+const THEME_KEY = 'qmanage_theme_mode';
+
+const initialDark = (() => {
+  if (typeof window === 'undefined') return false;
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved !== null) {
+    return saved === 'dark';
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+})();
+
+if (typeof document !== 'undefined') {
+  if (initialDark) {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+}
 
 export const useStore = create<AppState>((set, get) => ({
   user: null,
   loading: true,
+  isDarkMode: initialDark,
   registeredUsers: [],
+
+  toggleDarkMode: () => {
+    const nextDark = !get().isDarkMode;
+    if (typeof document !== 'undefined') {
+      if (nextDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+    localStorage.setItem(THEME_KEY, nextDark ? 'dark' : 'light');
+    set({ isDarkMode: nextDark });
+  },
 
   fetchRegisteredUsers: async () => {
     try {
@@ -101,10 +133,10 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  registerEmployee: async (name: string, username: string, pin: string, role: Role) => {
+  registerEmployee: async (name: string, username: string, pin?: string) => {
     const cleanName = name.trim();
     const cleanUsername = username.trim().toLowerCase();
-    const cleanPin = pin.trim();
+    const cleanPin = (pin || '').trim();
 
     if (!cleanName || !cleanUsername) {
       return { success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน' };
@@ -125,7 +157,7 @@ export const useStore = create<AppState>((set, get) => ({
         name: cleanName,
         username: cleanUsername,
         pin: cleanPin,
-        role: role,
+        role: 'employee',
         createdAt: Date.now(),
       };
 
