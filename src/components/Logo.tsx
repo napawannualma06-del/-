@@ -1,4 +1,5 @@
 import React from 'react';
+import logoUrl from '../assets/logo.svg';
 
 interface LogoProps {
   className?: string;
@@ -21,7 +22,7 @@ export const Logo: React.FC<LogoProps> = ({
   return (
     <div className={`inline-flex items-center gap-2.5 select-none ${className}`}>
       <img
-        src="/logo.svg"
+        src={logoUrl}
         alt="ไทย พลัส+"
         className={`${sizeMap[size]} w-auto object-contain drop-shadow-xs transition-transform hover:scale-105`}
       />
