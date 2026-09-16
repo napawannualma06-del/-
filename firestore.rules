@@ -38,5 +38,9 @@ service cloud.firestore {
       allow create, update: if isValidCase(incoming());
       allow delete: if true;
     }
+
+    match /system_duties/{dutyId} {
+      allow read, write: if true;
+    }
   }
 }

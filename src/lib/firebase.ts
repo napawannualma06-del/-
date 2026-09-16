@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import { getMessaging } from 'firebase/messaging';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
@@ -9,14 +8,30 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Initialize messaging only if supported (some browsers like Safari might have issues, or if VAPID isn't set)
-let messagingInstance: any = null;
-try {
-  messagingInstance = getMessaging(app);
-} catch (e) {
-  console.warn("Firebase Messaging not supported", e);
+// Messaging is optional and not supported in sandboxed iframes or certain mobile browsers.
+// We safely guard with isSupported() so it never throws "messaging/unsupported-browser".
+export let messaging: any = null;
+if (typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator) {
+  import('firebase/messaging')
+    .then(({ isSupported, getMessaging }) => {
+      isSupported()
+        .then((supported) => {
+          if (supported) {
+            try {
+              messaging = getMessaging(app);
+            } catch {
+              messaging = null;
+            }
+          }
+        })
+        .catch(() => {
+          messaging = null;
+        });
+    })
+    .catch(() => {
+      messaging = null;
+    });
 }
-export const messaging = messagingInstance;
 
 export enum OperationType {
   CREATE = 'create',

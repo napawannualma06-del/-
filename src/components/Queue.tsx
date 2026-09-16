@@ -34,56 +34,46 @@ import {
   ShieldCheck,
   UserCheck,
   ArrowRightLeft,
+  LayoutGrid,
+  Layers,
+  List,
+  Lock,
   X
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { clsx } from 'clsx';
+import { CreditCheckDutyStation } from './CreditCheckDutyStation';
+import { SimpleEmployeeWorkload } from './SimpleEmployeeWorkload';
+import { AnimalAvatar } from './AnimalAvatar';
+import { DutyWorker, Case } from '../types';
 
-export interface Case {
-  id: string;
-  agentName: string;
-  iphoneModel: string;
-  province: string;
-  status: 'pending' | 'credit_check' | 'processing' | 'closed' | 'cancelled';
-  contractNumber?: string;
-  contractUpdatedAt?: number;
-  contractUpdatedBy?: string;
-  remarks?: string;
-  remarksUpdatedAt?: number;
-  remarksUpdatedBy?: string;
-  assigneeId?: string;
-  assigneeName?: string;
-  createdAt: number;
-  updatedAt: number;
-  completedAt?: number;
-  cancelledAt?: number;
-}
+export type { Case };
 
 export const statusMap: Record<Case['status'], { label: string; badgeClass: string; borderClass: string; stepNumber: number }> = {
   pending: {
-    label: 'รอรับเคส',
-    badgeClass: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
-    borderClass: 'border-slate-200 dark:border-slate-800',
+    label: 'เครดิตผ่าน (รอรับเคส)',
+    badgeClass: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
+    borderClass: 'border-indigo-200 dark:border-indigo-800',
     stepNumber: 0,
   },
   credit_check: {
-    label: 'กำลังเช็คเครดิต',
-    badgeClass: 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
-    borderClass: 'border-blue-200 dark:border-blue-800/60',
+    label: 'กำลังทำเคส',
+    badgeClass: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+    borderClass: 'border-amber-200 dark:border-amber-800/60',
     stepNumber: 1,
   },
   processing: {
     label: 'กำลังทำเคส',
     badgeClass: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
     borderClass: 'border-amber-200 dark:border-amber-800/60',
-    stepNumber: 2,
+    stepNumber: 1,
   },
   closed: {
     label: 'จบเคสแล้ว',
     badgeClass: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
     borderClass: 'border-emerald-200 dark:border-emerald-800/60',
-    stepNumber: 3,
+    stepNumber: 2,
   },
   cancelled: {
     label: 'ยกเลิกเคส',
@@ -93,7 +83,12 @@ export const statusMap: Record<Case['status'], { label: string; badgeClass: stri
   },
 };
 
-const POPULAR_IPHONES = [
+export const POPULAR_IPHONES = [
+  'iPhone 17 Pro Max',
+  'iPhone 17 Pro',
+  'iPhone 17 Air',
+  'iPhone 17 Plus',
+  'iPhone 17',
   'iPhone 16 Pro Max',
   'iPhone 16 Pro',
   'iPhone 16 Plus',
@@ -104,32 +99,100 @@ const POPULAR_IPHONES = [
   'iPhone 15',
   'iPhone 14 Pro Max',
   'iPhone 14 Pro',
+  'iPhone 14 Plus',
   'iPhone 14',
+  'iPhone 13 Pro Max',
+  'iPhone 13 Pro',
   'iPhone 13',
+  'iPhone 13 mini',
+  'iPhone 12 Pro Max',
+  'iPhone 12 Pro',
   'iPhone 12',
+  'iPhone 11 Pro Max',
+  'iPhone 11 Pro',
   'iPhone 11',
+  'iPhone SE (รุ่นที่ 3)',
 ];
 
-const POPULAR_PROVINCES = [
+// ครบทุก 77 จังหวัดทั่วประเทศไทย
+export const POPULAR_PROVINCES = [
   'กรุงเทพมหานคร',
-  'นนทบุรี',
-  'ปทุมธานี',
-  'สมุทรปราการ',
-  'ชลบุรี',
-  'เชียงใหม่',
-  'นครราชสีมา',
+  'กระบี่',
+  'กาญจนบุรี',
+  'กาฬสินธุ์',
+  'กำแพงเพชร',
   'ขอนแก่น',
-  'ภูเก็ต',
-  'สงขลา',
-  'ระยอง',
-  'อุบลราชธานี',
-  'นครปฐม',
-  'สุราษฎร์ธานี',
-  'พิษณุโลก',
-  'อุดรธานี',
+  'จันทบุรี',
+  'ฉะเชิงเทรา',
+  'ชลบุรี',
+  'ชัยนาท',
+  'ชัยภูมิ',
+  'ชุมพร',
   'เชียงราย',
-  'สระบุรี',
+  'เชียงใหม่',
+  'ตรัง',
+  'ตราด',
+  'ตาก',
+  'นครนายก',
+  'นครปฐม',
+  'นครพนม',
+  'นครราชสีมา',
+  'นครศรีธรรมราช',
+  'นครสวรรค์',
+  'นนทบุรี',
+  'นราธิวาส',
+  'น่าน',
+  'บึงกาฬ',
+  'บุรีรัมย์',
+  'ปทุมธานี',
+  'ประจวบคีรีขันธ์',
+  'ปราจีนบุรี',
+  'ปัตตานี',
   'พระนครศรีอยุธยา',
+  'พะเยา',
+  'พังงา',
+  'พัทลุง',
+  'พิจิตร',
+  'พิษณุโลก',
+  'เพชรบุรี',
+  'เพชรบูรณ์',
+  'แพร่',
+  'ภูเก็ต',
+  'มหาสารคาม',
+  'มุกดาหาร',
+  'แม่ฮ่องสอน',
+  'ยโสธร',
+  'ยะลา',
+  'ร้อยเอ็ด',
+  'ระนอง',
+  'ระยอง',
+  'ราชบุรี',
+  'ลพบุรี',
+  'ลำปาง',
+  'ลำพูน',
+  'เลย',
+  'ศรีสะเกษ',
+  'สกลนคร',
+  'สงขลา',
+  'สตูล',
+  'สมุทรปราการ',
+  'สมุทรสงคราม',
+  'สมุทรสาคร',
+  'สระแก้ว',
+  'สระบุรี',
+  'สิงห์บุรี',
+  'สุโขทัย',
+  'สุพรรณบุรี',
+  'สุราษฎร์ธานี',
+  'สุรินทร์',
+  'หนองคาย',
+  'หนองบัวลำภู',
+  'อ่างทอง',
+  'อำนาจเจริญ',
+  'อุดรธานี',
+  'อุตรดิตถ์',
+  'อุทัยธานี',
+  'อุบลราชธานี',
 ];
 
 export const PRESET_REMARKS = [
@@ -173,15 +236,37 @@ export function Queue() {
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'mine' | 'contract' | 'remarks' | 'closed' | 'cancelled'>('all');
+  const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'row' | 'compact' | 'card'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('qmanage_queue_view_mode');
+      if (saved === 'row' || saved === 'compact' || saved === 'card') return saved;
+      return 'compact';
+    }
+    return 'compact';
+  });
+
+  const toggleViewMode = (mode: 'row' | 'compact' | 'card') => {
+    setViewMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('qmanage_queue_view_mode', mode);
+    }
+  };
+
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>('default');
 
+  // Credit Check Duty State (Max 2 workers, only they + admin can create cases)
+  const [isCreditChecker, setIsCreditChecker] = useState(false);
+  const [dutyWorkers, setDutyWorkers] = useState<DutyWorker[]>([]);
+  const canCreateCase = isAdmin || isCreditChecker;
+
   // Form State
   const [formData, setFormData] = useState({
     agentName: '',
-    iphoneModel: 'iPhone 16 Pro Max',
+    iphoneModel: 'iPhone 17 Pro Max',
     province: 'กรุงเทพมหานคร',
     contractNumber: '',
     remarks: '',
@@ -403,6 +488,11 @@ export function Queue() {
   const handleAddCase = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.agentName.trim() || !formData.iphoneModel || !formData.province) return;
+
+    if (!canCreateCase) {
+      alert('เฉพาะผู้ที่กำลังปฏิบัติหน้าที่ "งานเช็คเครดิต" (จำกัด 2 คน) หรือแอดมินเท่านั้นที่สามารถสร้างเคสได้\n\nกรุณากดปุ่ม "เข้าประจำเวรเช็คเครดิต" ด้านบนก่อนเปิดเคส');
+      return;
+    }
     
     setIsSubmitting(true);
     try {
@@ -410,7 +500,7 @@ export function Queue() {
         agentName: formData.agentName.trim(),
         iphoneModel: formData.iphoneModel,
         province: formData.province,
-        status: 'pending',
+        status: 'pending', // เครดิตผ่านทันที รอพนักงานกดรับไปทำเคส
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -430,7 +520,7 @@ export function Queue() {
       await addDoc(collection(db, 'cases'), newCase);
       setFormData({
         agentName: '',
-        iphoneModel: 'iPhone 16 Pro Max',
+        iphoneModel: 'iPhone 17 Pro Max',
         province: 'กรุงเทพมหานคร',
         contractNumber: '',
         remarks: '',
@@ -450,7 +540,7 @@ export function Queue() {
       await updateDoc(caseRef, {
         assigneeId: user.uid,
         assigneeName: user.name,
-        status: 'credit_check',
+        status: 'processing', // สร้างเคส = เครดิตผ่านเลย เมื่อกดรับเคสจะเริ่มทำเคสทันที
         updatedAt: Date.now(),
       });
     } catch (error) {
@@ -519,7 +609,10 @@ export function Queue() {
 
   // Filter & Search Logic
   const filteredCases = cases.filter((c) => {
-    if (activeFilter === 'pending') {
+    if (activeFilter === 'all') {
+      // เคสที่จบแล้วให้เอาออกจาก เคสทั้งหมด (สามารถดูได้ในแท็บ 'จบเคสแล้ว')
+      if (c.status === 'closed') return false;
+    } else if (activeFilter === 'pending') {
       if (c.status !== 'pending') return false;
     } else if (activeFilter === 'mine') {
       if (c.assigneeId !== user?.uid || c.status === 'closed' || c.status === 'cancelled') return false;
@@ -531,6 +624,10 @@ export function Queue() {
       if (c.status !== 'closed') return false;
     } else if (activeFilter === 'cancelled') {
       if (c.status !== 'cancelled') return false;
+    }
+
+    if (selectedEmployeeFilter) {
+      if (c.assigneeName !== selectedEmployeeFilter) return false;
     }
 
     if (searchQuery.trim()) {
@@ -547,6 +644,7 @@ export function Queue() {
     return true;
   });
 
+  const allActiveCount = cases.filter(c => c.status !== 'closed').length;
   const pendingCount = cases.filter(c => c.status === 'pending').length;
   const myCount = cases.filter(c => c.assigneeId === user?.uid && c.status !== 'closed' && c.status !== 'cancelled').length;
   const contractCount = cases.filter(c => !!c.contractNumber && c.status !== 'cancelled').length;
@@ -572,11 +670,11 @@ export function Queue() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center">
             กระดานคิวงาน
             <span className="ml-2.5 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">
-              {activeCount} เคสรอทำ
+              {allActiveCount} เคสทั้งหมดในคิว
             </span>
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            ไทย พลัส+ | รับเคส ตรวจสอบเครดิต ยกเลิกเคส และอัปเดตสถานะงานได้แบบเรียลไทม์
+            ไทย พลัส+ | สร้างเคส = เครดิตผ่านทันที • เฉพาะผู้เข้าเวรเช็คเครดิต (2 คน) เท่านั้นที่สร้างเคสได้
           </p>
         </div>
 
@@ -595,42 +693,96 @@ export function Queue() {
 
           <button
             type="button"
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="inline-flex items-center px-4 py-2.5 border border-transparent rounded-xl shadow-sm text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition cursor-pointer"
+            onClick={() => {
+              if (!canCreateCase) {
+                alert('เฉพาะผู้ที่กำลังปฏิบัติหน้าที่ "งานเช็คเครดิต" (จำกัด 2 คนพร้อมกัน) หรือแอดมินเท่านั้นที่สามารถสร้างเคสได้\n\n👉 กรุณากดปุ่ม "เข้าประจำเวรเช็คเครดิต" ที่กล่องด้านล่างก่อนเริ่มเปิดเคส');
+                return;
+              }
+              setShowAddForm(!showAddForm);
+            }}
+            className={clsx(
+              "inline-flex items-center px-4 py-2.5 border rounded-xl shadow-xs text-sm font-semibold transition cursor-pointer active:scale-95",
+              canCreateCase
+                ? "border-transparent text-white bg-indigo-600 hover:bg-indigo-700"
+                : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700"
+            )}
+            title={canCreateCase ? "สร้างเคสใหม่" : "เฉพาะผู้เข้าเวรเช็คเครดิต 2 คน หรือแอดมินเท่านั้นที่สามารถสร้างเคสได้"}
           >
-            <Plus className="w-4 h-4 mr-1.5" />
+            {canCreateCase ? (
+              <Plus className="w-4 h-4 mr-1.5" />
+            ) : (
+              <Lock className="w-4 h-4 mr-1.5 text-slate-400" />
+            )}
             {showAddForm ? 'ปิดแบบฟอร์ม' : 'เพิ่มเคสใหม่'}
+            {!canCreateCase && (
+              <span className="ml-1 text-[11px] font-normal opacity-80">(เฉพาะเวรเช็คเครดิต)</span>
+            )}
           </button>
         </div>
       </div>
 
+      {/* CREDIT CHECK DUTY STATION (Max 2 workers, only they can create cases) */}
+      <CreditCheckDutyStation 
+        onStatusChange={(isWorker, workers) => {
+          setIsCreditChecker(isWorker);
+          setDutyWorkers(workers);
+        }} 
+      />
+
+      {/* SIMPLE EMPLOYEE WORKLOAD OVERVIEW (ใครกำลังรับงานอยู่กี่เคส แสดงแบบง่ายๆ) */}
+      <SimpleEmployeeWorkload 
+        cases={cases}
+        selectedEmployeeName={selectedEmployeeFilter}
+        onSelectEmployee={(empName) => setSelectedEmployeeFilter(empName)}
+      />
+
       {/* CREATE CASE FORM MODAL / COLLAPSIBLE */}
       {showAddForm && (
         <div className="bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-2xl shadow-sm border border-indigo-100 dark:border-slate-800 ring-1 ring-indigo-500/10">
-          <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100 dark:border-slate-800">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center">
-              <Plus className="w-4 h-4 mr-2 text-indigo-600 dark:text-indigo-400" />
-              ลงข้อมูลเคสใหม่เข้าระบบ
-            </h2>
-            <span className="text-xs text-slate-400 dark:text-slate-500">สถานะเริ่มต้น: รอรับเคส</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-4 border-b border-slate-100 dark:border-slate-800 gap-2">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center">
+                <Plus className="w-4 h-4 mr-2 text-indigo-600 dark:text-indigo-400" />
+                ลงข้อมูลเคสใหม่เข้าระบบ
+              </h2>
+              <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5 font-medium">
+                ✓ สร้างเคส = เครดิตผ่านทันที (ไม่ต้องผ่านขั้นตอนตรวจเครดิตซ้ำ) พนักงานท่านอื่นสามารถกดรับไปทำเคสได้เลย
+              </p>
+            </div>
+            <span className="self-start sm:self-auto text-xs px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800">
+              สถานะ: เครดิตผ่าน (รอรับเคส)
+            </span>
           </div>
 
           <form onSubmit={handleAddCase} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Agent Name */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                  ชื่อตัวแทน (ผู้ส่งเคส) *
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                  <span>ชื่อตัวแทน (ผู้ส่งเคส) *</span>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, agentName: 'Agent Pream' })}
+                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-normal cursor-pointer"
+                  >
+                    + ใช้ตัวอย่าง Agent Pream
+                  </button>
                 </label>
                 <div className="relative">
                   <input
                     type="text"
                     required
-                    placeholder="เช่น ตัวแทนสมบัติ สาขาบางนา"
+                    placeholder="เช่น Agent Pream"
                     value={formData.agentName}
                     onChange={(e) => setFormData({ ...formData, agentName: e.target.value })}
+                    list="agent-name-suggestions"
                     className="w-full pl-9 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition"
                   />
+                  <datalist id="agent-name-suggestions">
+                    <option value="Agent Pream" />
+                    <option value="Agent Pream (สาขาใหญ่)" />
+                    <option value="Agent สมบัติ สาขาบางนา" />
+                  </datalist>
                   <Send className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 </div>
               </div>
@@ -749,7 +901,7 @@ export function Queue() {
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
-            เคสทั้งหมด ({cases.length})
+            เคสทั้งหมด ({allActiveCount})
           </button>
 
           <button
@@ -877,18 +1029,89 @@ export function Queue() {
           </button>
         </div>
 
-        {/* Search */}
-        <div className="relative w-full sm:w-64">
-          <input
-            type="text"
-            placeholder="ค้นหาตัวแทน, รุ่น, จังหวัด..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-          />
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+        {/* Search & View Mode Switcher */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          <div className="relative flex-1 sm:w-60">
+            <input
+              type="text"
+              placeholder="ค้นหาตัวแทน, รุ่น, จังหวัด..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
+            />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+          </div>
+
+          {/* View Mode Toggle: Row vs Compact (2 Columns) vs Full Card */}
+          <div className="flex bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-xs font-semibold shrink-0 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={() => toggleViewMode('row')}
+              className={clsx(
+                "px-2.5 py-1.5 rounded-lg flex items-center transition cursor-pointer text-xs",
+                viewMode === 'row'
+                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
+              )}
+              title="มุมมองแบบแถว/บรรทัดเดียว (แสดงข้อมูลกระชับ เลื่อนดูได้รวดเร็ว)"
+            >
+              <List className="w-3.5 h-3.5 mr-1 text-indigo-500" />
+              <span>แบบแถว</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleViewMode('compact')}
+              className={clsx(
+                "px-2.5 py-1.5 rounded-lg flex items-center transition cursor-pointer text-xs",
+                viewMode === 'compact'
+                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
+              )}
+              title="มุมมองกะทัดรัด (2 คอลัมน์บนมือถือ ดูได้หลายเคส)"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 mr-1 text-indigo-500" />
+              <span>การ์ดย่อ</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleViewMode('card')}
+              className={clsx(
+                "px-2.5 py-1.5 rounded-lg flex items-center transition cursor-pointer text-xs",
+                viewMode === 'card'
+                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
+              )}
+              title="มุมมองการ์ดเต็ม"
+            >
+              <Layers className="w-3.5 h-3.5 mr-1 text-slate-500" />
+              <span>การ์ดเต็ม</span>
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Active Employee Filter Banner */}
+      {selectedEmployeeFilter && (
+        <div className="flex items-center justify-between px-3.5 py-2.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/80 rounded-xl text-xs text-indigo-900 dark:text-indigo-200 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-700 dark:text-slate-300">กำลังแสดงเฉพาะเคสของ:</span>
+            <span className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 font-bold text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 shadow-2xs">
+              {selectedEmployeeFilter}
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              (พบ {filteredCases.length} เคส)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSelectedEmployeeFilter(null)}
+            className="flex items-center gap-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:text-indigo-950 dark:hover:text-white px-2 py-1 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/60 cursor-pointer transition"
+          >
+            <X className="w-3.5 h-3.5" />
+            ล้างตัวกรอง
+          </button>
+        </div>
+      )}
 
       {/* Case List Grid */}
       {filteredCases.length === 0 ? (
@@ -901,8 +1124,51 @@ export function Queue() {
             {searchQuery ? 'ลองเปลี่ยนคำค้นหา หรือกดล้างการค้นหา' : 'คุณสามารถกด "เพิ่มเคสใหม่" ด้านบนเพื่อเริ่มเปิดเคส'}
           </p>
         </div>
+      ) : viewMode === 'row' ? (
+        /* ROW / LIST VIEW: single line / compact horizontal strip per case */
+        <div className="space-y-1.5 sm:space-y-2">
+          {filteredCases.map((c) => (
+            <RowCaseItem
+              key={c.id}
+              data={c}
+              currentUserId={user?.uid}
+              isAdmin={isAdmin}
+              onAccept={() => handleAcceptCase(c.id)}
+              onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
+              onCancel={() => handleCancelCase(c.id)}
+              onReopen={() => handleReopenCase(c.id)}
+              onDelete={() => handleDeleteCase(c.id)}
+              onOpenRemark={handleOpenRemark}
+              onOpenContract={handleOpenContract}
+              onTakeOver={() => handleTakeOverCase(c.id)}
+              onOpenReassign={() => handleOpenReassign(c)}
+            />
+          ))}
+        </div>
+      ) : viewMode === 'compact' ? (
+        /* COMPACT GRID: 2 columns on mobile so multiple cases fit on screen! */
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
+          {filteredCases.map((c) => (
+            <CompactCaseCard
+              key={c.id}
+              data={c}
+              currentUserId={user?.uid}
+              isAdmin={isAdmin}
+              onAccept={() => handleAcceptCase(c.id)}
+              onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
+              onCancel={() => handleCancelCase(c.id)}
+              onReopen={() => handleReopenCase(c.id)}
+              onDelete={() => handleDeleteCase(c.id)}
+              onOpenRemark={handleOpenRemark}
+              onOpenContract={handleOpenContract}
+              onTakeOver={() => handleTakeOverCase(c.id)}
+              onOpenReassign={() => handleOpenReassign(c)}
+            />
+          ))}
+        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        /* FULL CARD GRID */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {filteredCases.map((c) => (
             <CaseCard
               key={c.id}
@@ -1216,6 +1482,440 @@ interface CaseCardProps {
   onOpenReassign: () => void;
 }
 
+const RowCaseItem: React.FC<CaseCardProps> = ({
+  data,
+  currentUserId,
+  isAdmin = false,
+  onAccept,
+  onUpdateStatus,
+  onCancel,
+  onReopen,
+  onDelete,
+  onOpenRemark,
+  onOpenContract,
+  onTakeOver,
+  onOpenReassign,
+}) => {
+  const isAssignee = data.assigneeId === currentUserId;
+  const canManage = isAssignee || isAdmin;
+  const statusInfo = statusMap[data.status] || statusMap.pending;
+
+  return (
+    <div className={clsx(
+      "bg-white dark:bg-slate-900 rounded-xl border p-2 sm:p-2.5 transition hover:shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-2.5 text-xs",
+      statusInfo.borderClass,
+      data.remarks ? "ring-1 ring-amber-400/40" : "",
+      data.contractNumber ? "border-blue-200 dark:border-blue-900/60" : "",
+      data.status === 'closed' ? "opacity-85 bg-slate-50/50 dark:bg-slate-900/50" : "",
+      data.status === 'cancelled' ? "opacity-80 bg-rose-50/30 dark:bg-rose-950/20" : ""
+    )}>
+      {/* Left content: Status, Time, Model, Agent, Province, Contract, Remarks */}
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0 flex-1">
+        {/* Status Badge */}
+        <span className={clsx(
+          "px-2 py-0.5 rounded-md text-[10px] sm:text-[11px] font-bold border flex items-center shrink-0 leading-tight",
+          statusInfo.badgeClass
+        )}>
+          {data.status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />}
+          {data.status === 'credit_check' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-spin mr-1" />}
+          {data.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />}
+          {data.status === 'closed' && <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600 dark:text-emerald-400" />}
+          {data.status === 'cancelled' && <Ban className="w-3 h-3 mr-1 text-rose-600 dark:text-rose-400" />}
+          {statusInfo.label}
+        </span>
+
+        {/* Time */}
+        <span className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 font-mono shrink-0">
+          {format(data.createdAt, 'HH:mm น.', { locale: th })}
+        </span>
+
+        {/* Model */}
+        <div className="font-bold text-slate-900 dark:text-white truncate sm:min-w-[140px] sm:max-w-[180px]" title={data.iphoneModel}>
+          {data.iphoneModel}
+        </div>
+
+        {/* Agent & Province */}
+        <div className="flex items-center text-slate-500 dark:text-slate-400 text-[11px] truncate sm:min-w-[150px]">
+          <span className="font-medium text-slate-700 dark:text-slate-300 truncate">{data.agentName}</span>
+          <span className="mx-1 text-slate-300 dark:text-slate-600">•</span>
+          <span className="truncate text-slate-400">{data.province}</span>
+        </div>
+
+        {/* Contract badge */}
+        {data.contractNumber ? (
+          <button
+            type="button"
+            onClick={() => onOpenContract(data)}
+            className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 text-[10px] font-mono font-bold text-blue-700 dark:text-blue-300 flex items-center hover:bg-blue-100 dark:hover:bg-blue-900/60 cursor-pointer shrink-0"
+            title="แก้ไขเลขสัญญา"
+          >
+            <FileSignature className="w-2.5 h-2.5 mr-1 text-blue-500" />
+            #{data.contractNumber}
+          </button>
+        ) : data.status !== 'pending' && (
+          <button
+            type="button"
+            onClick={() => onOpenContract(data)}
+            className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center cursor-pointer shrink-0"
+          >
+            <FileSignature className="w-2.5 h-2.5 mr-0.5 text-blue-500" />
+            +สัญญา
+          </button>
+        )}
+
+        {/* Remarks badge */}
+        {data.remarks ? (
+          <button
+            type="button"
+            onClick={() => onOpenRemark(data)}
+            className="px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200 flex items-center hover:bg-amber-100 dark:hover:bg-amber-900/60 cursor-pointer max-w-[180px] truncate shrink-0"
+            title={data.remarks}
+          >
+            <StickyNote className="w-2.5 h-2.5 mr-1 text-amber-600 shrink-0" />
+            <span className="truncate">{data.remarks}</span>
+          </button>
+        ) : (data.status === 'credit_check' || data.status === 'processing') && (
+          <button
+            type="button"
+            onClick={() => onOpenRemark(data)}
+            className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline flex items-center cursor-pointer shrink-0"
+          >
+            <StickyNote className="w-2.5 h-2.5 mr-0.5 text-amber-500" />
+            +หมายเหตุ
+          </button>
+        )}
+      </div>
+
+      {/* Right content: Assignee with AnimalAvatar + Actions */}
+      <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 border-t sm:border-t-0 pt-1.5 sm:pt-0 border-slate-100 dark:border-slate-800">
+        {/* Assignee display with Animal Cartoon Avatar */}
+        {data.assigneeName ? (
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 min-w-[100px]">
+            <AnimalAvatar identifier={data.assigneeId || data.assigneeName} name={data.assigneeName} size="xs" />
+            <span className="font-semibold truncate max-w-[90px]">{data.assigneeName}</span>
+            {isAssignee && <span className="text-indigo-600 dark:text-indigo-400 font-bold text-[10px] shrink-0">(คุณ)</span>}
+          </div>
+        ) : (
+          <span className="text-[10px] text-slate-400 italic">รอรับเคส</span>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {data.status === 'pending' && (
+            <>
+              <button
+                type="button"
+                onClick={onAccept}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition"
+              >
+                <Check className="w-3 h-3 mr-1" />
+                รับเคส
+              </button>
+              <button
+                type="button"
+                onClick={onCancel}
+                className="px-2 py-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg text-xs cursor-pointer transition"
+                title="ยกเลิกเคส"
+              >
+                <Ban className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+
+          {(data.status === 'credit_check' || data.status === 'processing') && (
+            <>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => onUpdateStatus('closed')}
+                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition"
+                >
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  จบเคส
+                </button>
+              )}
+              {isAdmin && !isAssignee && (
+                <button
+                  type="button"
+                  onClick={onTakeOver}
+                  className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold cursor-pointer transition"
+                  title="👑 แอดมิน: ดึงเคสมาทำเอง"
+                >
+                  <Crown className="w-3 h-3" />
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={onOpenReassign}
+                  className="p-1 text-slate-400 hover:text-amber-600 rounded cursor-pointer"
+                  title="👑 แอดมิน: โอนเคส"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </>
+          )}
+
+          {data.status === 'closed' && (
+            <div className="flex items-center gap-1">
+              <span className="px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 rounded border border-emerald-200 dark:border-emerald-800">
+                ✓ เรียบร้อย
+              </span>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={onReopen}
+                  className="p-1 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"
+                  title="👑 แอดมิน: กู้คืนเคส"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {data.status === 'cancelled' && (
+            <button
+              type="button"
+              onClick={onReopen}
+              className="px-2 py-1 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 flex items-center cursor-pointer"
+              title="กู้คืนเคส"
+            >
+              <RotateCcw className="w-3 h-3 mr-1 text-indigo-500" />
+              กู้คืน
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="p-1 text-slate-300 hover:text-rose-600 dark:text-slate-600 dark:hover:text-rose-400 rounded transition cursor-pointer"
+              title="ลบเคสนี้"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CompactCaseCard: React.FC<CaseCardProps> = ({
+  data,
+  currentUserId,
+  isAdmin = false,
+  onAccept,
+  onUpdateStatus,
+  onCancel,
+  onReopen,
+  onDelete,
+  onOpenRemark,
+  onOpenContract,
+  onTakeOver,
+  onOpenReassign,
+}) => {
+  const isAssignee = data.assigneeId === currentUserId;
+  const canManage = isAssignee || isAdmin;
+  const statusInfo = statusMap[data.status] || statusMap.pending;
+
+  return (
+    <div className={clsx(
+      "bg-white dark:bg-slate-900 rounded-xl shadow-2xs border p-2.5 sm:p-3 flex flex-col justify-between transition hover:shadow-xs",
+      statusInfo.borderClass,
+      data.remarks ? "ring-1 ring-amber-400/40" : "",
+      data.contractNumber ? "border-blue-200 dark:border-blue-900/60" : "",
+      data.status === 'closed' ? "opacity-85 bg-slate-50/50 dark:bg-slate-900/50" : "",
+      data.status === 'cancelled' ? "opacity-80 bg-rose-50/30 dark:bg-rose-950/20" : ""
+    )}>
+      <div>
+        {/* Top bar: Status Badge & Time & Admin Delete */}
+        <div className="flex items-center justify-between gap-1 mb-1.5">
+          <span className={clsx(
+            "px-1.5 py-0.5 rounded-md text-[10px] font-bold border flex items-center shrink-0 leading-none",
+            statusInfo.badgeClass
+          )}>
+            {data.status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />}
+            {data.status === 'credit_check' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-spin mr-1" />}
+            {data.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />}
+            {data.status === 'closed' && <CheckCircle2 className="w-2.5 h-2.5 mr-0.5 text-emerald-600 dark:text-emerald-400" />}
+            {data.status === 'cancelled' && <Ban className="w-2.5 h-2.5 mr-0.5 text-rose-600 dark:text-rose-400" />}
+            {statusInfo.label}
+          </span>
+
+          <div className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 gap-1 font-mono">
+            <span>{format(data.createdAt, 'HH:mm', { locale: th })}</span>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="p-0.5 text-slate-300 dark:text-slate-600 hover:text-rose-600 dark:hover:text-rose-400 rounded transition cursor-pointer"
+                title="ลบเคสนี้"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* iPhone Model & Agent */}
+        <div>
+          <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate leading-tight" title={data.iphoneModel}>
+            {data.iphoneModel}
+          </h4>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate flex items-center mt-0.5">
+            <span className="truncate font-medium text-slate-700 dark:text-slate-300">{data.agentName}</span>
+            <span className="mx-1 text-slate-300 dark:text-slate-600 shrink-0">•</span>
+            <span className="truncate shrink-0 text-slate-400">{data.province}</span>
+          </div>
+        </div>
+
+        {/* Contract & Remarks badges */}
+        <div className="mt-1.5 space-y-1">
+          {data.contractNumber ? (
+            <button
+              type="button"
+              onClick={() => onOpenContract(data)}
+              className="w-full text-left px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 text-[10px] font-mono font-bold text-blue-700 dark:text-blue-300 flex items-center justify-between cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60"
+              title="แก้ไขเลขสัญญา"
+            >
+              <span className="flex items-center truncate">
+                <FileSignature className="w-2.5 h-2.5 mr-1 text-blue-500 shrink-0" />
+                <span className="truncate">#{data.contractNumber}</span>
+              </span>
+              <span className="text-[9px] text-blue-500 underline font-normal shrink-0 ml-1">แก้</span>
+            </button>
+          ) : data.status !== 'pending' && (
+            <button
+              type="button"
+              onClick={() => onOpenContract(data)}
+              className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center cursor-pointer py-0.5"
+            >
+              <FileSignature className="w-2.5 h-2.5 mr-0.5 text-blue-500" />
+              + ระบุเลขสัญญา
+            </button>
+          )}
+
+          {data.remarks ? (
+            <button
+              type="button"
+              onClick={() => onOpenRemark(data)}
+              className="w-full text-left p-1 rounded bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200 flex items-start justify-between cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/60"
+              title={data.remarks}
+            >
+              <span className="flex items-start truncate">
+                <StickyNote className="w-2.5 h-2.5 mr-1 text-amber-600 shrink-0 mt-0.5" />
+                <span className="truncate font-medium">{data.remarks}</span>
+              </span>
+              <span className="text-[9px] text-amber-600 underline font-normal shrink-0 ml-1">แก้</span>
+            </button>
+          ) : (data.status === 'credit_check' || data.status === 'processing') && (
+            <button
+              type="button"
+              onClick={() => onOpenRemark(data)}
+              className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline flex items-center cursor-pointer py-0.5"
+            >
+              <StickyNote className="w-2.5 h-2.5 mr-0.5 text-amber-500" />
+              + ระบุหมายเหตุงานค้าง
+            </button>
+          )}
+        </div>
+
+        {/* Assignee display with Animal Cartoon Avatar */}
+        {data.assigneeName && (
+          <div className="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400">
+            <AnimalAvatar identifier={data.assigneeId || data.assigneeName} name={data.assigneeName} size="xs" />
+            <span className="truncate font-semibold text-slate-700 dark:text-slate-300">{data.assigneeName}</span>
+            {isAssignee && <span className="text-indigo-600 dark:text-indigo-400 font-bold ml-0.5 shrink-0">(คุณ)</span>}
+          </div>
+        )}
+      </div>
+
+      {/* Action Buttons Footer */}
+      <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+        {data.status === 'pending' && (
+          <div>
+            <button
+              type="button"
+              onClick={onAccept}
+              className="w-full py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition"
+            >
+              <Check className="w-3 h-3 mr-1" />
+              กดรับเคส
+            </button>
+            <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-slate-400">
+              <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">+สัญญา</button>
+              <button type="button" onClick={() => onOpenRemark(data)} className="hover:text-amber-600 cursor-pointer">+หมายเหตุ</button>
+              <button type="button" onClick={onCancel} className="text-rose-400 hover:text-rose-600 cursor-pointer">ยกเลิก</button>
+            </div>
+          </div>
+        )}
+
+        {(data.status === 'credit_check' || data.status === 'processing') && (
+          <div>
+            {canManage ? (
+              <button
+                type="button"
+                onClick={() => onUpdateStatus('closed')}
+                className="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition"
+              >
+                <CheckCircle2 className="w-3 h-3 mr-1" />
+                จบเคส
+              </button>
+            ) : (
+              <div className="w-full py-1 px-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg text-[10px] text-center truncate">
+                กำลังทำ: {data.assigneeName}
+              </div>
+            )}
+            <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-slate-400">
+              <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">สัญญา</button>
+              <button type="button" onClick={() => onOpenRemark(data)} className="hover:text-amber-600 cursor-pointer">หมายเหตุ</button>
+              {canManage ? (
+                <button type="button" onClick={onCancel} className="text-rose-400 hover:text-rose-600 cursor-pointer">ยกเลิก</button>
+              ) : isAdmin ? (
+                <button type="button" onClick={onTakeOver} className="text-indigo-600 font-bold hover:underline cursor-pointer">ดึงงาน</button>
+              ) : null}
+            </div>
+          </div>
+        )}
+
+        {data.status === 'closed' && (
+          <div>
+            <div className="w-full py-1 px-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 rounded-lg text-[10px] font-semibold text-center truncate">
+              ✓ จบแล้ว ({data.assigneeName})
+            </div>
+            <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-slate-400">
+              <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">สัญญา</button>
+              {isAdmin && (
+                <button type="button" onClick={onReopen} className="text-indigo-600 hover:underline cursor-pointer flex items-center">
+                  <RotateCcw className="w-2.5 h-2.5 mr-0.5" />กู้คืนเคส
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {data.status === 'cancelled' && (
+          <div>
+            <div className="w-full py-1 px-1.5 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 rounded-lg text-[10px] font-medium text-center truncate">
+              ยกเลิกเคส
+            </div>
+            <button
+              type="button"
+              onClick={onReopen}
+              className="mt-1 w-full text-[10px] text-slate-500 hover:text-indigo-600 py-0.5 border border-slate-200 dark:border-slate-700 rounded flex items-center justify-center cursor-pointer"
+            >
+              <RotateCcw className="w-2.5 h-2.5 mr-0.5" />กู้คืนเคส
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const CaseCard: React.FC<CaseCardProps> = ({
   data,
   currentUserId,
@@ -1394,7 +2094,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
         )}
 
         {/* Remarks Box if present */}
-        {data.remarks && (
+        {data.remarks ? (
           <div className="mb-3 p-2.5 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl">
             <div className="flex items-center justify-between text-xs font-bold text-amber-800 dark:text-amber-300 mb-1">
               <span className="flex items-center">
@@ -1421,7 +2121,18 @@ const CaseCard: React.FC<CaseCardProps> = ({
               </div>
             )}
           </div>
-        )}
+        ) : (data.status === 'credit_check' || data.status === 'processing') ? (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => onOpenRemark(data)}
+              className="w-full py-1.5 px-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 hover:bg-amber-100/70 text-xs font-medium transition flex items-center justify-center cursor-pointer shadow-2xs"
+            >
+              <StickyNote className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
+              ระบุหมายเหตุ (งานค้างเพราะอะไร)
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {/* Footer / Workflow Actions */}
@@ -1504,9 +2215,12 @@ const CaseCard: React.FC<CaseCardProps> = ({
         ) : data.status === 'closed' ? (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs bg-emerald-50/70 dark:bg-emerald-950/30 px-2.5 py-1.5 rounded-xl border border-emerald-100 dark:border-emerald-900/40 text-emerald-800 dark:text-emerald-300">
-              <span className="flex items-center">
-                <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
-                จบเคสแล้ว โดย {data.assigneeName || 'พนักงาน'}
+              <span className="flex items-center gap-1.5 truncate">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                {data.assigneeName && (
+                  <AnimalAvatar identifier={data.assigneeId || data.assigneeName} name={data.assigneeName} size="xs" />
+                )}
+                <span className="truncate">จบเคสแล้ว โดย {data.assigneeName || 'พนักงาน'}</span>
               </span>
               {data.completedAt && (
                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
@@ -1555,8 +2269,9 @@ const CaseCard: React.FC<CaseCardProps> = ({
                 <User className="w-3.5 h-3.5 mr-1 text-slate-400" />
                 ผู้รับผิดชอบ:
               </span>
-              <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center">
-                {data.assigneeName} {isAssignee ? '(คุณ)' : ''}
+              <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <AnimalAvatar identifier={data.assigneeId || data.assigneeName || 'user'} name={data.assigneeName || 'พนักงาน'} size="xs" />
+                <span>{data.assigneeName} {isAssignee ? '(คุณ)' : ''}</span>
               </span>
             </div>
 
@@ -1590,18 +2305,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
             <div className="space-y-1.5 pt-1">
               {canManage ? (
                 <>
-                  {data.status === 'credit_check' && (
-                    <button
-                      type="button"
-                      onClick={() => onUpdateStatus('processing')}
-                      className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white text-xs font-bold shadow-xs shadow-amber-200 dark:shadow-none transition flex items-center justify-center cursor-pointer"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                      ผ่านเครดิต -&gt; เริ่มทำเคส
-                    </button>
-                  )}
-
-                  {data.status === 'processing' && (
+                  {(data.status === 'processing' || data.status === 'credit_check') && (
                     <button
                       type="button"
                       onClick={() => onUpdateStatus('closed')}

@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { Logo } from './Logo';
+import { AnimalAvatar } from './AnimalAvatar';
 import { 
   LogOut, 
   BarChart3, 
   ListTodo, 
   Bell, 
-  Sun,
+  Sun, 
   Moon
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -121,13 +122,13 @@ export function Layout() {
 
               {/* Current Member Badge */}
               <div className="flex items-center pl-2 sm:pl-3 border-l border-slate-200 dark:border-slate-800">
-                <div className={clsx(
-                  "w-8 h-8 rounded-xl font-bold flex items-center justify-center text-xs mr-2 transition-all",
-                  user?.role === 'admin'
-                    ? "bg-amber-400 text-amber-950 ring-2 ring-amber-300 dark:ring-amber-500 shadow-xs"
-                    : "bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300"
-                )}>
-                  {user?.role === 'admin' ? '👑' : (user?.name?.charAt(0) || 'U')}
+                <div className="relative mr-2">
+                  <AnimalAvatar identifier={user?.username || user?.uid || 'user'} name={user?.name || 'User'} size="md" />
+                  {user?.role === 'admin' && (
+                    <span className="absolute -bottom-1 -right-1 text-[11px] leading-none select-none filter drop-shadow">
+                      👑
+                    </span>
+                  )}
                 </div>
                 <div className="hidden sm:block text-left mr-3">
                   <div className="flex items-center space-x-1.5">
