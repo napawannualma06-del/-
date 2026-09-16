@@ -890,7 +890,7 @@ export function Queue() {
       {/* Filter Tabs & Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-2 sm:p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
         {/* Filter Pills */}
-        <div className="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0">
+        <div className="flex items-center space-x-1 overflow-x-auto no-scrollbar max-w-full pb-1 sm:pb-0">
           <button
             type="button"
             onClick={() => setActiveFilter('all')}

@@ -493,7 +493,7 @@ export function AdminDashboard() {
           </div>
 
           {/* Primary View Switcher: Simple Summary vs Team Workload vs All Active Cases */}
-          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold self-start lg:self-auto shrink-0 overflow-x-auto no-scrollbar">
+          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold max-w-full overflow-x-auto no-scrollbar">
             <button
               type="button"
               onClick={() => setDashboardViewTab('simple')}
@@ -541,7 +541,7 @@ export function AdminDashboard() {
           <div className="pt-4">
             {/* Filter & Search Bar */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pb-3">
-              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold overflow-x-auto no-scrollbar">
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold max-w-full overflow-x-auto no-scrollbar">
                 <button
                   type="button"
                   onClick={() => setWorkloadFilter('all')}
@@ -710,7 +710,7 @@ export function AdminDashboard() {
           <div>
             {/* Filter bar for active cases */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-4 pb-3">
-              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold overflow-x-auto no-scrollbar">
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold max-w-full overflow-x-auto no-scrollbar">
                 <button
                   type="button"
                   onClick={() => setActiveCaseStatusFilter('all')}
@@ -857,7 +857,7 @@ export function AdminDashboard() {
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2 pt-4 pb-1">
               {/* Filter Tabs */}
-              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold overflow-x-auto no-scrollbar">
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold max-w-full overflow-x-auto no-scrollbar">
                 <button
                   type="button"
                   onClick={() => setWorkloadFilter('all')}
