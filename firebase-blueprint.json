@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "User's email"
+        },
+        "name": {
+          "type": "string",
+          "description": "User's display name"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["employee", "admin"],
+          "description": "Role of the user"
+        },
+        "fcmToken": {
+          "type": "string",
+          "description": "FCM device token for push notifications"
+        },
+        "createdAt": {
+          "type": "number"
+        }
+      },
+      "required": ["email", "name", "role", "createdAt"]
+    },
+    "Case": {
+      "title": "Case",
+      "description": "A case to be processed",
+      "type": "object",
+      "properties": {
+        "agentName": {
+          "type": "string",
+          "description": "Sender"
+        },
+        "iphoneModel": {
+          "type": "string"
+        },
+        "province": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "credit_check", "processing", "closed"],
+          "description": "pending means not accepted yet. credit_check, processing, closed are the actual statuses after accept."
+        },
+        "assigneeId": {
+          "type": "string",
+          "description": "User ID of the employee who accepted the case"
+        },
+        "assigneeName": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number",
+          "description": "Timestamp when case was closed"
+        }
+      },
+      "required": ["agentName", "iphoneModel", "province", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "cases/{caseId}": {
+      "schema": "Case",
+      "description": "Cases queue"
+    }
+  }
+}

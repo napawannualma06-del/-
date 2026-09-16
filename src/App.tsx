@@ -1,0 +1,44 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useStore } from './store/useStore';
+import { Login } from './components/Login';
+import { Queue } from './components/Queue';
+import { AdminDashboard } from './components/AdminDashboard';
+import { Layout } from './components/Layout';
+
+export default function App() {
+  const { initAuth, user, loading } = useStore();
+
+  useEffect(() => {
+    initAuth();
+  }, [initAuth]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
+        
+        <Route element={user ? <Layout /> : <Navigate to="/login" />}>
+          <Route path="/" element={<Queue />} />
+          <Route 
+            path="/admin" 
+            element={user?.role === 'admin' ? <AdminDashboard /> : <Navigate to="/" />} 
+          />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}

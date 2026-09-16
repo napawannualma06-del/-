@@ -1,0 +1,10 @@
+{
+  "name": "Remix ระบบจัดการคิวพนักงาน",
+  "description": "ระบบจัดการคิวพนักงาน (Employee Task/Queue Management)",
+  "requestFramePermissions": [
+    "notifications"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
