@@ -79,6 +79,30 @@
         "assigneeName": {
           "type": "string"
         },
+        "previousAssigneeName": {
+          "type": "string",
+          "description": "Name of employee who previously accepted this case before returning it"
+        },
+        "previousAssigneeId": {
+          "type": "string",
+          "description": "User ID of the employee who previously accepted this case"
+        },
+        "returnedBy": {
+          "type": "string",
+          "description": "Name of employee who performed the return action"
+        },
+        "returnedById": {
+          "type": "string",
+          "description": "User ID of employee who performed the return action"
+        },
+        "returnedAt": {
+          "type": "number",
+          "description": "Timestamp when case was returned to pending queue"
+        },
+        "returnedReason": {
+          "type": "string",
+          "description": "Reason provided when returning the case"
+        },
         "createdAt": {
           "type": "number"
         },
@@ -91,6 +115,30 @@
         }
       },
       "required": ["agentName", "iphoneModel", "province", "status", "createdAt", "updatedAt"]
+    },
+    "Agent": {
+      "title": "Agent",
+      "description": "Agent or sender profile",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the agent"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp when agent was added"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Name of user who added the agent"
+        },
+        "createdById": {
+          "type": "string",
+          "description": "User ID of user who added the agent"
+        }
+      },
+      "required": ["name", "createdAt"]
     }
   },
   "firestore": {
@@ -101,6 +149,10 @@
     "cases/{caseId}": {
       "schema": "Case",
       "description": "Cases queue"
+    },
+    "agents/{agentId}": {
+      "schema": "Agent",
+      "description": "List of agents for selection"
     }
   }
 }

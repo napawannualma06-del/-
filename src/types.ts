@@ -26,6 +26,14 @@ export interface CreditCheckDuty {
   updatedAt: number;
 }
 
+export interface Agent {
+  id: string;
+  name: string;
+  createdAt: number;
+  createdBy?: string;
+  createdById?: string;
+}
+
 export interface Case {
   id: string;
   agentName: string;
@@ -40,6 +48,12 @@ export interface Case {
   remarksUpdatedBy?: string;
   assigneeId?: string;
   assigneeName?: string;
+  previousAssigneeName?: string;
+  previousAssigneeId?: string;
+  returnedBy?: string;
+  returnedById?: string;
+  returnedAt?: number;
+  returnedReason?: string;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;

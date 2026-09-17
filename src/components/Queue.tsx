@@ -28,6 +28,7 @@ import {
   Ban,
   RotateCcw,
   StickyNote,
+  AlertCircle,
   FileText,
   FileSignature,
   Crown,
@@ -51,6 +52,9 @@ import { AnimalAvatar } from './AnimalAvatar';
 import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { ReturnCaseModal } from './ReturnCaseModal';
 import { TransferCaseModal } from './TransferCaseModal';
+import { CloseCaseModal } from './CloseCaseModal';
+import { AgentSelect } from './AgentSelect';
+import { getPreviousAssignee } from '../lib/caseUtils';
 import { DutyWorker, Case } from '../types';
 
 export type { Case };
@@ -291,6 +295,7 @@ export function Queue() {
   // Reassign & Return Case Modals
   const [activeReassignCase, setActiveReassignCase] = useState<Case | null>(null);
   const [activeReturnCase, setActiveReturnCase] = useState<Case | null>(null);
+  const [activeCloseCase, setActiveCloseCase] = useState<Case | null>(null);
 
   const initialLoadRef = useRef(true);
 
@@ -541,7 +546,18 @@ export function Queue() {
     }
   };
 
+  const handleOpenCloseCase = (c: Case) => {
+    setActiveCloseCase(c);
+  };
+
   const handleUpdateStatus = async (caseId: string, newStatus: 'processing' | 'closed') => {
+    if (newStatus === 'closed') {
+      const targetCase = cases.find((c) => c.id === caseId);
+      if (targetCase) {
+        handleOpenCloseCase(targetCase);
+        return;
+      }
+    }
     try {
       const caseRef = doc(db, 'cases', caseId);
       const updates: Record<string, unknown> = {
@@ -603,8 +619,8 @@ export function Queue() {
   // Filter & Search Logic
   const filteredCases = cases.filter((c) => {
     if (activeFilter === 'all') {
-      // เคสที่จบแล้วให้เอาออกจาก เคสทั้งหมด (สามารถดูได้ในแท็บ 'จบเคสแล้ว')
-      if (c.status === 'closed') return false;
+      // เคสที่จบแล้วหรือยกเลิก ให้เอาออกจาก เคสทั้งหมด (สามารถดูได้ในแท็บ 'จบเคสแล้ว' และ 'ยกเลิกเคส')
+      if (c.status === 'closed' || c.status === 'cancelled') return false;
     } else if (activeFilter === 'pending') {
       if (c.status !== 'pending') return false;
     } else if (activeFilter === 'mine') {
@@ -637,7 +653,7 @@ export function Queue() {
     return true;
   });
 
-  const allActiveCount = cases.filter(c => c.status !== 'closed').length;
+  const allActiveCount = cases.filter(c => c.status !== 'closed' && c.status !== 'cancelled').length;
   const pendingCount = cases.filter(c => c.status === 'pending').length;
   const myCount = cases.filter(c => c.assigneeId === user?.uid && c.status !== 'closed' && c.status !== 'cancelled').length;
   const contractCount = cases.filter(c => !!c.contractNumber && c.status !== 'cancelled').length;
@@ -749,36 +765,14 @@ export function Queue() {
 
           <form onSubmit={handleAddCase} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* Agent Name */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                  <span>ชื่อตัวแทน (ผู้ส่งเคส) *</span>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, agentName: 'Agent Pream' })}
-                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-normal cursor-pointer"
-                  >
-                    + ใช้ตัวอย่าง Agent Pream
-                  </button>
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    placeholder="เช่น Agent Pream"
-                    value={formData.agentName}
-                    onChange={(e) => setFormData({ ...formData, agentName: e.target.value })}
-                    list="agent-name-suggestions"
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition"
-                  />
-                  <datalist id="agent-name-suggestions">
-                    <option value="Agent Pream" />
-                    <option value="Agent Pream (สาขาใหญ่)" />
-                    <option value="Agent สมบัติ สาขาบางนา" />
-                  </datalist>
-                  <Send className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                </div>
-              </div>
+              {/* Agent Name (Dropdown with direct add ability for credit checkers) */}
+              <AgentSelect
+                value={formData.agentName}
+                onChange={(selectedName) => setFormData({ ...formData, agentName: selectedName })}
+                currentUser={user}
+                cases={cases}
+                required
+              />
 
               {/* iPhone Model */}
               <div>
@@ -856,6 +850,9 @@ export function Queue() {
                   />
                   <StickyNote className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 </div>
+                <p className="text-[11px] font-bold text-red-600 dark:text-red-400 mt-1">
+                  * หมายเหตุ: คนเช็คเครดิต รับเคส คนสุดท้าย
+                </p>
               </div>
             </div>
 
@@ -1175,6 +1172,7 @@ export function Queue() {
               isAdmin={isAdmin}
               onAccept={() => handleAcceptCase(c.id)}
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
+              onCloseCase={() => handleOpenCloseCase(c)}
               onCancel={() => handleCancelCase(c.id)}
               onReopen={() => handleReopenCase(c.id)}
               onReturnToPending={() => handleOpenReturnToPending(c)}
@@ -1197,6 +1195,7 @@ export function Queue() {
               isAdmin={isAdmin}
               onAccept={() => handleAcceptCase(c.id)}
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
+              onCloseCase={() => handleOpenCloseCase(c)}
               onCancel={() => handleCancelCase(c.id)}
               onReopen={() => handleReopenCase(c.id)}
               onReturnToPending={() => handleOpenReturnToPending(c)}
@@ -1219,6 +1218,7 @@ export function Queue() {
               isAdmin={isAdmin}
               onAccept={() => handleAcceptCase(c.id)}
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
+              onCloseCase={() => handleOpenCloseCase(c)}
               onCancel={() => handleCancelCase(c.id)}
               onReopen={() => handleReopenCase(c.id)}
               onReturnToPending={() => handleOpenReturnToPending(c)}
@@ -1297,6 +1297,11 @@ export function Queue() {
                   placeholder="พิมพ์เหตุผลที่งานค้าง เช่น รอลูกค้าส่งเอกสารบัตรประชาชน, รอลูกค้าโอนเงินมัดจำภายใน 16:00 น...."
                   className="w-full px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white dark:focus:bg-slate-800 transition"
                 />
+                {/* Red Note */}
+                <div className="mt-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  <span>หมายเหตุ: คนเช็คเครดิต รับเคส คนสุดท้าย</span>
+                </div>
                 {activeRemarkCase.remarksUpdatedBy && (
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
                     บันทึกล่าสุดโดย {activeRemarkCase.remarksUpdatedBy}
@@ -1458,6 +1463,17 @@ export function Queue() {
         />
       )}
 
+      {/* CLOSE CASE MODAL (Enforces Contract Number) */}
+      {activeCloseCase && (
+        <CloseCaseModal
+          isOpen={!!activeCloseCase}
+          onClose={() => setActiveCloseCase(null)}
+          caseData={activeCloseCase}
+          currentUser={user}
+          onSuccess={() => setActiveCloseCase(null)}
+        />
+      )}
+
       {/* Clock Out Confirmation Modal */}
       {user && (
         <ClockOutConfirmModal
@@ -1483,6 +1499,7 @@ interface CaseCardProps {
   isAdmin?: boolean;
   onAccept: () => void;
   onUpdateStatus: (status: 'processing' | 'closed') => void;
+  onCloseCase?: () => void;
   onCancel: () => void;
   onReopen: () => void;
   onReturnToPending: () => void;
@@ -1499,6 +1516,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
   isAdmin = false,
   onAccept,
   onUpdateStatus,
+  onCloseCase,
   onCancel,
   onReopen,
   onReturnToPending,
@@ -1511,6 +1529,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
+  const prevWorker = getPreviousAssignee(data);
 
   return (
     <div className={clsx(
@@ -1577,15 +1596,31 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
 
         {/* Remarks badge */}
         {data.remarks ? (
-          <button
-            type="button"
-            onClick={() => onOpenRemark(data)}
-            className="px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200 flex items-center hover:bg-amber-100 dark:hover:bg-amber-900/60 cursor-pointer max-w-[180px] truncate shrink-0"
+          <div
+            className="px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200 flex flex-col items-start max-w-[280px] shrink-0 text-left"
             title={data.remarks}
           >
-            <StickyNote className="w-2.5 h-2.5 mr-1 text-amber-600 shrink-0" />
-            <span className="truncate">{data.remarks}</span>
-          </button>
+            <div className="flex items-start justify-between w-full gap-1">
+              <div
+                onClick={() => onOpenRemark(data)}
+                className="flex items-start gap-1 flex-1 min-w-0 cursor-pointer hover:opacity-80"
+              >
+                <StickyNote className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <span className="break-words whitespace-pre-wrap font-medium leading-relaxed">{data.remarks}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenRemark(data)}
+                className="text-[9px] text-amber-600 dark:text-amber-400 underline font-normal shrink-0 hover:text-amber-800 cursor-pointer ml-1"
+                title="แก้ไขหมายเหตุ"
+              >
+                แก้
+              </button>
+            </div>
+            <span className="text-[9px] font-bold text-red-600 dark:text-red-400 mt-1 pt-0.5 border-t border-amber-200/60 dark:border-amber-900/40 w-full">
+              * คนเช็คเครดิต รับเคส คนสุดท้าย
+            </span>
+          </div>
         ) : (data.status === 'credit_check' || data.status === 'processing') && (
           <button
             type="button"
@@ -1596,19 +1631,52 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
             +หมายเหตุ
           </button>
         )}
+
+        {/* Previous Assignee badge if returned */}
+        {prevWorker && (
+          <span
+            className="px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-800 dark:text-amber-300 flex items-center shrink-0 font-medium"
+            title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}${prevWorker.returnedAt ? ` เวลา ${format(prevWorker.returnedAt, 'HH:mm น.', { locale: th })}` : ''}`}
+          >
+            <RotateCcw className="w-2.5 h-2.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span className="truncate max-w-[130px]">เคยรับ: <strong className="font-semibold">{prevWorker.name}</strong></span>
+          </span>
+        )}
       </div>
 
       {/* Right content: Assignee with AnimalAvatar + Actions */}
       <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 border-t sm:border-t-0 pt-1.5 sm:pt-0 border-slate-100 dark:border-slate-800">
         {/* Assignee display with Animal Cartoon Avatar */}
         {data.assigneeName ? (
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 min-w-[100px]">
-            <AnimalAvatar identifier={data.assigneeId || data.assigneeName} name={data.assigneeName} size="xs" />
-            <span className="font-semibold truncate max-w-[90px]">{data.assigneeName}</span>
-            {isAssignee && <span className="text-indigo-600 dark:text-indigo-400 font-bold text-[10px] shrink-0">(คุณ)</span>}
+          <div className="flex flex-col items-start sm:items-end min-w-[95px]">
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+              <AnimalAvatar identifier={data.assigneeId || data.assigneeName} name={data.assigneeName} size="xs" />
+              <span className="font-semibold truncate max-w-[90px]">{data.assigneeName}</span>
+              {isAssignee && <span className="text-indigo-600 dark:text-indigo-400 font-bold text-[10px] shrink-0">(คุณ)</span>}
+            </div>
+            {prevWorker && (
+              <span
+                className="text-[9px] text-amber-700 dark:text-amber-400 flex items-center gap-0.5 mt-0.5 truncate max-w-[110px]"
+                title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}`}
+              >
+                <RotateCcw className="w-2 h-2 shrink-0" />
+                <span className="truncate">เคยรับ: {prevWorker.name}</span>
+              </span>
+            )}
           </div>
         ) : (
-          <span className="text-[10px] text-slate-400 italic">รอรับเคส</span>
+          <div className="flex flex-col items-start sm:items-end min-w-[95px]">
+            <span className="text-[10px] text-slate-400 italic">รอรับเคส</span>
+            {prevWorker && (
+              <span
+                className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-900/60 px-1.5 py-0.5 rounded flex items-center gap-1 mt-0.5"
+                title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
+              >
+                <RotateCcw className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="truncate max-w-[95px]">เคยรับ: {prevWorker.name}</span>
+              </span>
+            )}
+          </div>
         )}
 
         {/* Action Buttons */}
@@ -1639,9 +1707,9 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
               {canManage && (
                 <button
                   type="button"
-                  onClick={() => onUpdateStatus('closed')}
+                  onClick={() => (onCloseCase ? onCloseCase() : onUpdateStatus('closed'))}
                   className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition whitespace-nowrap"
-                  title="บันทึกจบเคสเสร็จสิ้น"
+                  title="บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"
                 >
                   <CheckCircle2 className="w-3 h-3 mr-1" />
                   จบเคส
@@ -1734,6 +1802,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
   isAdmin = false,
   onAccept,
   onUpdateStatus,
+  onCloseCase,
   onCancel,
   onReopen,
   onReturnToPending,
@@ -1746,6 +1815,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
+  const prevWorker = getPreviousAssignee(data);
 
   return (
     <div className={clsx(
@@ -1825,18 +1895,33 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
           )}
 
           {data.remarks ? (
-            <button
-              type="button"
-              onClick={() => onOpenRemark(data)}
-              className="w-full text-left p-1 rounded bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200 flex items-start justify-between cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/60"
-              title={data.remarks}
+            <div
+              className="w-full text-left p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200"
             >
-              <span className="flex items-start truncate">
-                <StickyNote className="w-2.5 h-2.5 mr-1 text-amber-600 shrink-0 mt-0.5" />
-                <span className="truncate font-medium">{data.remarks}</span>
-              </span>
-              <span className="text-[9px] text-amber-600 underline font-normal shrink-0 ml-1">แก้</span>
-            </button>
+              <div className="flex items-start justify-between gap-1.5">
+                <div
+                  onClick={() => onOpenRemark(data)}
+                  className="flex items-start gap-1 flex-1 min-w-0 cursor-pointer hover:opacity-85 transition"
+                  title="คลิกเพื่อดูหรือแก้ไขหมายเหตุ"
+                >
+                  <StickyNote className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <span className="font-medium text-slate-800 dark:text-slate-200 break-words whitespace-pre-wrap leading-relaxed">
+                    {data.remarks}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenRemark(data)}
+                  className="text-[9px] text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 underline font-normal shrink-0 ml-1 cursor-pointer pt-0.5"
+                  title="แก้ไขหมายเหตุ"
+                >
+                  แก้
+                </button>
+              </div>
+              <div className="mt-1 pt-1 border-t border-amber-200/60 dark:border-amber-900/40 text-[10px] font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
+                <span>* คนเช็คเครดิต รับเคส คนสุดท้าย</span>
+              </div>
+            </div>
           ) : (data.status === 'credit_check' || data.status === 'processing') && (
             <button
               type="button"
@@ -1850,11 +1935,35 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
         </div>
 
         {/* Assignee display with Animal Cartoon Avatar */}
-        {data.assigneeName && (
+        {data.assigneeName ? (
           <div className="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400">
             <AnimalAvatar identifier={data.assigneeId || data.assigneeName} name={data.assigneeName} size="xs" />
             <span className="truncate font-semibold text-slate-700 dark:text-slate-300">{data.assigneeName}</span>
             {isAssignee && <span className="text-indigo-600 dark:text-indigo-400 font-bold ml-0.5 shrink-0">(คุณ)</span>}
+          </div>
+        ) : (
+          <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px]">
+            <span className="text-slate-400 italic">รอรับเคส</span>
+            {prevWorker && (
+              <span
+                className="text-[9px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-900/60 px-1 py-0.5 rounded flex items-center gap-0.5 truncate max-w-[105px]"
+                title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
+              >
+                <RotateCcw className="w-2 h-2 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="truncate">เคยรับ: {prevWorker.name}</span>
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* If case has current assignee AND also was returned by previous worker */}
+        {data.assigneeName && prevWorker && (
+          <div
+            className="mt-1 px-1.5 py-0.5 rounded bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-900/50 text-[9px] text-amber-800 dark:text-amber-300 flex items-center gap-1 truncate"
+            title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
+          >
+            <RotateCcw className="w-2 h-2 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span className="truncate">เคยรับก่อนนี้: <span className="font-semibold">{prevWorker.name}</span></span>
           </div>
         )}
       </div>
@@ -1863,6 +1972,11 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
       <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80">
         {data.status === 'pending' && (
           <div>
+            {!data.remarks && (
+              <div className="text-[10px] font-bold text-red-600 dark:text-red-400 text-center mb-1 flex items-center justify-center gap-1">
+                <span>* คนเช็คเครดิต รับเคส คนสุดท้าย</span>
+              </div>
+            )}
             <button
               type="button"
               onClick={onAccept}
@@ -1884,9 +1998,9 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
             {canManage ? (
               <button
                 type="button"
-                onClick={() => onUpdateStatus('closed')}
+                onClick={() => (onCloseCase ? onCloseCase() : onUpdateStatus('closed'))}
                 className="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition whitespace-nowrap"
-                title="บันทึกจบเคสเสร็จสิ้น"
+                title="บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"
               >
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 จบเคส
@@ -1973,6 +2087,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
   isAdmin = false,
   onAccept,
   onUpdateStatus,
+  onCloseCase,
   onCancel,
   onReopen,
   onReturnToPending,
@@ -1985,6 +2100,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
+  const prevWorker = getPreviousAssignee(data);
 
   return (
     <div className={clsx(
@@ -2097,6 +2213,43 @@ const CaseCard: React.FC<CaseCardProps> = ({
               </span>
             </div>
           </div>
+
+          {/* Previous Assignee if returned */}
+          {prevWorker && (
+            <div className="mt-2.5 p-2.5 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2 truncate">
+                  <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-900/70 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="truncate">
+                    <span className="text-[10px] text-amber-800 dark:text-amber-400 block font-medium">
+                      พนักงานที่เคยรับเคสก่อนนี้
+                    </span>
+                    <div className="flex items-center space-x-1.5 font-bold text-amber-950 dark:text-amber-200 text-xs truncate">
+                      <AnimalAvatar
+                        identifier={data.previousAssigneeId || prevWorker.id || prevWorker.name}
+                        name={prevWorker.name}
+                        size="xs"
+                      />
+                      <span className="truncate">{prevWorker.name}</span>
+                    </div>
+                  </div>
+                </div>
+                {prevWorker.returnedAt && (
+                  <span className="text-[10px] text-amber-700/80 dark:text-amber-400/80 shrink-0 font-mono ml-1">
+                    {format(prevWorker.returnedAt, 'HH:mm น.', { locale: th })}
+                  </span>
+                )}
+              </div>
+              {prevWorker.reason && (
+                <div className="mt-1.5 pt-1.5 border-t border-amber-200/60 dark:border-amber-900/50 text-[11px] text-amber-900 dark:text-amber-200 flex items-start">
+                  <span className="text-amber-700 dark:text-amber-400 font-semibold shrink-0 mr-1">เหตุผล:</span>
+                  <span className="line-clamp-2">{prevWorker.reason}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* CONTRACT NUMBER BOX (Editable anytime after job acceptance) */}
@@ -2161,9 +2314,12 @@ const CaseCard: React.FC<CaseCardProps> = ({
                 แก้ไข
               </button>
             </div>
-            <p className="text-xs text-slate-800 dark:text-slate-200 font-medium leading-relaxed break-words">
+            <p className="text-xs text-slate-800 dark:text-slate-200 font-medium leading-relaxed break-words whitespace-pre-wrap">
               {data.remarks}
             </p>
+            <div className="mt-1.5 pt-1.5 border-t border-amber-200/60 dark:border-amber-900/40 text-[11px] font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
+              <span>* คนเช็คเครดิต รับเคส คนสุดท้าย</span>
+            </div>
             {data.remarksUpdatedBy && (
               <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 flex items-center justify-between border-t border-amber-200/50 dark:border-amber-900/40 pt-1">
                 <span>บันทึกโดย: {data.remarksUpdatedBy}</span>
@@ -2191,6 +2347,11 @@ const CaseCard: React.FC<CaseCardProps> = ({
       <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
         {data.status === 'pending' ? (
           <div className="space-y-2">
+            {!data.remarks && (
+              <div className="text-xs font-bold text-red-600 dark:text-red-400 text-center flex items-center justify-center gap-1">
+                <span>* คนเช็คเครดิต รับเคส คนสุดท้าย</span>
+              </div>
+            )}
             <button
               type="button"
               onClick={onAccept}
@@ -2348,9 +2509,9 @@ const CaseCard: React.FC<CaseCardProps> = ({
                     <>
                       <button
                         type="button"
-                        onClick={() => onUpdateStatus('closed')}
+                        onClick={() => (onCloseCase ? onCloseCase() : onUpdateStatus('closed'))}
                         className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-bold shadow-xs shadow-emerald-200 dark:shadow-none transition flex items-center justify-center cursor-pointer whitespace-nowrap"
-                        title="บันทึกจบเคสเสร็จสิ้น"
+                        title="บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
                         เสร็จสิ้น -&gt; จบเคส

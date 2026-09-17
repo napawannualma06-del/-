@@ -38,10 +38,19 @@ export const ReturnCaseModal: React.FC<ReturnCaseModalProps> = ({
       const reasonSuffix = trimmedReason ? ` เหตุผล: ${trimmedReason}` : '';
       const newRemarks = `${existingRemarks}[คืนสถานะไปรอรับเคส โดย ${currentUser.name}${reasonSuffix}]`;
 
+      const previousWorkerName = caseData.assigneeName || currentUser.name;
+      const previousWorkerId = caseData.assigneeId || currentUser.uid;
+
       const updates: Record<string, unknown> = {
         status: 'pending',
         assigneeId: '',
         assigneeName: '',
+        previousAssigneeName: previousWorkerName,
+        previousAssigneeId: previousWorkerId,
+        returnedBy: currentUser.name,
+        returnedById: currentUser.uid,
+        returnedAt: now,
+        returnedReason: trimmedReason || '',
         updatedAt: now,
         remarks: newRemarks,
         remarksUpdatedAt: now,
@@ -138,6 +147,12 @@ export const ReturnCaseModal: React.FC<ReturnCaseModalProps> = ({
                 หากรับมาแล้วติดธุระหรือไม่ได้ทำต่อ สามารถคืนเคสเพื่อให้พนักงานท่านอื่นกดรับไปทำต่อได้ทันที
               </p>
             </div>
+          </div>
+
+          {/* Red Warning Note */}
+          <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <span>หมายเหตุ: คนเช็คเครดิต รับเคส คนสุดท้าย</span>
           </div>
 
           {/* Optional Return Reason */}

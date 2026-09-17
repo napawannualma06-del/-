@@ -40,6 +40,8 @@ import { CreditCheckDutyStation } from './CreditCheckDutyStation';
 import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { TransferCaseModal } from './TransferCaseModal';
 import { ReturnCaseModal } from './ReturnCaseModal';
+import { CloseCaseModal } from './CloseCaseModal';
+import { getPreviousAssignee } from '../lib/caseUtils';
 import { clockInEmployee } from '../lib/shiftService';
 import { useStore } from '../store/useStore';
 
@@ -74,6 +76,7 @@ export function AdminDashboard() {
   // Case action modals
   const [activeReassignCase, setActiveReassignCase] = useState<Case | null>(null);
   const [activeReturnCase, setActiveReturnCase] = useState<Case | null>(null);
+  const [activeCloseCase, setActiveCloseCase] = useState<Case | null>(null);
 
   useEffect(() => {
     // 1. Subscribe to cases collection
@@ -153,8 +156,8 @@ export function AdminDashboard() {
   const activeCases = filteredCases.filter(c => c.status === 'credit_check' || c.status === 'processing');
   const pendingCases = filteredCases.filter(c => c.status === 'pending');
   const contractedCases = filteredCases.filter(c => !!c.contractNumber?.trim());
-  // เคสทั้งหมด (เอาเคสที่จบแล้วออก ตามคำสั่ง: เคสที่จบแล้วให้เอาออกจาก เคสทั้งหมด)
-  const totalOpenCases = filteredCases.filter(c => c.status !== 'closed');
+  // เคสทั้งหมด (เอาเคสที่จบแล้วและเคสที่ยกเลิกออก ตามคำสั่ง: ไม่แสดงในเคสทั้งหมด)
+  const totalOpenCases = filteredCases.filter(c => c.status !== 'closed' && c.status !== 'cancelled');
 
   // Merge registered employees with any assignee found in cases
   const employeeMap: Record<string, EmployeeProfile> = {};
@@ -425,7 +428,7 @@ export function AdminDashboard() {
             <div className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-900 dark:text-white">
               {totalOpenCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">รอทำ (ไม่รวมจบแล้ว)</p>
+            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">รอทำ (ไม่รวมจบ/ยกเลิก)</p>
           </div>
         </div>
 
@@ -852,6 +855,7 @@ export function AdminDashboard() {
               <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3 pt-2">
                 {displayedActiveCases.map((c) => {
                   const statusObj = statusMap[c.status] || statusMap.pending;
+                  const prevWorker = getPreviousAssignee(c);
                   return (
                     <div
                       key={c.id}
@@ -902,6 +906,24 @@ export function AdminDashboard() {
                           </div>
                         </div>
 
+                        {/* Previous Assignee if returned */}
+                        {prevWorker && (
+                          <div
+                            className="mt-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/50 text-[10px] text-amber-800 dark:text-amber-300 flex items-center justify-between"
+                            title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
+                          >
+                            <span className="flex items-center gap-1 truncate">
+                              <RotateCcw className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span className="truncate">เคยรับ: <strong>{prevWorker.name}</strong></span>
+                            </span>
+                            {prevWorker.returnedAt && (
+                              <span className="text-[9px] text-amber-600/80 dark:text-amber-400/80 shrink-0 font-mono ml-1">
+                                {format(prevWorker.returnedAt, 'HH:mm', { locale: th })}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
                         {/* Agent & Province */}
                         <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1.5 truncate">
                           ตัวแทน: <span className="font-medium text-slate-700 dark:text-slate-300">{c.agentName}</span> ({c.province})
@@ -916,37 +938,53 @@ export function AdminDashboard() {
 
                         {/* Remarks */}
                         {c.remarks && (
-                          <div className="mt-1 p-1 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200">
+                          <div className="mt-1 p-1.5 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200">
                             <span className="font-bold flex items-center text-amber-700 dark:text-amber-400">
                               <StickyNote className="w-2.5 h-2.5 mr-0.5 shrink-0" />
-                              งานค้าง:
+                              งานค้าง / หมายเหตุ:
                             </span>
-                            <p className="line-clamp-2 mt-0.5">{c.remarks}</p>
+                            <p className="mt-0.5 break-words whitespace-pre-wrap leading-relaxed">{c.remarks}</p>
+                            <div className="text-[9px] font-bold text-red-600 dark:text-red-400 mt-1 pt-0.5 border-t border-amber-200/60 dark:border-amber-900/40">
+                              * คนเช็คเครดิต รับเคส คนสุดท้าย
+                            </div>
                           </div>
                         )}
                       </div>
 
-                      {/* Admin Quick Actions: Transfer & Return to Queue */}
+                      {/* Admin Quick Actions: Close Case, Transfer & Return to Queue */}
                       {(c.status === 'credit_check' || c.status === 'processing' || c.assigneeId) && (
-                        <div className="grid grid-cols-2 gap-1.5 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                          <button
-                            type="button"
-                            onClick={() => setActiveReassignCase(c)}
-                            className="py-1 px-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
-                            title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
-                          >
-                            <ArrowRightLeft className="w-2.5 h-2.5 mr-1 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                            <span>โยกเคส</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActiveReturnCase(c)}
-                            className="py-1 px-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
-                            title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
-                          >
-                            <RotateCcw className="w-2.5 h-2.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0" />
-                            <span>คืนเคส</span>
-                          </button>
+                        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                          {(c.status === 'credit_check' || c.status === 'processing') && (
+                            <button
+                              type="button"
+                              onClick={() => setActiveCloseCase(c)}
+                              className="w-full py-1 px-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold flex items-center justify-center cursor-pointer transition shadow-2xs whitespace-nowrap"
+                              title="บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"
+                            >
+                              <CheckCircle2 className="w-2.5 h-2.5 mr-1" />
+                              <span>จบเคส</span>
+                            </button>
+                          )}
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setActiveReassignCase(c)}
+                              className="py-1 px-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
+                              title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
+                            >
+                              <ArrowRightLeft className="w-2.5 h-2.5 mr-1 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                              <span>โยกเคส</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveReturnCase(c)}
+                              className="py-1 px-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
+                              title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
+                            >
+                              <RotateCcw className="w-2.5 h-2.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span>คืนเคส</span>
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1189,6 +1227,21 @@ export function AdminDashboard() {
                                     {format(c.updatedAt || c.createdAt, 'HH:mm', { locale: th })}
                                   </span>
                                 </div>
+                                {(() => {
+                                  const prev = getPreviousAssignee(c);
+                                  if (!prev) return null;
+                                  return (
+                                    <div
+                                      className="mt-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/50 text-[10px] text-amber-800 dark:text-amber-300 flex items-center justify-between"
+                                      title={`พนักงานที่เคยรับเคสก่อนนี้: ${prev.name}${prev.reason ? ` (เหตุผล: ${prev.reason})` : ''}`}
+                                    >
+                                      <span className="flex items-center gap-1 truncate">
+                                        <RotateCcw className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                                        <span className="truncate">เคยรับก่อนนี้: <strong>{prev.name}</strong></span>
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
                                 {c.contractNumber && (
                                   <div className="mt-1 px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-[10px] text-blue-900 dark:text-blue-200 flex items-center justify-between">
                                     <span className="flex items-center font-medium">
@@ -1201,11 +1254,16 @@ export function AdminDashboard() {
                                   </div>
                                 )}
                                 {c.remarks && (
-                                  <div className="mt-1 p-1 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200 flex items-start">
-                                    <StickyNote className="w-2.5 h-2.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                                    <span className="line-clamp-2">
-                                      <strong>หมายเหตุ:</strong> {c.remarks}
-                                    </span>
+                                  <div className="mt-1 p-1 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200">
+                                    <div className="flex items-start">
+                                      <StickyNote className="w-2.5 h-2.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                                      <span className="break-words whitespace-pre-wrap leading-relaxed">
+                                        <strong>หมายเหตุ:</strong> {c.remarks}
+                                      </span>
+                                    </div>
+                                    <div className="text-[9px] font-bold text-red-600 dark:text-red-400 mt-1 pt-0.5 border-t border-amber-200/60 dark:border-amber-900/40">
+                                      * คนเช็คเครดิต รับเคส คนสุดท้าย
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -1406,6 +1464,17 @@ export function AdminDashboard() {
           caseData={activeReturnCase}
           currentUser={user}
           onSuccess={() => setActiveReturnCase(null)}
+        />
+      )}
+
+      {/* Close Case Modal */}
+      {activeCloseCase && (
+        <CloseCaseModal
+          isOpen={!!activeCloseCase}
+          onClose={() => setActiveCloseCase(null)}
+          caseData={activeCloseCase}
+          currentUser={user}
+          onSuccess={() => setActiveCloseCase(null)}
         />
       )}
     </div>
