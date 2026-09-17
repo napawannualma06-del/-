@@ -38,7 +38,9 @@ import {
   Layers,
   List,
   Lock,
-  X
+  X,
+  Moon,
+  LogOut
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -46,6 +48,9 @@ import { clsx } from 'clsx';
 import { CreditCheckDutyStation } from './CreditCheckDutyStation';
 import { SimpleEmployeeWorkload } from './SimpleEmployeeWorkload';
 import { AnimalAvatar } from './AnimalAvatar';
+import { ClockOutConfirmModal } from './ClockOutConfirmModal';
+import { ReturnCaseModal } from './ReturnCaseModal';
+import { TransferCaseModal } from './TransferCaseModal';
 import { DutyWorker, Case } from '../types';
 
 export type { Case };
@@ -231,12 +236,13 @@ function playNotificationChime() {
 }
 
 export function Queue() {
-  const { user, registeredUsers } = useStore();
+  const { user, registeredUsers, clockIn } = useStore();
   const isAdmin = user?.role === 'admin' && (user?.username?.toLowerCase() === 'gametpl' || user?.uid === 'admin_gametpl');
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'mine' | 'contract' | 'remarks' | 'closed' | 'cancelled'>('all');
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string | null>(null);
+  const [showQueueClockOutModal, setShowQueueClockOutModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'row' | 'compact' | 'card'>(() => {
     if (typeof window !== 'undefined') {
@@ -282,10 +288,9 @@ export function Queue() {
   const [contractInput, setContractInput] = useState('');
   const [isSavingContract, setIsSavingContract] = useState(false);
 
-  // Admin Reassign Modal State
+  // Reassign & Return Case Modals
   const [activeReassignCase, setActiveReassignCase] = useState<Case | null>(null);
-  const [selectedReassignUser, setSelectedReassignUser] = useState('');
-  const [isReassigning, setIsReassigning] = useState(false);
+  const [activeReturnCase, setActiveReturnCase] = useState<Case | null>(null);
 
   const initialLoadRef = useRef(true);
 
@@ -459,30 +464,11 @@ export function Queue() {
   };
 
   const handleOpenReassign = (c: Case) => {
-    if (!isAdmin) return;
     setActiveReassignCase(c);
-    setSelectedReassignUser(c.assigneeId || (registeredUsers[0]?.uid || ''));
   };
 
-  const handleSaveReassign = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeReassignCase || !selectedReassignUser || !isAdmin) return;
-    const targetUser = registeredUsers.find(u => u.uid === selectedReassignUser || u.username === selectedReassignUser);
-    if (!targetUser) return;
-    setIsReassigning(true);
-    try {
-      const caseRef = doc(db, 'cases', activeReassignCase.id);
-      await updateDoc(caseRef, {
-        assigneeId: targetUser.uid,
-        assigneeName: targetUser.name,
-        updatedAt: Date.now(),
-      });
-      setActiveReassignCase(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `cases/${activeReassignCase.id}`);
-    } finally {
-      setIsReassigning(false);
-    }
+  const handleOpenReturnToPending = (c: Case) => {
+    setActiveReturnCase(c);
   };
 
   const handleAddCase = async (e: React.FormEvent) => {
@@ -535,6 +521,13 @@ export function Queue() {
 
   const handleAcceptCase = async (caseId: string) => {
     if (!user) return;
+    if (user.workStatus === 'off_work') {
+      const confirmClockIn = window.confirm(
+        'ขณะนี้คุณอยู่ในสถานะ "เลิกงานแล้ว" ต้องการเปลี่ยนสถานะเป็น "เข้างาน" และรับเคสนี้ใช่หรือไม่?'
+      );
+      if (!confirmClockIn) return;
+      await clockIn();
+    }
     try {
       const caseRef = doc(db, 'cases', caseId);
       await updateDoc(caseRef, {
@@ -1113,6 +1106,53 @@ export function Queue() {
         </div>
       )}
 
+      {/* Off-work status banner for "My Cases" tab */}
+      {activeFilter === 'mine' && user?.workStatus === 'off_work' && (
+        <div className="flex flex-wrap items-center justify-between gap-2.5 px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-300 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 shrink-0">
+              <Moon className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <span className="font-bold text-slate-800 dark:text-slate-200">คุณอยู่ในสถานะ: เลิกงานแล้ว</span>
+              <span className="text-slate-500 dark:text-slate-400 ml-1.5 hidden sm:inline">(เคสที่เคยถือครองถูกส่งคืนกลับไป "รอรับเคส" เรียบร้อยแล้ว)</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              await clockIn();
+            }}
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition cursor-pointer shadow-xs whitespace-nowrap"
+          >
+            คลิกเพื่อเข้างาน
+          </button>
+        </div>
+      )}
+
+      {/* Active Workload & Quick Clock-Out for "My Cases" tab */}
+      {activeFilter === 'mine' && user?.workStatus !== 'off_work' && myCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 rounded-xl text-xs text-amber-900 dark:text-amber-200">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-amber-800 dark:text-amber-300">คุณมีงานที่กำลังทำอยู่:</span>
+            <span className="px-2 py-0.5 rounded-md bg-amber-500 text-white font-bold text-[11px]">
+              {myCount} เคส
+            </span>
+            <span className="text-amber-700/80 dark:text-amber-400/80 text-[11px] hidden sm:inline">
+              (เมื่อเลิกงาน สามารถกดบันทึกเพื่อคืนเคสทั้งหมดกลับไป "รอรับเคส" ได้ทันที)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowQueueClockOutModal(true)}
+            className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs transition"
+          >
+            <LogOut className="w-3.5 h-3.5 text-amber-600" />
+            <span>บันทึกเลิกงาน (คืน {myCount} เคส)</span>
+          </button>
+        </div>
+      )}
+
       {/* Case List Grid */}
       {filteredCases.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-6">
@@ -1137,6 +1177,7 @@ export function Queue() {
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
               onCancel={() => handleCancelCase(c.id)}
               onReopen={() => handleReopenCase(c.id)}
+              onReturnToPending={() => handleOpenReturnToPending(c)}
               onDelete={() => handleDeleteCase(c.id)}
               onOpenRemark={handleOpenRemark}
               onOpenContract={handleOpenContract}
@@ -1158,6 +1199,7 @@ export function Queue() {
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
               onCancel={() => handleCancelCase(c.id)}
               onReopen={() => handleReopenCase(c.id)}
+              onReturnToPending={() => handleOpenReturnToPending(c)}
               onDelete={() => handleDeleteCase(c.id)}
               onOpenRemark={handleOpenRemark}
               onOpenContract={handleOpenContract}
@@ -1179,6 +1221,7 @@ export function Queue() {
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
               onCancel={() => handleCancelCase(c.id)}
               onReopen={() => handleReopenCase(c.id)}
+              onReturnToPending={() => handleOpenReturnToPending(c)}
               onDelete={() => handleDeleteCase(c.id)}
               onOpenRemark={handleOpenRemark}
               onOpenContract={handleOpenContract}
@@ -1392,76 +1435,43 @@ export function Queue() {
         </div>
       )}
 
-      {/* ADMIN REASSIGN MODAL DIALOG (Only for admin gametpl) */}
-      {isAdmin && activeReassignCase && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 w-full max-w-md overflow-hidden">
-            {/* Modal Header */}
-            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/70 dark:bg-amber-950/30">
-              <div className="flex items-center space-x-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-xs">
-                  <Crown className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center">
-                    โอนเคสงาน (สิทธิ์แอดมิน gametpl)
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    {activeReassignCase.iphoneModel} • ผู้รับผิดชอบเดิม: {activeReassignCase.assigneeName || 'ไม่มี'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveReassignCase(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* TRANSFER / REASSIGN CASE MODAL */}
+      {activeReassignCase && (
+        <TransferCaseModal
+          isOpen={!!activeReassignCase}
+          onClose={() => setActiveReassignCase(null)}
+          caseData={activeReassignCase}
+          currentUser={user}
+          registeredUsers={registeredUsers}
+          onSuccess={() => setActiveReassignCase(null)}
+        />
+      )}
 
-            <form onSubmit={handleSaveReassign} className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  เลือกพนักงานที่ต้องการมอบหมายเคสนี้:
-                </label>
-                <select
-                  value={selectedReassignUser}
-                  onChange={(e) => setSelectedReassignUser(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white dark:focus:bg-slate-800 transition cursor-pointer"
-                >
-                  {registeredUsers.map((u) => (
-                    <option key={u.uid} value={u.uid}>
-                      {u.name} (@{u.username}) {u.username.toLowerCase() === 'gametpl' ? '👑 [แอดมิน]' : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
-                  เมื่อโอนเคสแล้ว ระบบจะเปลี่ยนผู้รับผิดชอบเป็นพนักงานท่านนี้ทันทีแบบเรียลไทม์
-                </p>
-              </div>
+      {/* RETURN CASE TO PENDING MODAL */}
+      {activeReturnCase && (
+        <ReturnCaseModal
+          isOpen={!!activeReturnCase}
+          onClose={() => setActiveReturnCase(null)}
+          caseData={activeReturnCase}
+          currentUser={user}
+          onSuccess={() => setActiveReturnCase(null)}
+        />
+      )}
 
-              {/* Modal Actions */}
-              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setActiveReassignCase(null)}
-                  className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  disabled={isReassigning}
-                  className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 active:scale-[0.98] rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50 flex items-center"
-                >
-                  <ArrowRightLeft className="w-3.5 h-3.5 mr-1.5" />
-                  {isReassigning ? 'กำลังโอนเคส...' : 'ยืนยันการโอนเคส'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Clock Out Confirmation Modal */}
+      {user && (
+        <ClockOutConfirmModal
+          isOpen={showQueueClockOutModal}
+          onClose={() => setShowQueueClockOutModal(false)}
+          employeeId={user.uid}
+          employeeName={user.name}
+          isSelf={true}
+          onSuccess={(res) => {
+            if (res.returnedCasesCount > 0) {
+              alert(`บันทึกเลิกงานเรียบร้อยแล้ว ส่งเคสคืนกลับไป "รอรับเคส" จำนวน ${res.returnedCasesCount} เคส`);
+            }
+          }}
+        />
       )}
     </div>
   );
@@ -1475,6 +1485,7 @@ interface CaseCardProps {
   onUpdateStatus: (status: 'processing' | 'closed') => void;
   onCancel: () => void;
   onReopen: () => void;
+  onReturnToPending: () => void;
   onDelete: () => void;
   onOpenRemark: (c: Case) => void;
   onOpenContract: (c: Case) => void;
@@ -1490,6 +1501,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
   onUpdateStatus,
   onCancel,
   onReopen,
+  onReturnToPending,
   onDelete,
   onOpenRemark,
   onOpenContract,
@@ -1628,10 +1640,33 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onUpdateStatus('closed')}
-                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition"
+                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition whitespace-nowrap"
+                  title="บันทึกจบเคสเสร็จสิ้น"
                 >
                   <CheckCircle2 className="w-3 h-3 mr-1" />
                   จบเคส
+                </button>
+              )}
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={onOpenReassign}
+                  className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
+                  title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
+                >
+                  <ArrowRightLeft className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                  <span>โยกเคส</span>
+                </button>
+              )}
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={onReturnToPending}
+                  className="px-2 py-1 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
+                  title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
+                >
+                  <RotateCcw className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                  <span>คืนเคส</span>
                 </button>
               )}
               {isAdmin && !isAssignee && (
@@ -1642,16 +1677,6 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                   title="👑 แอดมิน: ดึงเคสมาทำเอง"
                 >
                   <Crown className="w-3 h-3" />
-                </button>
-              )}
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={onOpenReassign}
-                  className="p-1 text-slate-400 hover:text-amber-600 rounded cursor-pointer"
-                  title="👑 แอดมิน: โอนเคส"
-                >
-                  <ArrowRightLeft className="w-3.5 h-3.5" />
                 </button>
               )}
             </>
@@ -1711,6 +1736,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
   onUpdateStatus,
   onCancel,
   onReopen,
+  onReturnToPending,
   onDelete,
   onOpenRemark,
   onOpenContract,
@@ -1854,12 +1880,13 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
         )}
 
         {(data.status === 'credit_check' || data.status === 'processing') && (
-          <div>
+          <div className="space-y-1.5">
             {canManage ? (
               <button
                 type="button"
                 onClick={() => onUpdateStatus('closed')}
-                className="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition"
+                className="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition whitespace-nowrap"
+                title="บันทึกจบเคสเสร็จสิ้น"
               >
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 จบเคส
@@ -1869,7 +1896,31 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
                 กำลังทำ: {data.assigneeName}
               </div>
             )}
-            <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-slate-400">
+
+            {canManage && (
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={onOpenReassign}
+                  className="py-1 px-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
+                  title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
+                >
+                  <ArrowRightLeft className="w-2.5 h-2.5 mr-0.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>โยกเคส</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onReturnToPending}
+                  className="py-1 px-1 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
+                  title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
+                >
+                  <RotateCcw className="w-2.5 h-2.5 mr-0.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>คืนเคส</span>
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-0.5 px-1 text-[10px] text-slate-400">
               <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">สัญญา</button>
               <button type="button" onClick={() => onOpenRemark(data)} className="hover:text-amber-600 cursor-pointer">หมายเหตุ</button>
               {canManage ? (
@@ -1924,6 +1975,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
   onUpdateStatus,
   onCancel,
   onReopen,
+  onReturnToPending,
   onDelete,
   onOpenRemark,
   onOpenContract,
@@ -2275,30 +2327,17 @@ const CaseCard: React.FC<CaseCardProps> = ({
               </span>
             </div>
 
-            {/* ADMIN SUPERPOWERS: Take Over or Reassign */}
-            {isAdmin && (
-              <div className="flex items-center gap-1.5 py-0.5">
-                {!isAssignee && (
-                  <button
-                    type="button"
-                    onClick={onTakeOver}
-                    className="flex-1 py-1 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition flex items-center justify-center cursor-pointer"
-                    title="ดึงเคสนี้มาเป็นความรับผิดชอบของแอดมินทันที"
-                  >
-                    <Crown className="w-3 h-3 mr-1 text-amber-500" />
-                    ดึงมาทำเอง
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={onOpenReassign}
-                  className="flex-1 py-1 px-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition flex items-center justify-center cursor-pointer"
-                  title="เปลี่ยนตัวผู้รับผิดชอบงานเคสนี้"
-                >
-                  <ArrowRightLeft className="w-3 h-3 mr-1 text-blue-500" />
-                  โอนเคสให้คนอื่น
-                </button>
-              </div>
+            {/* ADMIN SUPERPOWERS: Take Over if admin and not assignee */}
+            {isAdmin && !isAssignee && (
+              <button
+                type="button"
+                onClick={onTakeOver}
+                className="w-full py-1.5 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition flex items-center justify-center cursor-pointer mb-1"
+                title="ดึงเคสนี้มาเป็นความรับผิดชอบของแอดมินทันที"
+              >
+                <Crown className="w-3 h-3 mr-1 text-amber-500" />
+                ดึงมาทำเอง (สิทธิ์แอดมิน)
+              </button>
             )}
 
             {/* Step Progression Buttons */}
@@ -2306,14 +2345,38 @@ const CaseCard: React.FC<CaseCardProps> = ({
               {canManage ? (
                 <>
                   {(data.status === 'processing' || data.status === 'credit_check') && (
-                    <button
-                      type="button"
-                      onClick={() => onUpdateStatus('closed')}
-                      className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-bold shadow-xs shadow-emerald-200 dark:shadow-none transition flex items-center justify-center cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-                      เสร็จสิ้น -&gt; จบเคส
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onUpdateStatus('closed')}
+                        className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-bold shadow-xs shadow-emerald-200 dark:shadow-none transition flex items-center justify-center cursor-pointer whitespace-nowrap"
+                        title="บันทึกจบเคสเสร็จสิ้น"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                        เสร็จสิ้น -&gt; จบเคส
+                      </button>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={onOpenReassign}
+                          className="py-1.5 px-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-semibold transition flex items-center justify-center cursor-pointer whitespace-nowrap"
+                          title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5 mr-1 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                          <span>โยกเคส</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onReturnToPending}
+                          className="py-1.5 px-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-xs font-semibold transition flex items-center justify-center cursor-pointer whitespace-nowrap"
+                          title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span>คืนเคส</span>
+                        </button>
+                      </div>
+                    </>
                   )}
                 </>
               ) : (

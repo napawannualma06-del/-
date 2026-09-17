@@ -1,4 +1,5 @@
 export type Role = 'employee' | 'admin';
+export type WorkStatus = 'working' | 'off_work';
 
 export interface UserProfile {
   uid: string;
@@ -8,6 +9,8 @@ export interface UserProfile {
   pin?: string;
   email?: string;
   fcmToken?: string;
+  workStatus?: WorkStatus;
+  offWorkAt?: number;
   createdAt: number;
 }
 

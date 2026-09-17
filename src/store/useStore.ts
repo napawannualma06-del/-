@@ -2,23 +2,14 @@ import { create } from 'zustand';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
+import { UserProfile, Role, WorkStatus } from '../types';
+import { clockOutEmployee, clockInEmployee, ShiftActionResult } from '../lib/shiftService';
 
-export type Role = 'employee' | 'admin';
+export type { Role, WorkStatus, UserProfile };
 
 export const SUPER_ADMIN_USERNAME = 'gametpl';
 export const SUPER_ADMIN_PIN = 'gametpl';
 export const SUPER_ADMIN_NAME = 'คุณเกม (แอดมินสูงสุด)';
-
-export interface UserProfile {
-  uid: string;
-  username: string;
-  name: string;
-  role: Role;
-  pin?: string;
-  email?: string;
-  fcmToken?: string;
-  createdAt: number;
-}
 
 interface AppState {
   user: UserProfile | null;
@@ -30,6 +21,8 @@ interface AppState {
   loginWithUsername: (username: string, pin: string) => Promise<{ success: boolean; message?: string }>;
   registerEmployee: (name: string, username: string, pin?: string) => Promise<{ success: boolean; message?: string }>;
   setUserDirectly: (profile: UserProfile) => void;
+  clockOut: () => Promise<ShiftActionResult>;
+  clockIn: () => Promise<{ success: boolean; message: string }>;
   logout: () => Promise<void>;
   initAuth: () => Promise<void>;
 }
@@ -317,6 +310,52 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  clockOut: async () => {
+    const currentUser = get().user;
+    if (!currentUser) {
+      return {
+        success: false,
+        returnedCasesCount: 0,
+        returnedCaseIds: [],
+        message: 'ไม่ได้เข้าสู่ระบบ',
+      };
+    }
+    const res = await clockOutEmployee(currentUser.uid, currentUser.name);
+    if (res.success) {
+      const updated: UserProfile = {
+        ...currentUser,
+        workStatus: 'off_work',
+        offWorkAt: Date.now(),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      set({ user: updated });
+      get().fetchRegisteredUsers();
+    }
+    return res;
+  },
+
+  clockIn: async () => {
+    const currentUser = get().user;
+    if (!currentUser) {
+      return {
+        success: false,
+        message: 'ไม่ได้เข้าสู่ระบบ',
+      };
+    }
+    const res = await clockInEmployee(currentUser.uid);
+    if (res.success) {
+      const updated: UserProfile = {
+        ...currentUser,
+        workStatus: 'working',
+        offWorkAt: undefined,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      set({ user: updated });
+      get().fetchRegisteredUsers();
+    }
+    return res;
+  },
+
   logout: async () => {
     try {
       await signOut(auth);
@@ -343,6 +382,23 @@ export const useStore = create<AppState>((set, get) => ({
             };
             set({ user: enforcedProfile, loading: false });
             get().fetchRegisteredUsers();
+
+            // Sync fresh workStatus from Firestore
+            try {
+              const freshDoc = await getDoc(doc(db, 'users', enforcedProfile.uid));
+              if (freshDoc.exists()) {
+                const freshData = freshDoc.data() as Partial<UserProfile>;
+                if (freshData.workStatus !== undefined && freshData.workStatus !== enforcedProfile.workStatus) {
+                  const updatedProfile: UserProfile = { 
+                    ...enforcedProfile, 
+                    workStatus: freshData.workStatus, 
+                    offWorkAt: freshData.offWorkAt 
+                  };
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProfile));
+                  set({ user: updatedProfile });
+                }
+              }
+            } catch (_) {}
             return;
           }
         } catch (_) {

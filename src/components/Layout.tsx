@@ -3,20 +3,24 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { Logo } from './Logo';
 import { AnimalAvatar } from './AnimalAvatar';
+import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { 
   LogOut, 
   BarChart3, 
   ListTodo, 
   Bell, 
   Sun, 
-  Moon
+  Moon,
+  Briefcase
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
 export function Layout() {
-  const { user, logout, isDarkMode, toggleDarkMode } = useStore();
+  const { user, logout, isDarkMode, toggleDarkMode, clockIn } = useStore();
   const location = useLocation();
   const [notifGranted, setNotifGranted] = useState(false);
+  const [showClockOutModal, setShowClockOutModal] = useState(false);
+  const isOffWork = user?.workStatus === 'off_work';
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -121,7 +125,39 @@ export function Layout() {
               >
                 <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
               </button>
- 
+
+              {/* Employee Work Shift Status (เข้างาน / เลิกงาน) */}
+              {user && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isOffWork) {
+                      clockIn();
+                    } else {
+                      setShowClockOutModal(true);
+                    }
+                  }}
+                  className={clsx(
+                    "px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl border text-[11px] sm:text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-2xs whitespace-nowrap",
+                    isOffWork
+                      ? "border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      : "border-emerald-300 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60"
+                  )}
+                  title={isOffWork ? "ขณะนี้เลิกงานแล้ว (คลิกเพื่อเข้างาน)" : "ขณะนี้เข้างานอยู่ (คลิกเพื่อบันทึกเลิกงาน)"}
+                >
+                  <span className={clsx(
+                    "w-2 h-2 rounded-full shrink-0",
+                    isOffWork ? "bg-slate-400" : "bg-emerald-500 animate-pulse"
+                  )} />
+                  <span className="hidden sm:inline">
+                    {isOffWork ? 'เลิกงานแล้ว' : 'เข้างานอยู่'}
+                  </span>
+                  <span className="inline sm:hidden">
+                    {isOffWork ? 'เลิกงาน' : 'เข้างาน'}
+                  </span>
+                </button>
+              )}
+
               {/* Current Member Badge */}
               <div className="flex items-center pl-1 sm:pl-3 border-l border-slate-200 dark:border-slate-800 shrink-0">
                 <div className="relative mr-1 sm:mr-2 shrink-0">
@@ -172,6 +208,22 @@ export function Layout() {
       <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-7">
         <Outlet />
       </main>
+
+      {/* Clock Out Confirmation Modal */}
+      {user && (
+        <ClockOutConfirmModal
+          isOpen={showClockOutModal}
+          onClose={() => setShowClockOutModal(false)}
+          employeeId={user.uid}
+          employeeName={user.name}
+          isSelf={true}
+          onSuccess={(res) => {
+            if (res.returnedCasesCount > 0) {
+              alert(`บันทึกเลิกงานเรียบร้อยแล้ว ส่งเคสคืนกลับไป "รอรับเคส" จำนวน ${res.returnedCasesCount} เคส`);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

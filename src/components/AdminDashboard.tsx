@@ -27,12 +27,21 @@ import {
   Activity,
   LayoutGrid,
   Layers,
-  Crown
+  Crown,
+  Moon,
+  LogOut,
+  ArrowRightLeft,
+  RotateCcw
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { clsx } from 'clsx';
 import { CreditCheckDutyStation } from './CreditCheckDutyStation';
+import { ClockOutConfirmModal } from './ClockOutConfirmModal';
+import { TransferCaseModal } from './TransferCaseModal';
+import { ReturnCaseModal } from './ReturnCaseModal';
+import { clockInEmployee } from '../lib/shiftService';
+import { useStore } from '../store/useStore';
 
 interface EmployeeProfile {
   uid: string;
@@ -40,9 +49,12 @@ interface EmployeeProfile {
   username: string;
   role?: string;
   createdAt?: number;
+  workStatus?: 'working' | 'off_work';
+  offWorkAt?: number;
 }
 
 export function AdminDashboard() {
+  const { user, registeredUsers } = useStore();
   const [cases, setCases] = useState<Case[]>([]);
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
   const [dutyWorkers, setDutyWorkers] = useState<DutyWorker[]>([]);
@@ -54,9 +66,14 @@ export function AdminDashboard() {
   const [activeCaseSearch, setActiveCaseSearch] = useState('');
   const [activeCaseStatusFilter, setActiveCaseStatusFilter] = useState<'all' | 'credit_check' | 'processing' | 'pending'>('all');
 
-  // Workload tab filter: 'all' | 'busy' | 'idle'
-  const [workloadFilter, setWorkloadFilter] = useState<'all' | 'busy' | 'idle'>('all');
+  // Workload tab filter: 'all' | 'busy' | 'idle' | 'off_work'
+  const [workloadFilter, setWorkloadFilter] = useState<'all' | 'busy' | 'idle' | 'off_work'>('all');
   const [employeeSearch, setEmployeeSearch] = useState('');
+  const [clockOutTarget, setClockOutTarget] = useState<EmployeeProfile | null>(null);
+
+  // Case action modals
+  const [activeReassignCase, setActiveReassignCase] = useState<Case | null>(null);
+  const [activeReturnCase, setActiveReturnCase] = useState<Case | null>(null);
 
   useEffect(() => {
     // 1. Subscribe to cases collection
@@ -85,6 +102,8 @@ export function AdminDashboard() {
           username: d.username || doc.id,
           role: d.role || 'employee',
           createdAt: d.createdAt,
+          workStatus: d.workStatus || 'working',
+          offWorkAt: d.offWorkAt,
         });
       });
       setEmployees(usersData);
@@ -183,6 +202,7 @@ export function AdminDashboard() {
     closedCount: number;
     cancelledCount: number;
     isBusy: boolean;
+    isOffWork: boolean;
     isOnCreditCheckDuty: boolean;
   }
 
@@ -212,8 +232,9 @@ export function AdminDashboard() {
       (w.name && w.name.toLowerCase() === emp.name.toLowerCase())
     );
 
-    // If on credit check duty OR has active cases, they are considered active/busy (NEVER idle/ว่างงาน!)
-    const isBusy = empActiveCases.length > 0 || isOnCreditCheckDuty;
+    const isOffWork = emp.workStatus === 'off_work';
+    // If off work, they are not busy and cannot hold active cases
+    const isBusy = !isOffWork && (empActiveCases.length > 0 || isOnCreditCheckDuty);
 
     return {
       employee: emp,
@@ -221,18 +242,21 @@ export function AdminDashboard() {
       closedCount: empClosedCount,
       cancelledCount: empCancelledCount,
       isBusy,
+      isOffWork,
       isOnCreditCheckDuty,
     };
   });
 
-  // Employees currently busy vs idle
-  const busyEmployees = workloads.filter(w => w.isBusy);
-  const idleEmployees = workloads.filter(w => !w.isBusy);
+  // Employees currently busy vs idle vs off-work
+  const busyEmployees = workloads.filter(w => !w.isOffWork && w.isBusy);
+  const idleEmployees = workloads.filter(w => !w.isOffWork && !w.isBusy);
+  const offWorkEmployees = workloads.filter(w => w.isOffWork);
 
   // Filter workloads for display
   const displayedWorkloads = workloads.filter((w) => {
-    if (workloadFilter === 'busy' && !w.isBusy) return false;
-    if (workloadFilter === 'idle' && w.isBusy) return false;
+    if (workloadFilter === 'busy' && (w.isOffWork || !w.isBusy)) return false;
+    if (workloadFilter === 'idle' && (w.isOffWork || w.isBusy)) return false;
+    if (workloadFilter === 'off_work' && !w.isOffWork) return false;
 
     if (employeeSearch.trim()) {
       const q = employeeSearch.toLowerCase();
@@ -249,8 +273,9 @@ export function AdminDashboard() {
     return true;
   });
 
-  // Sort workloads: busy employees first (by number of active cases desc), then by closedCount desc
+  // Sort workloads: working employees first (busy first, then idle), then off-work employees at bottom
   displayedWorkloads.sort((a, b) => {
+    if (a.isOffWork !== b.isOffWork) return a.isOffWork ? 1 : -1;
     if (a.isBusy && !b.isBusy) return -1;
     if (!a.isBusy && b.isBusy) return 1;
     if (a.isBusy && b.isBusy) return b.activeCases.length - a.activeCases.length;
@@ -559,6 +584,19 @@ export function AdminDashboard() {
                 >
                   ว่างงาน ({idleEmployees.length})
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setWorkloadFilter('off_work')}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center whitespace-nowrap",
+                    workloadFilter === 'off_work'
+                      ? "bg-slate-600 text-white shadow-xs font-bold"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  <Moon className="w-3 h-3 mr-1" />
+                  เลิกงาน ({offWorkEmployees.length})
+                </button>
               </div>
 
               {/* Search Box */}
@@ -581,12 +619,14 @@ export function AdminDashboard() {
               </div>
             ) : (
               <div className="space-y-2 pt-1">
-                {displayedWorkloads.map(({ employee, activeCases, closedCount, isBusy, isOnCreditCheckDuty }) => (
+                {displayedWorkloads.map(({ employee, activeCases, closedCount, isBusy, isOffWork, isOnCreditCheckDuty }) => (
                   <div
                     key={employee.uid}
                     className={clsx(
                       "p-3 sm:p-3.5 rounded-xl sm:rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3",
-                      isOnCreditCheckDuty
+                      isOffWork
+                        ? "bg-slate-50/60 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800/80 opacity-85"
+                        : isOnCreditCheckDuty
                         ? "bg-indigo-50/30 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-900/60"
                         : isBusy
                         ? "bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60"
@@ -597,7 +637,9 @@ export function AdminDashboard() {
                     <div className="flex items-center space-x-3 min-w-[200px]">
                       <div className="relative shrink-0">
                         <AnimalAvatar identifier={employee.username || employee.uid} name={employee.name} size="md" />
-                        {isBusy ? (
+                        {isOffWork ? (
+                          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-slate-400 ring-2 ring-white dark:ring-slate-900" />
+                        ) : isBusy ? (
                           <span className={clsx(
                             "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-slate-900",
                             isOnCreditCheckDuty && activeCases.length === 0 ? "bg-indigo-600" : "bg-amber-500 animate-ping"
@@ -616,12 +658,17 @@ export function AdminDashboard() {
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          {isOnCreditCheckDuty && (
+                          {isOffWork ? (
+                            <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 bg-slate-200/80 dark:bg-slate-800 px-1.5 py-0.2 rounded flex items-center">
+                              <Moon className="w-3 h-3 mr-0.5 text-slate-400" />
+                              เลิกงานแล้ว
+                            </span>
+                          ) : isOnCreditCheckDuty ? (
                             <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-950/80 px-1.5 py-0.2 rounded flex items-center">
                               <ShieldCheck className="w-3 h-3 mr-0.5" />
                               เวรเช็คเครดิต
                             </span>
-                          )}
+                          ) : null}
                           <span className="text-[10px] text-slate-400">
                             ปิดเคสสะสม: <strong className="text-emerald-600 dark:text-emerald-400">{closedCount}</strong> เคส
                           </span>
@@ -631,7 +678,12 @@ export function AdminDashboard() {
 
                     {/* Middle: Current Active Cases List (Simple Pills) */}
                     <div className="flex-1 min-w-0">
-                      {activeCases.length > 0 ? (
+                      {isOffWork ? (
+                        <span className="text-xs text-slate-400 dark:text-slate-500 font-medium flex items-center">
+                          <Moon className="w-3.5 h-3.5 mr-1 text-slate-400 shrink-0" />
+                          เลิกงานแล้ว (เคสทั้งหมดถูกส่งคืนสู่สถานะ "รอรับเคส")
+                        </span>
+                      ) : activeCases.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">
                           {activeCases.map((c) => (
                             <div
@@ -662,23 +714,69 @@ export function AdminDashboard() {
                       )}
                     </div>
 
-                    {/* Right: Workload Count Badge (Clear & Prominent) */}
-                    <div className="shrink-0 sm:text-right flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100 dark:border-slate-800">
-                      {activeCases.length > 0 ? (
-                        <span className="px-3 py-1 rounded-xl text-xs font-bold bg-amber-500 text-white shadow-xs flex items-center">
-                          <Clock className="w-3.5 h-3.5 mr-1" />
-                          กำลังทำ {activeCases.length} เคส
-                        </span>
+                    {/* Right: Workload Count Badge & Actions */}
+                    <div className="shrink-0 sm:text-right flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1.5 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100 dark:border-slate-800">
+                      {isOffWork ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-2.5 py-1 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 flex items-center">
+                            <Moon className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                            เลิกงานแล้ว
+                          </span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await clockInEmployee(employee.uid);
+                            }}
+                            className="px-2.5 py-1 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs transition cursor-pointer"
+                          >
+                            เข้างาน
+                          </button>
+                        </div>
+                      ) : activeCases.length > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-3 py-1 rounded-xl text-xs font-bold bg-amber-500 text-white shadow-xs flex items-center">
+                            <Clock className="w-3.5 h-3.5 mr-1" />
+                            กำลังทำ {activeCases.length} เคส
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setClockOutTarget(employee)}
+                            title="สั่งเลิกงานและคืนเคส"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition cursor-pointer"
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       ) : isOnCreditCheckDuty ? (
-                        <span className="px-3 py-1 rounded-xl text-xs font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center">
-                          <ShieldCheck className="w-3.5 h-3.5 mr-1" />
-                          0 เคส (ติดเวร)
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-3 py-1 rounded-xl text-xs font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center">
+                            <ShieldCheck className="w-3.5 h-3.5 mr-1" />
+                            0 เคส (ติดเวร)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setClockOutTarget(employee)}
+                            title="สั่งเลิกงาน"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition cursor-pointer"
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       ) : (
-                        <span className="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center">
-                          <UserCheck className="w-3.5 h-3.5 mr-1 text-emerald-600" />
-                          ว่างงาน (0 เคส)
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center">
+                            <UserCheck className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                            ว่างงาน (0 เคส)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setClockOutTarget(employee)}
+                            title="สั่งเลิกงาน"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition cursor-pointer"
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -827,6 +925,30 @@ export function AdminDashboard() {
                           </div>
                         )}
                       </div>
+
+                      {/* Admin Quick Actions: Transfer & Return to Queue */}
+                      {(c.status === 'credit_check' || c.status === 'processing' || c.assigneeId) && (
+                        <div className="grid grid-cols-2 gap-1.5 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setActiveReassignCase(c)}
+                            className="py-1 px-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
+                            title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
+                          >
+                            <ArrowRightLeft className="w-2.5 h-2.5 mr-1 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                            <span>โยกเคส</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveReturnCase(c)}
+                            className="py-1 px-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
+                            title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>คืนเคส</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -875,6 +997,19 @@ export function AdminDashboard() {
                 >
                   ว่างงาน ({idleEmployees.length})
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setWorkloadFilter('off_work')}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center whitespace-nowrap",
+                    workloadFilter === 'off_work'
+                      ? "bg-slate-600 text-white shadow-xs font-bold"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  <Moon className="w-3 h-3 mr-1" />
+                  เลิกงาน ({offWorkEmployees.length})
+                </button>
               </div>
 
               {/* Search Box */}
@@ -897,12 +1032,14 @@ export function AdminDashboard() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 pt-4">
-                {displayedWorkloads.map(({ employee, activeCases, closedCount, cancelledCount, isBusy, isOnCreditCheckDuty }) => (
+                {displayedWorkloads.map(({ employee, activeCases, closedCount, cancelledCount, isBusy, isOffWork, isOnCreditCheckDuty }) => (
                   <div 
                     key={employee.uid}
                     className={clsx(
                       "rounded-xl sm:rounded-2xl border p-3.5 sm:p-5 flex flex-col justify-between transition-all hover:shadow-md",
-                      isOnCreditCheckDuty
+                      isOffWork
+                        ? "bg-slate-50/60 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/80 opacity-85"
+                        : isOnCreditCheckDuty
                         ? "bg-indigo-50/20 dark:bg-indigo-950/10 border-indigo-200 dark:border-indigo-900/60"
                         : isBusy 
                         ? "bg-amber-50/30 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60" 
@@ -920,7 +1057,9 @@ export function AdminDashboard() {
                               name={employee.name} 
                               size="lg" 
                             />
-                            {isBusy ? (
+                            {isOffWork ? (
+                              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-slate-400 ring-2 ring-white dark:ring-slate-900"></span>
+                            ) : isBusy ? (
                               <span className={clsx(
                                 "absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-white dark:ring-slate-900 flex items-center justify-center",
                                 isOnCreditCheckDuty ? "bg-indigo-600" : "bg-amber-500"
@@ -942,29 +1081,59 @@ export function AdminDashboard() {
                           </div>
                         </div>
 
-                        {/* Status Pill */}
-                        {isBusy ? (
-                          isOnCreditCheckDuty && activeCases.length === 0 ? (
-                            <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 flex items-center">
-                              <ShieldCheck className="w-3 h-3 mr-1 text-indigo-600" />
-                              เวรเช็คเครดิต
+                        {/* Status Pill & Action */}
+                        <div className="flex items-center gap-1.5">
+                          {isOffWork ? (
+                            <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 flex items-center">
+                              <Moon className="w-3 h-3 mr-1 text-slate-400" />
+                              เลิกงานแล้ว
                             </span>
+                          ) : isBusy ? (
+                            isOnCreditCheckDuty && activeCases.length === 0 ? (
+                              <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 flex items-center">
+                                <ShieldCheck className="w-3 h-3 mr-1 text-indigo-600" />
+                                เวรเช็คเครดิต
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center">
+                                <Clock className="w-3 h-3 mr-1 text-amber-600 animate-spin" />
+                                รับงาน ({activeCases.length})
+                              </span>
+                            )
                           ) : (
-                            <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center">
-                              <Clock className="w-3 h-3 mr-1 text-amber-600 animate-spin" />
-                              รับงานอยู่ ({activeCases.length})
+                            <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center">
+                              <UserCheck className="w-3 h-3 mr-1 text-emerald-600" />
+                              ว่างงาน
                             </span>
-                          )
-                        ) : (
-                          <span className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center">
-                            <UserCheck className="w-3 h-3 mr-1 text-emerald-600" />
-                            ว่างงาน (พร้อมรับ)
-                          </span>
-                        )}
+                          )}
+
+                          {/* Quick Clock out / in button for Admin */}
+                          {isOffWork ? (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await clockInEmployee(employee.uid);
+                              }}
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold transition cursor-pointer shadow-2xs"
+                              title="เปลี่ยนเป็นเข้างาน"
+                            >
+                              เข้างาน
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setClockOutTarget(employee)}
+                              className="p-1 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-950/50 transition cursor-pointer"
+                              title="บันทึกเลิกงาน & คืนเคส"
+                            >
+                              <LogOut className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {/* Credit Check Duty Station Badge */}
-                      {isOnCreditCheckDuty && (
+                      {isOnCreditCheckDuty && !isOffWork && (
                         <div className="mb-2 px-2.5 py-1.5 rounded-xl bg-indigo-50/90 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-[11px] text-indigo-900 dark:text-indigo-200 flex items-center justify-between">
                           <span className="flex items-center font-bold">
                             <ShieldCheck className="w-3.5 h-3.5 mr-1 text-indigo-600 dark:text-indigo-400 shrink-0" />
@@ -976,8 +1145,18 @@ export function AdminDashboard() {
                         </div>
                       )}
 
-                      {/* Active Tasks List for Busy Employees */}
-                      {activeCases.length > 0 ? (
+                      {/* Active Tasks List for Busy Employees or Off-work banner */}
+                      {isOffWork ? (
+                        <div className="bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl p-3 text-center my-3">
+                          <p className="text-xs text-slate-600 dark:text-slate-400 font-medium flex items-center justify-center">
+                            <Moon className="w-3.5 h-3.5 mr-1 text-slate-400" />
+                            ขณะนี้อยู่ในสถานะเลิกงาน
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            เคสที่เคยถือครองถูกส่งคืนกลับไประบบ "รอรับเคส" เรียบร้อยแล้ว
+                          </p>
+                        </div>
+                      ) : activeCases.length > 0 ? (
                         <div className="space-y-1.5 sm:space-y-2 mb-3">
                           <span className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400 tracking-wider block">
                             งานที่กำลังรับผิดชอบในขณะนี้:
@@ -1191,6 +1370,44 @@ export function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Clock Out Confirm Modal for Admin */}
+      {clockOutTarget && (
+        <ClockOutConfirmModal
+          isOpen={!!clockOutTarget}
+          onClose={() => setClockOutTarget(null)}
+          employeeId={clockOutTarget.uid}
+          employeeName={clockOutTarget.name}
+          isSelf={false}
+          onSuccess={(res) => {
+            alert(`บันทึกเลิกงานให้ ${clockOutTarget.name} เรียบร้อยแล้ว (คืนเคสกลับไป "รอรับเคส" จำนวน ${res.returnedCasesCount} เคส)`);
+            setClockOutTarget(null);
+          }}
+        />
+      )}
+
+      {/* Transfer Case Modal */}
+      {activeReassignCase && (
+        <TransferCaseModal
+          isOpen={!!activeReassignCase}
+          onClose={() => setActiveReassignCase(null)}
+          caseData={activeReassignCase}
+          currentUser={user}
+          registeredUsers={registeredUsers && registeredUsers.length > 0 ? registeredUsers : (employees as any)}
+          onSuccess={() => setActiveReassignCase(null)}
+        />
+      )}
+
+      {/* Return Case to Pending Modal */}
+      {activeReturnCase && (
+        <ReturnCaseModal
+          isOpen={!!activeReturnCase}
+          onClose={() => setActiveReturnCase(null)}
+          caseData={activeReturnCase}
+          currentUser={user}
+          onSuccess={() => setActiveReturnCase(null)}
+        />
+      )}
     </div>
   );
 }
