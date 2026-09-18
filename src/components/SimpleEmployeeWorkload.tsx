@@ -32,6 +32,7 @@ interface EmployeeWorkloadSummary {
   uid: string;
   name: string;
   username: string;
+  avatarEmoji?: string;
   activeCount: number;
   activeCases: Case[];
   isOnDuty: boolean;
@@ -48,7 +49,7 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
   onSelectEmployee,
   className,
 }) => {
-  const { user: currentUser } = useStore();
+  const { user: currentUser, clockIn, fetchRegisteredUsers } = useStore();
   const isAdmin = currentUser?.role === 'admin';
   const [employees, setEmployees] = useState<UserProfile[]>([]);
   const [dutyWorkers, setDutyWorkers] = useState<DutyWorker[]>([]);
@@ -102,6 +103,7 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
       uid: emp.uid,
       name: emp.name || emp.username,
       username: emp.username,
+      avatarEmoji: emp.avatarEmoji,
       activeCount: activeCases.length,
       activeCases,
       isOnDuty,
@@ -220,7 +222,12 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                     {/* Left: Animal Avatar + Name */}
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <div className="relative shrink-0">
-                        <AnimalAvatar identifier={emp.username || emp.uid} name={emp.name} size="sm" />
+                        <AnimalAvatar 
+                          avatarEmoji={emp.avatarEmoji} 
+                          identifier={emp.username || emp.uid} 
+                          name={emp.name} 
+                          size="sm" 
+                        />
                         {emp.isOffWork ? (
                           <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-slate-400 ring-1 ring-white dark:ring-slate-900" title="เลิกงานแล้ว" />
                         ) : emp.isBusy ? (
@@ -270,7 +277,12 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                               title="คลิกเพื่อบันทึกเข้างาน"
                               onClick={async (e) => {
                                 e.stopPropagation();
-                                await clockInEmployee(emp.uid);
+                                if (currentUser && (currentUser.uid === emp.uid || currentUser.username === emp.username)) {
+                                  await clockIn();
+                                } else {
+                                  await clockInEmployee(emp.uid);
+                                  fetchRegisteredUsers();
+                                }
                               }}
                               className="px-1.5 py-0.5 rounded text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 hover:bg-emerald-200 border border-emerald-300 dark:border-emerald-800 transition cursor-pointer shrink-0"
                             >
@@ -368,7 +380,12 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
               {adminWorker && (
                 <div className="p-2 sm:p-2.5 rounded-xl border border-dashed border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10 flex items-center justify-between gap-2 text-left">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <AnimalAvatar identifier={adminWorker.username || adminWorker.uid} name={adminWorker.name} size="sm" />
+                    <AnimalAvatar 
+                      avatarEmoji={adminWorker.avatarEmoji} 
+                      identifier={adminWorker.username || adminWorker.uid} 
+                      name={adminWorker.name} 
+                      size="sm" 
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1">
                         <Crown className="w-3 h-3 text-amber-500 shrink-0" />

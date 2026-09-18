@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { clockOutEmployee, ShiftActionResult } from '../lib/shiftService';
+import { useStore } from '../store/useStore';
 import { Case } from '../types';
 import { LogOut, AlertTriangle, CheckCircle2, Clock, X } from 'lucide-react';
 
@@ -22,6 +23,7 @@ export const ClockOutConfirmModal: React.FC<ClockOutConfirmModalProps> = ({
   isSelf = true,
   onSuccess,
 }) => {
+  const { user: currentUser, clockOut, fetchRegisteredUsers } = useStore();
   const [loading, setLoading] = useState(false);
   const [activeCases, setActiveCases] = useState<Case[]>([]);
   const [fetchingCases, setFetchingCases] = useState(true);
@@ -83,7 +85,13 @@ export const ClockOutConfirmModal: React.FC<ClockOutConfirmModalProps> = ({
   const handleConfirm = async () => {
     setLoading(true);
     try {
-      const res = await clockOutEmployee(employeeId, employeeName);
+      let res: ShiftActionResult;
+      if (isSelf || (currentUser && currentUser.uid === employeeId)) {
+        res = await clockOut();
+      } else {
+        res = await clockOutEmployee(employeeId, employeeName);
+        fetchRegisteredUsers();
+      }
       if (onSuccess) {
         onSuccess(res);
       }

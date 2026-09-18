@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { Logo } from './Logo';
 import { AnimalAvatar } from './AnimalAvatar';
 import { ClockOutConfirmModal } from './ClockOutConfirmModal';
+import { AvatarSelectorModal } from './AvatarSelectorModal';
 import { 
   LogOut, 
   BarChart3, 
@@ -11,7 +12,8 @@ import {
   Bell, 
   Sun, 
   Moon,
-  Briefcase
+  Briefcase,
+  Smile
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -20,6 +22,7 @@ export function Layout() {
   const location = useLocation();
   const [notifGranted, setNotifGranted] = useState(false);
   const [showClockOutModal, setShowClockOutModal] = useState(false);
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
   const isOffWork = user?.workStatus === 'off_work';
 
   useEffect(() => {
@@ -158,37 +161,59 @@ export function Layout() {
                 </button>
               )}
 
-              {/* Current Member Badge */}
+              {/* Current Member Badge (Click to customize avatar) */}
               <div className="flex items-center pl-1 sm:pl-3 border-l border-slate-200 dark:border-slate-800 shrink-0">
-                <div className="relative mr-1 sm:mr-2 shrink-0">
-                  <AnimalAvatar identifier={user?.username || user?.uid || 'user'} name={user?.name || 'User'} size="sm" className="sm:hidden" />
-                  <AnimalAvatar identifier={user?.username || user?.uid || 'user'} name={user?.name || 'User'} size="md" className="hidden sm:flex" />
-                  {user?.role === 'admin' && (
-                    <span className="absolute -bottom-1 -right-1 text-[9px] sm:text-[11px] leading-none select-none filter drop-shadow">
-                      👑
-                    </span>
-                  )}
-                </div>
-                <div className="hidden lg:block text-left mr-2.5 shrink-0">
-                  <div className="flex items-center space-x-1.5 whitespace-nowrap">
-                    <span className="text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[110px]">
-                      {user?.name}
+                <button
+                  id="open-avatar-selector-btn"
+                  type="button"
+                  onClick={() => setShowAvatarModal(true)}
+                  className="group relative flex items-center p-1 sm:p-1.5 -ml-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/80 transition cursor-pointer text-left focus:outline-hidden focus:ring-2 focus:ring-amber-500/50"
+                  title="คลิกเพื่อเปลี่ยนรูปตัวการ์ตูนประจำตัว"
+                >
+                  <div className="relative mr-1.5 sm:mr-2 shrink-0">
+                    <AnimalAvatar 
+                      avatarEmoji={user?.avatarEmoji}
+                      identifier={user?.username || user?.uid || 'user'} 
+                      name={user?.name || 'User'} 
+                      size="sm" 
+                      className="sm:hidden" 
+                    />
+                    <AnimalAvatar 
+                      avatarEmoji={user?.avatarEmoji}
+                      identifier={user?.username || user?.uid || 'user'} 
+                      name={user?.name || 'User'} 
+                      size="md" 
+                      className="hidden sm:flex" 
+                    />
+                    <span 
+                      className="absolute -bottom-1 -right-1 w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-amber-500 text-white flex items-center justify-center opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shadow-xs text-[8px] sm:text-[9px]"
+                      title="เปลี่ยนรูปตัวการ์ตูน"
+                    >
+                      ✏️
                     </span>
                     {user?.role === 'admin' && (
-                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 whitespace-nowrap shrink-0">
-                        Admin
+                      <span className="absolute -top-1.5 -left-1.5 text-[9px] sm:text-[11px] leading-none select-none filter drop-shadow">
+                        👑
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center whitespace-nowrap">
-                    <span>@{user?.username || 'member'}</span>
-                    {user?.role === 'admin' ? (
-                      <span className="ml-1 text-amber-600 dark:text-amber-400 font-semibold shrink-0">• แอดมิน</span>
-                    ) : (
-                      <span className="ml-1 shrink-0">• พนักงาน</span>
-                    )}
+                  <div className="hidden lg:block text-left mr-2 shrink-0">
+                    <div className="flex items-center space-x-1.5 whitespace-nowrap">
+                      <span className="text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[110px] group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                        {user?.name}
+                      </span>
+                      {user?.role === 'admin' && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 whitespace-nowrap shrink-0">
+                          Admin
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center whitespace-nowrap">
+                      <span>@{user?.username || 'member'}</span>
+                      <span className="ml-1 text-amber-500 opacity-0 group-hover:opacity-100 transition-opacity font-medium shrink-0">• เปลี่ยนรูป</span>
+                    </div>
                   </div>
-                </div>
+                </button>
  
                 <button
                   type="button"
@@ -208,6 +233,14 @@ export function Layout() {
       <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-7">
         <Outlet />
       </main>
+
+      {/* Avatar Customization Modal */}
+      {user && (
+        <AvatarSelectorModal
+          isOpen={showAvatarModal}
+          onClose={() => setShowAvatarModal(false)}
+        />
+      )}
 
       {/* Clock Out Confirmation Modal */}
       {user && (

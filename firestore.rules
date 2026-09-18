@@ -11,7 +11,8 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.name is string && data.name.size() <= 128 &&
-             data.role in ['employee', 'admin'];
+             data.role in ['employee', 'admin'] &&
+             (!('avatarEmoji' in data) || (data.avatarEmoji is string && data.avatarEmoji.size() <= 64));
     }
 
     function isValidCase(data) {
@@ -22,7 +23,7 @@ service cloud.firestore {
              (!('contractNumber' in data) || (data.contractNumber is string && data.contractNumber.size() <= 128)) &&
              (!('contractUpdatedBy' in data) || (data.contractUpdatedBy is string && data.contractUpdatedBy.size() <= 128)) &&
              (!('contractUpdatedAt' in data) || (data.contractUpdatedAt is number)) &&
-             (!('remarks' in data) || (data.remarks is string && data.remarks.size() <= 1000)) &&
+             (!('remarks' in data) || (data.remarks is string && data.remarks.size() <= 5000)) &&
              (!('remarksUpdatedBy' in data) || (data.remarksUpdatedBy is string && data.remarksUpdatedBy.size() <= 128)) &&
              (!('remarksUpdatedAt' in data) || (data.remarksUpdatedAt is number)) &&
              (!('previousAssigneeName' in data) || (data.previousAssigneeName is string && data.previousAssigneeName.size() <= 128)) &&
@@ -38,6 +39,11 @@ service cloud.firestore {
              data.createdAt is number &&
              (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128)) &&
              (!('createdById' in data) || (data.createdById is string && data.createdById.size() <= 128));
+    }
+
+    function isValidDuty(data) {
+      return (!('workers' in data) || data.workers is list) &&
+             (!('updatedAt' in data) || data.updatedAt is number);
     }
 
     match /users/{userId} {
@@ -59,7 +65,9 @@ service cloud.firestore {
     }
 
     match /system_duties/{dutyId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDuty(incoming());
+      allow delete: if false;
     }
   }
 }

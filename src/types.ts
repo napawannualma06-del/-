@@ -11,6 +11,7 @@ export interface UserProfile {
   fcmToken?: string;
   workStatus?: WorkStatus;
   offWorkAt?: number;
+  avatarEmoji?: string;
   createdAt: number;
 }
 

@@ -76,36 +76,56 @@ export async function clockOutEmployee(
     }
 
     // 2. คืนเคสทั้งหมดกลับไปเป็น "รอรับเคส" (status: 'pending')
-    activeDocs.forEach((caseData, caseId) => {
-      const caseDocRef = doc(db, 'cases', caseId);
-      returnedCaseIds.push(caseId);
-      
-      const currentRemarks = caseData.remarks ? `${caseData.remarks} | ` : '';
-      const updatePayload: Record<string, unknown> = {
-        status: 'pending',
-        assigneeId: '',
-        assigneeName: '',
-        updatedAt: now,
-        remarks: `${currentRemarks}[พนักงานเลิกงาน: ส่งกลับไปรอรับเคส]`,
-        remarksUpdatedAt: now,
-        remarksUpdatedBy: 'ระบบจัดการกะ',
-      };
-      
-      batch.update(caseDocRef, updatePayload);
-    });
+    const caseEntries = Array.from(activeDocs.entries());
+    
+    // Firestore batch limit is 500 operations. We chunk cases into batches of 400.
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < caseEntries.length; i += CHUNK_SIZE) {
+      const chunk = caseEntries.slice(i, i + CHUNK_SIZE);
+      const chunkBatch = writeBatch(db);
+
+      chunk.forEach(([caseId, caseData]) => {
+        const caseDocRef = doc(db, 'cases', caseId);
+        returnedCaseIds.push(caseId);
+        
+        const currentRemarks = caseData.remarks ? `${caseData.remarks} | ` : '';
+        const rawRemarks = `${currentRemarks}[พนักงานเลิกงาน: ส่งกลับไปรอรับเคส]`;
+        const safeRemarks = rawRemarks.length > 4500 ? rawRemarks.slice(-4500) : rawRemarks;
+        
+        const updatePayload: Record<string, unknown> = {
+          status: 'pending',
+          assigneeId: '',
+          assigneeName: '',
+          updatedAt: now,
+          remarks: safeRemarks,
+          remarksUpdatedAt: now,
+          remarksUpdatedBy: 'ระบบจัดการกะ',
+        };
+        
+        chunkBatch.update(caseDocRef, updatePayload);
+      });
+
+      await chunkBatch.commit();
+    }
 
     // 3. ปรับสถานะพนักงานในคอลเลกชัน users เป็น 'off_work'
-    const userDocRef = doc(db, 'users', employeeId);
-    batch.update(userDocRef, {
+    let userDocRef = doc(db, 'users', employeeId);
+    const userDocSnap = await getDoc(userDocRef);
+    if (!userDocSnap.exists() && employeeName) {
+      const qUser = query(collection(db, 'users'), where('username', '==', employeeName.toLowerCase()));
+      const snapUser = await getDocs(qUser);
+      if (!snapUser.empty) {
+        userDocRef = doc(db, 'users', snapUser.docs[0].id);
+      }
+    }
+    
+    await updateDoc(userDocRef, {
       workStatus: 'off_work',
       offWorkAt: now,
       updatedAt: now,
     });
 
-    // 4. บันทึก Batch ทันที
-    await batch.commit();
-
-    // 5. ปลดออกจากเวรเช็คเครดิต (ถ้ามี)
+    // 4. ปลดออกจากเวรเช็คเครดิต (ถ้ามี)
     try {
       const dutyDocRef = doc(db, 'system_duties', 'credit_check');
       const dutySnap = await getDoc(dutyDocRef);
@@ -158,7 +178,16 @@ export async function clockInEmployee(employeeId: string): Promise<{ success: bo
   }
 
   try {
-    const userDocRef = doc(db, 'users', employeeId);
+    let userDocRef = doc(db, 'users', employeeId);
+    const snap = await getDoc(userDocRef);
+    if (!snap.exists()) {
+      const qUser = query(collection(db, 'users'), where('username', '==', employeeId.toLowerCase()));
+      const snapUser = await getDocs(qUser);
+      if (!snapUser.empty) {
+        userDocRef = doc(db, 'users', snapUser.docs[0].id);
+      }
+    }
+
     await updateDoc(userDocRef, {
       workStatus: 'working',
       offWorkAt: null,

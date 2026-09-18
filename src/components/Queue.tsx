@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   collection, 
   query, 
@@ -7,7 +7,8 @@ import {
   updateDoc, 
   deleteDoc, 
   doc, 
-  orderBy 
+  orderBy,
+  runTransaction 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore } from '../store/useStore';
@@ -275,6 +276,11 @@ export function Queue() {
   const [dutyWorkers, setDutyWorkers] = useState<DutyWorker[]>([]);
   const canCreateCase = isAdmin || isCreditChecker;
 
+  const handleDutyStatusChange = useCallback((isWorker: boolean, workers: DutyWorker[]) => {
+    setIsCreditChecker(isWorker);
+    setDutyWorkers(workers);
+  }, []);
+
   // Form State
   const [formData, setFormData] = useState({
     agentName: '',
@@ -537,14 +543,31 @@ export function Queue() {
     }
     try {
       const caseRef = doc(db, 'cases', caseId);
-      await updateDoc(caseRef, {
-        assigneeId: user.uid,
-        assigneeName: user.name,
-        status: 'processing', // สร้างเคส = เครดิตผ่านเลย เมื่อกดรับเคสจะเริ่มทำเคสทันที
-        updatedAt: Date.now(),
+      await runTransaction(db, async (transaction) => {
+        const caseDoc = await transaction.get(caseRef);
+        if (!caseDoc.exists()) {
+          throw new Error('CASE_NOT_FOUND');
+        }
+        const currentData = caseDoc.data() as Case;
+        if (currentData.status !== 'pending') {
+          throw new Error(`ALREADY_ACCEPTED:${currentData.assigneeName || 'พนักงานท่านอื่น'}`);
+        }
+        transaction.update(caseRef, {
+          assigneeId: user.uid,
+          assigneeName: user.name,
+          status: 'processing', // สร้างเคส = เครดิตผ่านเลย เมื่อกดรับเคสจะเริ่มทำเคสทันที
+          updatedAt: Date.now(),
+        });
       });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `cases/${caseId}`);
+    } catch (error: any) {
+      if (error?.message?.startsWith('ALREADY_ACCEPTED:')) {
+        const takenBy = error.message.split(':')[1];
+        alert(`เคสนี้ถูกรับไปแล้วโดย ${takenBy}`);
+      } else if (error?.message === 'CASE_NOT_FOUND') {
+        alert('ไม่พบเคสนี้ในระบบ หรืออาจถูกลบไปแล้ว');
+      } else {
+        handleFirestoreError(error, OperationType.UPDATE, `cases/${caseId}`);
+      }
     }
   };
 
@@ -745,10 +768,7 @@ export function Queue() {
 
       {/* CREDIT CHECK DUTY STATION (Max 2 workers, only they can create cases) */}
       <CreditCheckDutyStation 
-        onStatusChange={(isWorker, workers) => {
-          setIsCreditChecker(isWorker);
-          setDutyWorkers(workers);
-        }} 
+        onStatusChange={handleDutyStatusChange} 
       />
 
       {/* SIMPLE EMPLOYEE WORKLOAD OVERVIEW (ใครกำลังรับงานอยู่กี่เคส แสดงแบบง่ายๆ) */}

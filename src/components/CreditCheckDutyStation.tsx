@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import React, { useState, useEffect, useRef } from 'react';
+import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore } from '../store/useStore';
 import { DutyWorker, CreditCheckDuty } from '../types';
@@ -25,11 +25,16 @@ interface CreditCheckDutyStationProps {
 }
 
 export function CreditCheckDutyStation({ onStatusChange, compact = false }: CreditCheckDutyStationProps) {
-  const { user } = useStore();
+  const { user, clockIn } = useStore();
   const isAdmin = user?.role === 'admin' && (user?.username?.toLowerCase() === 'gametpl' || user?.uid === 'admin_gametpl');
   const [workers, setWorkers] = useState<DutyWorker[]>([]);
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const onStatusChangeRef = useRef(onStatusChange);
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
 
   useEffect(() => {
     const dutyDocRef = doc(db, 'system_duties', 'credit_check');
@@ -38,14 +43,14 @@ export function CreditCheckDutyStation({ onStatusChange, compact = false }: Cred
         const data = snap.data() as CreditCheckDuty;
         const currentWorkers = Array.isArray(data.workers) ? data.workers : [];
         setWorkers(currentWorkers);
-        if (onStatusChange && user) {
+        if (onStatusChangeRef.current && user) {
           const isCurrentWorker = currentWorkers.some(w => w.uid === user.uid || w.username === user.username);
-          onStatusChange(isCurrentWorker, currentWorkers);
+          onStatusChangeRef.current(isCurrentWorker, currentWorkers);
         }
       } else {
         setWorkers([]);
-        if (onStatusChange) {
-          onStatusChange(false, []);
+        if (onStatusChangeRef.current) {
+          onStatusChangeRef.current(false, []);
         }
       }
       setLoading(false);
@@ -55,7 +60,7 @@ export function CreditCheckDutyStation({ onStatusChange, compact = false }: Cred
     });
 
     return () => unsub();
-  }, [user, onStatusChange]);
+  }, [user?.uid, user?.username]);
 
   const isCurrentWorker = workers.some(w => w.uid === user?.uid || w.username === user?.username);
   const isFull = workers.length >= 2;
@@ -68,21 +73,49 @@ export function CreditCheckDutyStation({ onStatusChange, compact = false }: Cred
       return;
     }
 
+    if (user.workStatus === 'off_work') {
+      const confirmClockIn = window.confirm(
+        'ขณะนี้คุณอยู่ในสถานะ "เลิกงานแล้ว" ต้องการเปลี่ยนสถานะเป็น "เข้างาน" และเริ่มเข้าเวรเช็คเครดิตใช่หรือไม่?'
+      );
+      if (!confirmClockIn) return;
+      await clockIn();
+    }
+
     setIsProcessing(true);
     try {
-      const newWorker: DutyWorker = {
-        uid: user.uid,
-        name: user.name,
-        username: user.username,
-        joinedAt: Date.now(),
-      };
-      const updatedWorkers = [...workers, newWorker];
-      await setDoc(doc(db, 'system_duties', 'credit_check'), {
-        workers: updatedWorkers,
-        updatedAt: Date.now(),
+      const dutyDocRef = doc(db, 'system_duties', 'credit_check');
+      await runTransaction(db, async (transaction) => {
+        const dutyDoc = await transaction.get(dutyDocRef);
+        const currentWorkers: DutyWorker[] = (dutyDoc.exists() && Array.isArray(dutyDoc.data().workers))
+          ? dutyDoc.data().workers
+          : [];
+
+        if (currentWorkers.some(w => w.uid === user.uid || w.username === user.username)) {
+          return;
+        }
+
+        if (currentWorkers.length >= 2) {
+          throw new Error('DUTY_FULL');
+        }
+
+        const newWorker: DutyWorker = {
+          uid: user.uid,
+          name: user.name,
+          username: user.username,
+          joinedAt: Date.now(),
+        };
+
+        transaction.set(dutyDocRef, {
+          workers: [...currentWorkers, newWorker],
+          updatedAt: Date.now(),
+        }, { merge: true });
       });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, 'system_duties/credit_check');
+    } catch (err: any) {
+      if (err.message === 'DUTY_FULL') {
+        alert('เจ้าหน้าที่งานเช็คเครดิตเต็มแล้ว (จำกัด 2 คนพร้อมกันเท่านั้น)');
+      } else {
+        handleFirestoreError(err, OperationType.UPDATE, 'system_duties/credit_check');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -100,10 +133,18 @@ export function CreditCheckDutyStation({ onStatusChange, compact = false }: Cred
 
     setIsProcessing(true);
     try {
-      const updatedWorkers = workers.filter(w => w.uid !== uidToRemove && w.username !== uidToRemove);
-      await setDoc(doc(db, 'system_duties', 'credit_check'), {
-        workers: updatedWorkers,
-        updatedAt: Date.now(),
+      const dutyDocRef = doc(db, 'system_duties', 'credit_check');
+      await runTransaction(db, async (transaction) => {
+        const dutyDoc = await transaction.get(dutyDocRef);
+        if (!dutyDoc.exists()) return;
+        const currentWorkers: DutyWorker[] = Array.isArray(dutyDoc.data().workers)
+          ? dutyDoc.data().workers
+          : [];
+        const updatedWorkers = currentWorkers.filter(w => w.uid !== uidToRemove && w.username !== uidToRemove);
+        transaction.update(dutyDocRef, {
+          workers: updatedWorkers,
+          updatedAt: Date.now(),
+        });
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, 'system_duties/credit_check');
