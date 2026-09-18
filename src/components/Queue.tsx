@@ -41,7 +41,8 @@ import {
   Lock,
   X,
   Moon,
-  LogOut
+  LogOut,
+  Building2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -53,7 +54,7 @@ import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { ReturnCaseModal } from './ReturnCaseModal';
 import { TransferCaseModal } from './TransferCaseModal';
 import { CloseCaseModal } from './CloseCaseModal';
-import { AgentSelect } from './AgentSelect';
+import { AgentSelect, AgentManagerModal } from './AgentSelect';
 import { getPreviousAssignee } from '../lib/caseUtils';
 import { DutyWorker, Case } from '../types';
 
@@ -265,6 +266,7 @@ export function Queue() {
   };
 
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showAgentManagerModal, setShowAgentManagerModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>('default');
 
@@ -700,6 +702,17 @@ export function Queue() {
             </button>
           )}
 
+          {/* Top Bar Action: View & Manage Agents directly */}
+          <button
+            type="button"
+            onClick={() => setShowAgentManagerModal(true)}
+            className="inline-flex items-center px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-xs transition cursor-pointer"
+            title="ดูรายชื่อตัวแทน เพิ่ม หรือจัดการตัวแทนในระบบ"
+          >
+            <Building2 className="w-3.5 h-3.5 mr-1.5 text-indigo-500" />
+            รายชื่อตัวแทน
+          </button>
+
           <button
             type="button"
             onClick={() => {
@@ -850,9 +863,6 @@ export function Queue() {
                   />
                   <StickyNote className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 </div>
-                <p className="text-[11px] font-bold text-red-600 dark:text-red-400 mt-1">
-                  * หมายเหตุ: คนเช็คเครดิต รับเคส คนสุดท้าย
-                </p>
               </div>
             </div>
 
@@ -1297,11 +1307,6 @@ export function Queue() {
                   placeholder="พิมพ์เหตุผลที่งานค้าง เช่น รอลูกค้าส่งเอกสารบัตรประชาชน, รอลูกค้าโอนเงินมัดจำภายใน 16:00 น...."
                   className="w-full px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white dark:focus:bg-slate-800 transition"
                 />
-                {/* Red Note */}
-                <div className="mt-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
-                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                  <span>หมายเหตุ: คนเช็คเครดิต รับเคส คนสุดท้าย</span>
-                </div>
                 {activeRemarkCase.remarksUpdatedBy && (
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
                     บันทึกล่าสุดโดย {activeRemarkCase.remarksUpdatedBy}
@@ -1474,6 +1479,18 @@ export function Queue() {
         />
       )}
 
+      {/* Agent Manager & Add Agent Modal (Direct from Header) */}
+      <AgentManagerModal
+        isOpen={showAgentManagerModal}
+        onClose={() => setShowAgentManagerModal(false)}
+        currentUser={user}
+        cases={cases}
+        currentSelectedAgent={formData.agentName}
+        onSelectAgent={(agentName) => {
+          setFormData((prev) => ({ ...prev, agentName }));
+        }}
+      />
+
       {/* Clock Out Confirmation Modal */}
       {user && (
         <ClockOutConfirmModal
@@ -1617,9 +1634,6 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                 แก้
               </button>
             </div>
-            <span className="text-[9px] font-bold text-red-600 dark:text-red-400 mt-1 pt-0.5 border-t border-amber-200/60 dark:border-amber-900/40 w-full">
-              * คนเช็คเครดิต รับเคส คนสุดท้าย
-            </span>
           </div>
         ) : (data.status === 'credit_check' || data.status === 'processing') && (
           <button
@@ -1918,9 +1932,6 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
                   แก้
                 </button>
               </div>
-              <div className="mt-1 pt-1 border-t border-amber-200/60 dark:border-amber-900/40 text-[10px] font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
-                <span>* คนเช็คเครดิต รับเคส คนสุดท้าย</span>
-              </div>
             </div>
           ) : (data.status === 'credit_check' || data.status === 'processing') && (
             <button
@@ -1972,11 +1983,6 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
       <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80">
         {data.status === 'pending' && (
           <div>
-            {!data.remarks && (
-              <div className="text-[10px] font-bold text-red-600 dark:text-red-400 text-center mb-1 flex items-center justify-center gap-1">
-                <span>* คนเช็คเครดิต รับเคส คนสุดท้าย</span>
-              </div>
-            )}
             <button
               type="button"
               onClick={onAccept}
@@ -2317,9 +2323,6 @@ const CaseCard: React.FC<CaseCardProps> = ({
             <p className="text-xs text-slate-800 dark:text-slate-200 font-medium leading-relaxed break-words whitespace-pre-wrap">
               {data.remarks}
             </p>
-            <div className="mt-1.5 pt-1.5 border-t border-amber-200/60 dark:border-amber-900/40 text-[11px] font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
-              <span>* คนเช็คเครดิต รับเคส คนสุดท้าย</span>
-            </div>
             {data.remarksUpdatedBy && (
               <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 flex items-center justify-between border-t border-amber-200/50 dark:border-amber-900/40 pt-1">
                 <span>บันทึกโดย: {data.remarksUpdatedBy}</span>
@@ -2347,11 +2350,6 @@ const CaseCard: React.FC<CaseCardProps> = ({
       <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
         {data.status === 'pending' ? (
           <div className="space-y-2">
-            {!data.remarks && (
-              <div className="text-xs font-bold text-red-600 dark:text-red-400 text-center flex items-center justify-center gap-1">
-                <span>* คนเช็คเครดิต รับเคส คนสุดท้าย</span>
-              </div>
-            )}
             <button
               type="button"
               onClick={onAccept}

@@ -35,7 +35,9 @@ service cloud.firestore {
 
     function isValidAgent(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
-             data.createdAt is number;
+             data.createdAt is number &&
+             (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128)) &&
+             (!('createdById' in data) || (data.createdById is string && data.createdById.size() <= 128));
     }
 
     match /users/{userId} {

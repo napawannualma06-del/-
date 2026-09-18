@@ -149,12 +149,6 @@ export const ReturnCaseModal: React.FC<ReturnCaseModalProps> = ({
             </div>
           </div>
 
-          {/* Red Warning Note */}
-          <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
-            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-            <span>หมายเหตุ: คนเช็คเครดิต รับเคส คนสุดท้าย</span>
-          </div>
-
           {/* Optional Return Reason */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">

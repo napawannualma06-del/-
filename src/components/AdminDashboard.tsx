@@ -944,9 +944,6 @@ export function AdminDashboard() {
                               งานค้าง / หมายเหตุ:
                             </span>
                             <p className="mt-0.5 break-words whitespace-pre-wrap leading-relaxed">{c.remarks}</p>
-                            <div className="text-[9px] font-bold text-red-600 dark:text-red-400 mt-1 pt-0.5 border-t border-amber-200/60 dark:border-amber-900/40">
-                              * คนเช็คเครดิต รับเคส คนสุดท้าย
-                            </div>
                           </div>
                         )}
                       </div>
@@ -1260,9 +1257,6 @@ export function AdminDashboard() {
                                       <span className="break-words whitespace-pre-wrap leading-relaxed">
                                         <strong>หมายเหตุ:</strong> {c.remarks}
                                       </span>
-                                    </div>
-                                    <div className="text-[9px] font-bold text-red-600 dark:text-red-400 mt-1 pt-0.5 border-t border-amber-200/60 dark:border-amber-900/40">
-                                      * คนเช็คเครดิต รับเคส คนสุดท้าย
                                     </div>
                                   </div>
                                 )}
