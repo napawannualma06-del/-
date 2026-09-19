@@ -248,7 +248,7 @@ export function Queue() {
   const isAdmin = isUserAdmin(user);
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'new' | 'pending' | 'stuck' | 'remarks' | 'mine' | 'closed' | 'cancelled'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'new' | 'pending' | 'in_progress' | 'stuck' | 'remarks' | 'mine' | 'closed' | 'cancelled'>('all');
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string | null>(null);
   const [showQueueClockOutModal, setShowQueueClockOutModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -658,27 +658,53 @@ export function Queue() {
 
   // Filter & Search Logic
   const filteredCases = cases.filter((c) => {
-    if (activeFilter === 'all') {
-      // 5. เคสทั้งหมดแสดงเฉพาะ เคสใหม่ เคสค้าง
-      const isNew = isNewCase(c);
-      const isStuck = isStuckCase(c) && c.status !== 'closed' && c.status !== 'cancelled';
-      if (!isNew && !isStuck) return false;
-    } else if (activeFilter === 'pending' || activeFilter === 'new') {
-      // 3. เคสใหม่: ยังไม่มีใครรับ
-      if (!isNewCase(c)) return false;
-    } else if (activeFilter === 'stuck' || activeFilter === 'remarks') {
-      // 2. เคสค้าง: ต้องมีคนเคยรับแล้ว
-      if (!isStuckCase(c) || c.status === 'closed' || c.status === 'cancelled') return false;
-    } else if (activeFilter === 'mine') {
-      if (c.assigneeId !== user?.uid || c.status === 'closed' || c.status === 'cancelled') return false;
-    } else if (activeFilter === 'closed') {
-      if (c.status !== 'closed') return false;
-    } else if (activeFilter === 'cancelled') {
-      if (c.status !== 'cancelled') return false;
-    }
-
     if (selectedEmployeeFilter) {
-      if (c.assigneeName !== selectedEmployeeFilter) return false;
+      // ตรวจสอบว่าเคสเป็นของพนักงานที่ถูกเลือกหรือไม่
+      const matchName = c.assigneeName === selectedEmployeeFilter;
+      const matchId = c.assigneeId === selectedEmployeeFilter;
+      const empUser = registeredUsers.find(
+        (u) => u.name === selectedEmployeeFilter || u.username === selectedEmployeeFilter || u.uid === selectedEmployeeFilter
+      );
+      const isEmployeeCase =
+        matchName ||
+        matchId ||
+        (empUser && (c.assigneeId === empUser.uid || c.assigneeName === empUser.name || c.assigneeName === empUser.username));
+
+      if (!isEmployeeCase) return false;
+
+      // กรองสถานะตามแท็บที่เลือกขณะระบุชื่อพนักงาน
+      if (activeFilter === 'closed') {
+        if (c.status !== 'closed') return false;
+      } else if (activeFilter === 'cancelled') {
+        if (c.status !== 'cancelled') return false;
+      } else if (activeFilter === 'in_progress') {
+        if ((c.status !== 'processing' && c.status !== 'credit_check') || c.status === 'closed' || c.status === 'cancelled') return false;
+      } else if (activeFilter === 'stuck' || activeFilter === 'remarks') {
+        if (!isStuckCase(c) || c.status === 'closed' || c.status === 'cancelled') return false;
+      } else {
+        // ค่าเริ่มต้นเมื่อกดเลือกดูเคสของพนักงานแต่ละคน: แสดงเคสที่กำลังทำอยู่/เคสค้างทั้งหมดของพนักงานท่านนั้น
+        if (c.status === 'closed' || c.status === 'cancelled') return false;
+      }
+    } else {
+      if (activeFilter === 'all') {
+        // เคสทั้งหมดที่ยังดำเนินการอยู่: เคสใหม่, กำลังทำ, เคสค้าง
+        if (c.status === 'closed' || c.status === 'cancelled') return false;
+      } else if (activeFilter === 'pending' || activeFilter === 'new') {
+        // เคสใหม่: ยังไม่มีใครรับ
+        if (!isNewCase(c)) return false;
+      } else if (activeFilter === 'in_progress') {
+        // เคสกำลังทำ: มีผู้รับเคสไปดำเนินการแล้ว
+        if ((c.status !== 'processing' && c.status !== 'credit_check') || c.status === 'closed' || c.status === 'cancelled') return false;
+      } else if (activeFilter === 'stuck' || activeFilter === 'remarks') {
+        // เคสค้าง: ต้องมีคนเคยรับแล้ว หรือมีโน้ตค้าง
+        if (!isStuckCase(c) || c.status === 'closed' || c.status === 'cancelled') return false;
+      } else if (activeFilter === 'mine') {
+        if (c.assigneeId !== user?.uid || c.status === 'closed' || c.status === 'cancelled') return false;
+      } else if (activeFilter === 'closed') {
+        if (c.status !== 'closed') return false;
+      } else if (activeFilter === 'cancelled') {
+        if (c.status !== 'cancelled') return false;
+      }
     }
 
     if (searchQuery.trim()) {
@@ -696,8 +722,8 @@ export function Queue() {
   });
 
   const newCount = cases.filter(c => isNewCase(c)).length;
+  const inProgressCount = cases.filter(c => (c.status === 'processing' || c.status === 'credit_check') && c.status !== 'closed' && c.status !== 'cancelled').length;
   const stuckCount = cases.filter(c => isStuckCase(c) && c.status !== 'closed' && c.status !== 'cancelled').length;
-  const allNewAndStuckCount = newCount + stuckCount;
   const myCount = cases.filter(c => c.assigneeId === user?.uid && c.status !== 'closed' && c.status !== 'cancelled').length;
   const closedCount = cases.filter(c => c.status === 'closed').length;
   const cancelledCount = cases.filter(c => c.status === 'cancelled').length;
@@ -794,7 +820,12 @@ export function Queue() {
       <SimpleEmployeeWorkload 
         cases={cases}
         selectedEmployeeName={selectedEmployeeFilter}
-        onSelectEmployee={(empName) => setSelectedEmployeeFilter(empName)}
+        onSelectEmployee={(empName) => {
+          setSelectedEmployeeFilter(empName);
+          if (empName && (activeFilter === 'pending' || activeFilter === 'new')) {
+            setActiveFilter('all');
+          }
+        }}
       />
 
       {/* CREATE CASE FORM MODAL / COLLAPSIBLE */}
@@ -940,7 +971,7 @@ export function Queue() {
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
-            ทั้งหมด ({allNewAndStuckCount})
+            ทั้งหมด ({allActiveCount})
           </button>
 
           {/* เคสใหม่ */}
@@ -961,6 +992,29 @@ export function Queue() {
                 activeFilter === 'pending' || activeFilter === 'new' ? "bg-white text-indigo-700 font-bold" : "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-medium"
               )}>
                 {newCount}
+              </span>
+            )}
+          </button>
+
+          {/* เคสกำลังทำ */}
+          <button
+            type="button"
+            onClick={() => setActiveFilter('in_progress')}
+            className={clsx(
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              activeFilter === 'in_progress'
+                ? "bg-amber-600 text-white shadow-xs"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            )}
+          >
+            <Clock className="w-3.5 h-3.5 mr-1 text-amber-500" />
+            กำลังทำ
+            {inProgressCount > 0 && (
+              <span className={clsx(
+                "ml-1.5 px-1.5 py-0.2 rounded-full text-[10px]",
+                activeFilter === 'in_progress' ? "bg-white text-amber-800 font-bold" : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium"
+              )}>
+                {inProgressCount}
               </span>
             )}
           </button>
