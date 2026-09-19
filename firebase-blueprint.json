@@ -112,9 +112,105 @@
         "completedAt": {
           "type": "number",
           "description": "Timestamp when case was closed"
+        },
+        "isStuck": {
+          "type": "boolean",
+          "description": "Whether case is marked as stuck/held"
+        },
+        "stuckAt": {
+          "type": "number",
+          "description": "Timestamp when case was marked stuck"
+        },
+        "stuckBy": {
+          "type": "string",
+          "description": "Name of user who marked case as stuck"
+        },
+        "stuckReason": {
+          "type": "string",
+          "description": "Required reason note why case is stuck"
         }
       },
       "required": ["agentName", "iphoneModel", "province", "status", "createdAt", "updatedAt"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "Real-time action log of what team members did",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Type of action performed"
+        },
+        "actorId": {
+          "type": "string",
+          "description": "User ID of actor"
+        },
+        "actorName": {
+          "type": "string",
+          "description": "Display name of actor"
+        },
+        "actorAvatarEmoji": {
+          "type": "string",
+          "description": "Emoji avatar of actor"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of action"
+        },
+        "caseId": {
+          "type": "string",
+          "description": "Associated case ID"
+        },
+        "iphoneModel": {
+          "type": "string",
+          "description": "Associated iPhone model"
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Timestamp of action"
+        }
+      },
+      "required": ["type", "actorId", "actorName", "description", "timestamp"]
+    },
+    "TeamChat": {
+      "title": "TeamChat",
+      "description": "Real-time team chat messages with mention support",
+      "type": "object",
+      "properties": {
+        "senderId": {
+          "type": "string",
+          "description": "User ID of sender"
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name of sender"
+        },
+        "senderUsername": {
+          "type": "string",
+          "description": "Username of sender"
+        },
+        "senderRole": {
+          "type": "string",
+          "description": "Role of sender"
+        },
+        "senderAvatarEmoji": {
+          "type": "string",
+          "description": "Emoji avatar of sender"
+        },
+        "text": {
+          "type": "string",
+          "description": "Message content"
+        },
+        "mentions": {
+          "type": "array",
+          "description": "List of tagged usernames"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp of message"
+        }
+      },
+      "required": ["senderId", "senderName", "text", "createdAt"]
     },
     "Agent": {
       "title": "Agent",
@@ -153,6 +249,14 @@
     "agents/{agentId}": {
       "schema": "Agent",
       "description": "List of agents for selection"
+    },
+    "activities/{activityId}": {
+      "schema": "Activity",
+      "description": "Real-time activity audit feed"
+    },
+    "team_chats/{messageId}": {
+      "schema": "TeamChat",
+      "description": "Real-time team chat messages"
     }
   }
 }

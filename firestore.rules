@@ -31,7 +31,11 @@ service cloud.firestore {
              (!('returnedBy' in data) || (data.returnedBy is string && data.returnedBy.size() <= 128)) &&
              (!('returnedById' in data) || (data.returnedById is string && data.returnedById.size() <= 128)) &&
              (!('returnedAt' in data) || (data.returnedAt is number)) &&
-             (!('returnedReason' in data) || (data.returnedReason is string && data.returnedReason.size() <= 500));
+             (!('returnedReason' in data) || (data.returnedReason is string && data.returnedReason.size() <= 500)) &&
+             (!('isStuck' in data) || (data.isStuck is bool)) &&
+             (!('stuckAt' in data) || (data.stuckAt is number)) &&
+             (!('stuckBy' in data) || (data.stuckBy is string && data.stuckBy.size() <= 128)) &&
+             (!('stuckReason' in data) || (data.stuckReason is string && data.stuckReason.size() <= 5000));
     }
 
     function isValidAgent(data) {
@@ -44,6 +48,28 @@ service cloud.firestore {
     function isValidDuty(data) {
       return (!('workers' in data) || data.workers is list) &&
              (!('updatedAt' in data) || data.updatedAt is number);
+    }
+
+    function isValidActivity(data) {
+      return data.type is string && data.type.size() <= 64 &&
+             data.actorId is string && data.actorId.size() <= 128 &&
+             data.actorName is string && data.actorName.size() <= 128 &&
+             data.description is string && data.description.size() <= 1000 &&
+             data.timestamp is number &&
+             (!('actorAvatarEmoji' in data) || (data.actorAvatarEmoji is string && data.actorAvatarEmoji.size() <= 64)) &&
+             (!('caseId' in data) || (data.caseId is string && data.caseId.size() <= 128)) &&
+             (!('iphoneModel' in data) || (data.iphoneModel is string && data.iphoneModel.size() <= 128));
+    }
+
+    function isValidTeamChat(data) {
+      return data.senderId is string && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() <= 128 &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 2000 &&
+             data.createdAt is number &&
+             (!('senderUsername' in data) || (data.senderUsername is string && data.senderUsername.size() <= 128)) &&
+             (!('senderRole' in data) || (data.senderRole is string && data.senderRole.size() <= 64)) &&
+             (!('senderAvatarEmoji' in data) || (data.senderAvatarEmoji is string && data.senderAvatarEmoji.size() <= 64)) &&
+             (!('mentions' in data) || (data.mentions is list && data.mentions.size() <= 20));
     }
 
     match /users/{userId} {
@@ -68,6 +94,18 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isValidDuty(incoming());
       allow delete: if false;
+    }
+
+    match /activities/{activityId} {
+      allow read: if true;
+      allow create: if isValidActivity(incoming());
+      allow update, delete: if false;
+    }
+
+    match /team_chats/{messageId} {
+      allow read: if true;
+      allow create: if isValidTeamChat(incoming());
+      allow update, delete: if false;
     }
   }
 }

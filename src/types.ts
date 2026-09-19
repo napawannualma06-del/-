@@ -55,8 +55,37 @@ export interface Case {
   returnedById?: string;
   returnedAt?: number;
   returnedReason?: string;
+  isStuck?: boolean;
+  stuckAt?: number;
+  stuckBy?: string;
+  stuckReason?: string;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
   cancelledAt?: number;
+}
+
+export interface ActivityLog {
+  id: string;
+  type: 'create_case' | 'accept_case' | 'stuck_case' | 'return_case' | 'transfer_case' | 'close_case' | 'contract_case' | 'remark_case' | 'cancel_case';
+  actorId: string;
+  actorName: string;
+  actorAvatarEmoji?: string;
+  description: string;
+  caseId?: string;
+  iphoneModel?: string;
+  contractNumber?: string;
+  timestamp: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderUsername: string;
+  senderRole: string;
+  senderAvatarEmoji?: string;
+  text: string;
+  mentions?: string[];
+  createdAt: number;
 }

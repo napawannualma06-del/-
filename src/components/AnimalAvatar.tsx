@@ -109,16 +109,16 @@ export function getAnimalProfile(
     };
   }
 
-  // 2. แอดมินสูงสุด (gametpl)
-  if (isAdmin || identifier?.toLowerCase() === 'gametpl' || identifier === 'admin_gametpl') {
+  // 2. คุณเกม (gametpl) - แสดงเป็นสิงโตธรรมดา ไม่เปิดเผยสถานะแอดมิน
+  if (identifier?.toLowerCase() === 'gametpl' || identifier === 'admin_gametpl') {
     return {
-      emoji: '👑🦁',
-      name: 'สิงโตเจ้าป่า (ผู้ดูแลระบบ)',
-      category: 'special',
-      bg: 'bg-amber-200',
-      darkBg: 'dark:bg-amber-900',
-      border: 'border-amber-400',
-      darkBorder: 'dark:border-amber-600',
+      emoji: '🦁',
+      name: 'สิงโตผู้กล้าหาญ',
+      category: 'wild',
+      bg: 'bg-amber-100',
+      darkBg: 'dark:bg-amber-950/60',
+      border: 'border-amber-300',
+      darkBorder: 'dark:border-amber-700',
     };
   }
 
@@ -218,11 +218,6 @@ export function AnimalAvatar({
       title={showTooltip ? tooltipText : undefined}
     >
       <span className="leading-none drop-shadow-2xs">{animal.emoji}</span>
-      {isAdmin && size !== 'xs' && (
-        <span className="absolute -top-1 -right-1 text-[9px] leading-none" title="ผู้ดูแลระบบ">
-          👑
-        </span>
-      )}
     </div>
   );
 }

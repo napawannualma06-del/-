@@ -150,7 +150,6 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
                 return (
                   <option key={u.uid} value={u.uid}>
                     {u.name} (@{u.username})
-                    {u.role === 'admin' ? ' 👑 [แอดมิน]' : ''}
                     {isOffWork ? ' • 🔴 [เลิกงานแล้ว]' : ' • 🟢 [เข้างานอยู่]'}
                     {isCurrent ? ' (ผู้รับผิดชอบปัจจุบัน)' : ''}
                   </option>

@@ -11,7 +11,7 @@ import {
   runTransaction 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useStore } from '../store/useStore';
+import { useStore, isUserAdmin } from '../store/useStore';
 import { 
   Clock, 
   CheckCircle2, 
@@ -36,14 +36,12 @@ import {
   ShieldCheck,
   UserCheck,
   ArrowRightLeft,
-  LayoutGrid,
-  Layers,
-  List,
   Lock,
   X,
   Moon,
   LogOut,
-  Building2
+  Building2,
+  PauseCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -55,11 +53,15 @@ import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { ReturnCaseModal } from './ReturnCaseModal';
 import { TransferCaseModal } from './TransferCaseModal';
 import { CloseCaseModal } from './CloseCaseModal';
+import { HoldCaseModal } from './HoldCaseModal';
+import { RecentActivityFeed } from './RecentActivityFeed';
 import { AgentSelect, AgentManagerModal } from './AgentSelect';
-import { getPreviousAssignee } from '../lib/caseUtils';
+import { getPreviousAssignee, isStuckCase, isNewCase } from '../lib/caseUtils';
 import { DutyWorker, Case } from '../types';
+import { logActivity } from '../lib/activityService';
 
 export type { Case };
+export { isStuckCase, isNewCase };
 
 export const statusMap: Record<Case['status'], { label: string; badgeClass: string; borderClass: string; stepNumber: number }> = {
   pending: {
@@ -243,28 +245,14 @@ function playNotificationChime() {
 
 export function Queue() {
   const { user, registeredUsers, clockIn } = useStore();
-  const isAdmin = user?.role === 'admin' && (user?.username?.toLowerCase() === 'gametpl' || user?.uid === 'admin_gametpl');
+  const isAdmin = isUserAdmin(user);
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'mine' | 'contract' | 'remarks' | 'closed' | 'cancelled'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'new' | 'pending' | 'stuck' | 'remarks' | 'mine' | 'closed' | 'cancelled'>('all');
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string | null>(null);
   const [showQueueClockOutModal, setShowQueueClockOutModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'row' | 'compact' | 'card'>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('qmanage_queue_view_mode');
-      if (saved === 'row' || saved === 'compact' || saved === 'card') return saved;
-      return 'compact';
-    }
-    return 'compact';
-  });
-
-  const toggleViewMode = (mode: 'row' | 'compact' | 'card') => {
-    setViewMode(mode);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('qmanage_queue_view_mode', mode);
-    }
-  };
+  const [viewMode] = useState<'row' | 'compact' | 'card'>('compact');
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [showAgentManagerModal, setShowAgentManagerModal] = useState(false);
@@ -300,10 +288,11 @@ export function Queue() {
   const [contractInput, setContractInput] = useState('');
   const [isSavingContract, setIsSavingContract] = useState(false);
 
-  // Reassign & Return Case Modals
+  // Reassign & Return & Hold Case Modals
   const [activeReassignCase, setActiveReassignCase] = useState<Case | null>(null);
   const [activeReturnCase, setActiveReturnCase] = useState<Case | null>(null);
   const [activeCloseCase, setActiveCloseCase] = useState<Case | null>(null);
+  const [activeHoldCase, setActiveHoldCase] = useState<Case | null>(null);
 
   const initialLoadRef = useRef(true);
 
@@ -516,7 +505,17 @@ export function Queue() {
         newCase.remarksUpdatedBy = user?.name || 'พนักงาน';
       }
 
-      await addDoc(collection(db, 'cases'), newCase);
+      const docRef = await addDoc(collection(db, 'cases'), newCase);
+      logActivity({
+        type: 'create_case',
+        actorId: user?.uid || 'unknown',
+        actorName: user?.name || 'พนักงาน',
+        actorAvatarEmoji: user?.avatarEmoji,
+        description: `เปิดเคสใหม่: ${formData.iphoneModel} (ตัวแทน: ${formData.agentName.trim()})`,
+        caseId: docRef.id,
+        iphoneModel: formData.iphoneModel,
+      }).catch(console.error);
+
       setFormData({
         agentName: '',
         iphoneModel: 'iPhone 17 Pro Max',
@@ -543,12 +542,14 @@ export function Queue() {
     }
     try {
       const caseRef = doc(db, 'cases', caseId);
+      let targetCaseData: Case | null = null;
       await runTransaction(db, async (transaction) => {
         const caseDoc = await transaction.get(caseRef);
         if (!caseDoc.exists()) {
           throw new Error('CASE_NOT_FOUND');
         }
         const currentData = caseDoc.data() as Case;
+        targetCaseData = { ...currentData, id: caseDoc.id };
         if (currentData.status !== 'pending') {
           throw new Error(`ALREADY_ACCEPTED:${currentData.assigneeName || 'พนักงานท่านอื่น'}`);
         }
@@ -556,9 +557,23 @@ export function Queue() {
           assigneeId: user.uid,
           assigneeName: user.name,
           status: 'processing', // สร้างเคส = เครดิตผ่านเลย เมื่อกดรับเคสจะเริ่มทำเคสทันที
+          isStuck: false,
           updatedAt: Date.now(),
         });
       });
+
+      if (targetCaseData) {
+        const c = targetCaseData as Case;
+        logActivity({
+          type: 'accept_case',
+          actorId: user.uid,
+          actorName: user.name,
+          actorAvatarEmoji: user.avatarEmoji,
+          description: `กดรับเคส ${c.iphoneModel} (ตัวแทน: ${c.agentName})`,
+          caseId,
+          iphoneModel: c.iphoneModel,
+        }).catch(console.error);
+      }
     } catch (error: any) {
       if (error?.message?.startsWith('ALREADY_ACCEPTED:')) {
         const takenBy = error.message.split(':')[1];
@@ -630,10 +645,10 @@ export function Queue() {
 
   const handleDeleteCase = async (caseId: string) => {
     if (!isAdmin) {
-      alert('เฉพาะผู้ดูแลระบบ (แอดมิน gametpl) เท่านั้นที่สามารถลบเคสได้');
+      alert('เฉพาะผู้ดูแลระบบเท่านั้นที่สามารถลบเคสได้');
       return;
     }
-    if (!window.confirm('คุณต้องการลบเคสนี้ออกจากระบบอย่างถาวรใช่หรือไม่? (สิทธิ์แอดมิน)')) return;
+    if (!window.confirm('คุณต้องการลบเคสนี้ออกจากระบบอย่างถาวรใช่หรือไม่?')) return;
     try {
       await deleteDoc(doc(db, 'cases', caseId));
     } catch (error) {
@@ -644,16 +659,18 @@ export function Queue() {
   // Filter & Search Logic
   const filteredCases = cases.filter((c) => {
     if (activeFilter === 'all') {
-      // เคสที่จบแล้วหรือยกเลิก ให้เอาออกจาก เคสทั้งหมด (สามารถดูได้ในแท็บ 'จบเคสแล้ว' และ 'ยกเลิกเคส')
-      if (c.status === 'closed' || c.status === 'cancelled') return false;
-    } else if (activeFilter === 'pending') {
-      if (c.status !== 'pending') return false;
+      // 5. เคสทั้งหมดแสดงเฉพาะ เคสใหม่ เคสค้าง
+      const isNew = isNewCase(c);
+      const isStuck = isStuckCase(c) && c.status !== 'closed' && c.status !== 'cancelled';
+      if (!isNew && !isStuck) return false;
+    } else if (activeFilter === 'pending' || activeFilter === 'new') {
+      // 3. เคสใหม่: ยังไม่มีใครรับ
+      if (!isNewCase(c)) return false;
+    } else if (activeFilter === 'stuck' || activeFilter === 'remarks') {
+      // 2. เคสค้าง: ต้องมีคนเคยรับแล้ว
+      if (!isStuckCase(c) || c.status === 'closed' || c.status === 'cancelled') return false;
     } else if (activeFilter === 'mine') {
       if (c.assigneeId !== user?.uid || c.status === 'closed' || c.status === 'cancelled') return false;
-    } else if (activeFilter === 'contract') {
-      if (!c.contractNumber || c.status === 'cancelled') return false;
-    } else if (activeFilter === 'remarks') {
-      if (!c.remarks || c.status === 'closed' || c.status === 'cancelled') return false;
     } else if (activeFilter === 'closed') {
       if (c.status !== 'closed') return false;
     } else if (activeFilter === 'cancelled') {
@@ -678,14 +695,13 @@ export function Queue() {
     return true;
   });
 
-  const allActiveCount = cases.filter(c => c.status !== 'closed' && c.status !== 'cancelled').length;
-  const pendingCount = cases.filter(c => c.status === 'pending').length;
+  const newCount = cases.filter(c => isNewCase(c)).length;
+  const stuckCount = cases.filter(c => isStuckCase(c) && c.status !== 'closed' && c.status !== 'cancelled').length;
+  const allNewAndStuckCount = newCount + stuckCount;
   const myCount = cases.filter(c => c.assigneeId === user?.uid && c.status !== 'closed' && c.status !== 'cancelled').length;
-  const contractCount = cases.filter(c => !!c.contractNumber && c.status !== 'cancelled').length;
-  const remarksCount = cases.filter(c => !!c.remarks && c.status !== 'closed' && c.status !== 'cancelled').length;
   const closedCount = cases.filter(c => c.status === 'closed').length;
   const cancelledCount = cases.filter(c => c.status === 'cancelled').length;
-  const activeCount = cases.filter(c => c.status !== 'closed' && c.status !== 'cancelled').length;
+  const allActiveCount = cases.filter(c => c.status !== 'closed' && c.status !== 'cancelled').length;
 
   if (loading) {
     return (
@@ -765,6 +781,9 @@ export function Queue() {
           </button>
         </div>
       </div>
+
+      {/* Real-time Activity Feed Banner & Modal */}
+      <RecentActivityFeed />
 
       {/* CREDIT CHECK DUTY STATION (Max 2 workers, only they can create cases) */}
       <CreditCheckDutyStation 
@@ -908,48 +927,73 @@ export function Queue() {
       )}
 
       {/* Filter Tabs & Search Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-2 sm:p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 bg-white dark:bg-slate-900 p-2 sm:p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
         {/* Filter Pills */}
-        <div className="flex items-center space-x-1 overflow-x-auto no-scrollbar max-w-full pb-1 sm:pb-0">
+        <div className="flex items-center flex-wrap gap-1 sm:gap-1.5">
           <button
             type="button"
             onClick={() => setActiveFilter('all')}
             className={clsx(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer",
               activeFilter === 'all'
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
-            เคสทั้งหมด ({allActiveCount})
+            ทั้งหมด ({allNewAndStuckCount})
           </button>
 
+          {/* เคสใหม่ */}
           <button
             type="button"
             onClick={() => setActiveFilter('pending')}
             className={clsx(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
-              activeFilter === 'pending'
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              activeFilter === 'pending' || activeFilter === 'new'
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
-            รอรับเคส
-            {pendingCount > 0 && (
+            เคสใหม่
+            {newCount > 0 && (
               <span className={clsx(
                 "ml-1.5 px-1.5 py-0.2 rounded-full text-[10px]",
-                activeFilter === 'pending' ? "bg-white text-indigo-700" : "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300"
+                activeFilter === 'pending' || activeFilter === 'new' ? "bg-white text-indigo-700 font-bold" : "bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-medium"
               )}>
-                {pendingCount}
+                {newCount}
               </span>
             )}
           </button>
 
+          {/* เคสค้าง */}
+          <button
+            type="button"
+            onClick={() => setActiveFilter('stuck')}
+            className={clsx(
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              activeFilter === 'stuck' || activeFilter === 'remarks'
+                ? "bg-amber-500 text-white shadow-xs"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            )}
+          >
+            <PauseCircle className="w-3.5 h-3.5 mr-1 text-amber-500" />
+            เคสค้าง
+            {stuckCount > 0 && (
+              <span className={clsx(
+                "ml-1.5 px-1.5 py-0.2 rounded-full text-[10px]",
+                activeFilter === 'stuck' || activeFilter === 'remarks' ? "bg-white text-amber-800 font-bold" : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium"
+              )}>
+                {stuckCount}
+              </span>
+            )}
+          </button>
+
+          {/* เคสของฉัน */}
           <button
             type="button"
             onClick={() => setActiveFilter('mine')}
             className={clsx(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
               activeFilter === 'mine'
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -959,64 +1003,19 @@ export function Queue() {
             {myCount > 0 && (
               <span className={clsx(
                 "ml-1.5 px-1.5 py-0.2 rounded-full text-[10px]",
-                activeFilter === 'mine' ? "bg-white text-indigo-700" : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300"
+                activeFilter === 'mine' ? "bg-white text-indigo-700 font-bold" : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-medium"
               )}>
                 {myCount}
               </span>
             )}
           </button>
 
-          {/* Contract Filter Tab */}
-          <button
-            type="button"
-            onClick={() => setActiveFilter('contract')}
-            className={clsx(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
-              activeFilter === 'contract'
-                ? "bg-blue-600 text-white shadow-xs"
-                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-            )}
-          >
-            <FileSignature className="w-3 h-3 mr-1 text-blue-500" />
-            มีเลขสัญญา
-            {contractCount > 0 && (
-              <span className={clsx(
-                "ml-1.5 px-1.5 py-0.2 rounded-full text-[10px]",
-                activeFilter === 'contract' ? "bg-white text-blue-800 font-bold" : "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
-              )}>
-                {contractCount}
-              </span>
-            )}
-          </button>
-
-          {/* Remarks / Stuck Cases Filter */}
-          <button
-            type="button"
-            onClick={() => setActiveFilter('remarks')}
-            className={clsx(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
-              activeFilter === 'remarks'
-                ? "bg-amber-500 text-white shadow-xs"
-                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-            )}
-          >
-            <StickyNote className="w-3 h-3 mr-1 text-amber-500" />
-            ติดหมายเหตุ/ค้าง
-            {remarksCount > 0 && (
-              <span className={clsx(
-                "ml-1.5 px-1.5 py-0.2 rounded-full text-[10px]",
-                activeFilter === 'remarks' ? "bg-white text-amber-800 font-bold" : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300"
-              )}>
-                {remarksCount}
-              </span>
-            )}
-          </button>
-
+          {/* จบเคสแล้ว */}
           <button
             type="button"
             onClick={() => setActiveFilter('closed')}
             className={clsx(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
               activeFilter === 'closed'
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1025,88 +1024,43 @@ export function Queue() {
             จบเคสแล้ว ({closedCount})
           </button>
 
-          {/* New Cancelled Status Filter Tab */}
+          {/* ยกเลิกเคส */}
           <button
             type="button"
             onClick={() => setActiveFilter('cancelled')}
             className={clsx(
-              "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
               activeFilter === 'cancelled'
                 ? "bg-rose-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
             <Ban className="w-3 h-3 mr-1 text-rose-500" />
-            ยกเลิกเคส
-            {cancelledCount > 0 && (
-              <span className={clsx(
-                "ml-1.5 px-1.5 py-0.2 rounded-full text-[10px]",
-                activeFilter === 'cancelled' ? "bg-white text-rose-700" : "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300"
-              )}>
-                {cancelledCount}
-              </span>
-            )}
+            ยกเลิก ({cancelledCount})
           </button>
         </div>
 
-        {/* Search & View Mode Switcher */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-          <div className="relative flex-1 sm:w-60">
-            <input
-              type="text"
-              placeholder="ค้นหาตัวแทน, รุ่น, จังหวัด..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-            />
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
-          </div>
-
-          {/* View Mode Toggle: Row vs Compact (2 Columns) vs Full Card */}
-          <div className="flex bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-xs font-semibold shrink-0 self-end sm:self-auto">
+        {/* Search Box - Clean & Right Aligned */}
+        <div className="relative w-full sm:w-56 md:w-64 shrink-0 sm:ml-auto">
+          <input
+            type="text"
+            placeholder="ค้นหาตัวแทน, รุ่น, จังหวัด..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
+            title="ค้นหาชื่อตัวแทน, รุ่นไอโฟน, เลขที่สัญญา, เบอร์โทร, จังหวัด"
+          />
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 pointer-events-none" />
+          {searchQuery && (
             <button
               type="button"
-              onClick={() => toggleViewMode('row')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg flex items-center transition cursor-pointer text-xs",
-                viewMode === 'row'
-                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
-              )}
-              title="มุมมองแบบแถว/บรรทัดเดียว (แสดงข้อมูลกระชับ เลื่อนดูได้รวดเร็ว)"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs px-1 py-0.5 rounded cursor-pointer"
+              title="ล้างคำค้นหา"
             >
-              <List className="w-3.5 h-3.5 mr-1 text-indigo-500" />
-              <span>แบบแถว</span>
+              ✕
             </button>
-            <button
-              type="button"
-              onClick={() => toggleViewMode('compact')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg flex items-center transition cursor-pointer text-xs",
-                viewMode === 'compact'
-                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
-              )}
-              title="มุมมองกะทัดรัด (2 คอลัมน์บนมือถือ ดูได้หลายเคส)"
-            >
-              <LayoutGrid className="w-3.5 h-3.5 mr-1 text-indigo-500" />
-              <span>การ์ดย่อ</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleViewMode('card')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg flex items-center transition cursor-pointer text-xs",
-                viewMode === 'card'
-                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"
-              )}
-              title="มุมมองการ์ดเต็ม"
-            >
-              <Layers className="w-3.5 h-3.5 mr-1 text-slate-500" />
-              <span>การ์ดเต็ม</span>
-            </button>
-          </div>
+          )}
         </div>
       </div>
 
@@ -1211,6 +1165,7 @@ export function Queue() {
               onOpenContract={handleOpenContract}
               onTakeOver={() => handleTakeOverCase(c.id)}
               onOpenReassign={() => handleOpenReassign(c)}
+              onOpenHoldModal={(target) => setActiveHoldCase(target)}
             />
           ))}
         </div>
@@ -1234,6 +1189,7 @@ export function Queue() {
               onOpenContract={handleOpenContract}
               onTakeOver={() => handleTakeOverCase(c.id)}
               onOpenReassign={() => handleOpenReassign(c)}
+              onOpenHoldModal={(target) => setActiveHoldCase(target)}
             />
           ))}
         </div>
@@ -1257,6 +1213,7 @@ export function Queue() {
               onOpenContract={handleOpenContract}
               onTakeOver={() => handleTakeOverCase(c.id)}
               onOpenReassign={() => handleOpenReassign(c)}
+              onOpenHoldModal={(target) => setActiveHoldCase(target)}
             />
           ))}
         </div>
@@ -1499,6 +1456,17 @@ export function Queue() {
         />
       )}
 
+      {/* HOLD CASE MODAL (Enforces Remarks and separates new vs stuck) */}
+      {activeHoldCase && (
+        <HoldCaseModal
+          isOpen={!!activeHoldCase}
+          onClose={() => setActiveHoldCase(null)}
+          caseData={activeHoldCase}
+          currentUser={user}
+          onSuccess={() => setActiveHoldCase(null)}
+        />
+      )}
+
       {/* Agent Manager & Add Agent Modal (Direct from Header) */}
       <AgentManagerModal
         isOpen={showAgentManagerModal}
@@ -1545,6 +1513,7 @@ interface CaseCardProps {
   onOpenContract: (c: Case) => void;
   onTakeOver: () => void;
   onOpenReassign: () => void;
+  onOpenHoldModal?: (c: Case) => void;
 }
 
 const RowCaseItem: React.FC<CaseCardProps> = ({
@@ -1562,16 +1531,23 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
   onOpenContract,
   onTakeOver,
   onOpenReassign,
+  onOpenHoldModal,
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
+  const isStuck = isStuckCase(data);
+  const isNew = isNewCase(data);
 
   return (
     <div className={clsx(
       "bg-white dark:bg-slate-900 rounded-xl border p-2 sm:p-2.5 transition hover:shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-2.5 text-xs",
-      statusInfo.borderClass,
+      data.status === 'pending'
+        ? isStuck
+          ? "border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10"
+          : "border-indigo-200 dark:border-indigo-800/60"
+        : statusInfo.borderClass,
       data.remarks ? "ring-1 ring-amber-400/40" : "",
       data.contractNumber ? "border-blue-200 dark:border-blue-900/60" : "",
       data.status === 'closed' ? "opacity-85 bg-slate-50/50 dark:bg-slate-900/50" : "",
@@ -1582,14 +1558,27 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
         {/* Status Badge */}
         <span className={clsx(
           "px-2 py-0.5 rounded-md text-[10px] sm:text-[11px] font-bold border flex items-center shrink-0 leading-tight",
-          statusInfo.badgeClass
+          data.status === 'pending'
+            ? isStuck
+              ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700"
+              : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800"
+            : statusInfo.badgeClass
         )}>
-          {data.status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />}
+          {data.status === 'pending' && isStuck && (
+            <PauseCircle className="w-3 h-3 mr-1 text-amber-600 dark:text-amber-400" />
+          )}
+          {data.status === 'pending' && isNew && (
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />
+          )}
           {data.status === 'credit_check' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-spin mr-1" />}
           {data.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />}
           {data.status === 'closed' && <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600 dark:text-emerald-400" />}
           {data.status === 'cancelled' && <Ban className="w-3 h-3 mr-1 text-rose-600 dark:text-rose-400" />}
-          {statusInfo.label}
+          {data.status === 'pending'
+            ? isStuck
+              ? 'เคสค้าง'
+              : 'เคสใหม่'
+            : statusInfo.label}
         </span>
 
         {/* Time */}
@@ -1700,7 +1689,12 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
           </div>
         ) : (
           <div className="flex flex-col items-start sm:items-end min-w-[95px]">
-            <span className="text-[10px] text-slate-400 italic">รอรับเคส</span>
+            <span className={clsx(
+              "text-[10px] font-semibold",
+              isStuck ? "text-amber-600 dark:text-amber-400" : "text-indigo-600 dark:text-indigo-400"
+            )}>
+              {isStuck ? 'เคสค้าง' : 'เคสใหม่'}
+            </span>
             {prevWorker && (
               <span
                 className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-900/60 px-1.5 py-0.5 rounded flex items-center gap-1 mt-0.5"
@@ -1720,10 +1714,22 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
               <button
                 type="button"
                 onClick={onAccept}
-                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition"
+                className={clsx(
+                  "px-3 py-1 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition",
+                  isStuck ? "bg-amber-600 hover:bg-amber-700" : "bg-indigo-600 hover:bg-indigo-700"
+                )}
               >
                 <Check className="w-3 h-3 mr-1" />
-                รับเคส
+                {isStuck ? 'รับเคสนี้ต่อ' : 'รับเคส'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
+                className="px-2 py-1 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
+                title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+              >
+                <PauseCircle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                <span>เคสค้าง</span>
               </button>
               <button
                 type="button"
@@ -1747,6 +1753,17 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                 >
                   <CheckCircle2 className="w-3 h-3 mr-1" />
                   จบเคส
+                </button>
+              )}
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
+                  className="px-2 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
+                  title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                >
+                  <PauseCircle className="w-3 h-3" />
+                  <span>เคสค้าง</span>
                 </button>
               )}
               {canManage && (
@@ -1845,16 +1862,23 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
   onOpenContract,
   onTakeOver,
   onOpenReassign,
+  onOpenHoldModal,
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
+  const isStuck = isStuckCase(data);
+  const isNew = isNewCase(data);
 
   return (
     <div className={clsx(
       "bg-white dark:bg-slate-900 rounded-xl shadow-2xs border p-2.5 sm:p-3 flex flex-col justify-between transition hover:shadow-xs",
-      statusInfo.borderClass,
+      data.status === 'pending'
+        ? isStuck
+          ? "border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10"
+          : "border-indigo-200 dark:border-indigo-800/60"
+        : statusInfo.borderClass,
       data.remarks ? "ring-1 ring-amber-400/40" : "",
       data.contractNumber ? "border-blue-200 dark:border-blue-900/60" : "",
       data.status === 'closed' ? "opacity-85 bg-slate-50/50 dark:bg-slate-900/50" : "",
@@ -1865,14 +1889,27 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
         <div className="flex items-center justify-between gap-1 mb-1.5">
           <span className={clsx(
             "px-1.5 py-0.5 rounded-md text-[10px] font-bold border flex items-center shrink-0 leading-none",
-            statusInfo.badgeClass
+            data.status === 'pending'
+              ? isStuck
+                ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700"
+                : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800"
+              : statusInfo.badgeClass
           )}>
-            {data.status === 'pending' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />}
+            {data.status === 'pending' && isStuck && (
+              <PauseCircle className="w-2.5 h-2.5 mr-0.5 text-amber-600 dark:text-amber-400" />
+            )}
+            {data.status === 'pending' && isNew && (
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />
+            )}
             {data.status === 'credit_check' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-spin mr-1" />}
             {data.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />}
             {data.status === 'closed' && <CheckCircle2 className="w-2.5 h-2.5 mr-0.5 text-emerald-600 dark:text-emerald-400" />}
             {data.status === 'cancelled' && <Ban className="w-2.5 h-2.5 mr-0.5 text-rose-600 dark:text-rose-400" />}
-            {statusInfo.label}
+            {data.status === 'pending'
+              ? isStuck
+                ? 'เคสค้าง'
+                : 'เคสใหม่'
+              : statusInfo.label}
           </span>
 
           <div className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 gap-1 font-mono">
@@ -1974,7 +2011,12 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
           </div>
         ) : (
           <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px]">
-            <span className="text-slate-400 italic">รอรับเคส</span>
+            <span className={clsx(
+              "font-semibold",
+              isStuck ? "text-amber-600 dark:text-amber-400" : "text-indigo-600 dark:text-indigo-400"
+            )}>
+              {isStuck ? 'เคสค้าง' : 'เคสใหม่'}
+            </span>
             {prevWorker && (
               <span
                 className="text-[9px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-900/60 px-1 py-0.5 rounded flex items-center gap-0.5 truncate max-w-[105px]"
@@ -2003,14 +2045,28 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
       <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80">
         {data.status === 'pending' && (
           <div>
-            <button
-              type="button"
-              onClick={onAccept}
-              className="w-full py-1.5 px-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition"
-            >
-              <Check className="w-3 h-3 mr-1" />
-              กดรับเคส
-            </button>
+            <div className="grid grid-cols-2 gap-1.5 mb-1">
+              <button
+                type="button"
+                onClick={onAccept}
+                className={clsx(
+                  "py-1.5 px-2 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition",
+                  isStuck ? "bg-amber-600 hover:bg-amber-700" : "bg-indigo-600 hover:bg-indigo-700"
+                )}
+              >
+                <Check className="w-3 h-3 mr-1" />
+                {isStuck ? 'รับต่อ' : 'รับเคส'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
+                className="py-1.5 px-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 rounded-lg text-xs font-semibold flex items-center justify-center cursor-pointer transition"
+                title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+              >
+                <PauseCircle className="w-3 h-3 mr-0.5 text-amber-600 dark:text-amber-400" />
+                <span>เคสค้าง</span>
+              </button>
+            </div>
             <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-slate-400">
               <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">+สัญญา</button>
               <button type="button" onClick={() => onOpenRemark(data)} className="hover:text-amber-600 cursor-pointer">+หมายเหตุ</button>
@@ -2038,7 +2094,16 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
             )}
 
             {canManage && (
-              <div className="grid grid-cols-2 gap-1">
+              <div className="grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
+                  className="py-1 px-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-bold flex items-center justify-center cursor-pointer transition whitespace-nowrap shadow-2xs"
+                  title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                >
+                  <PauseCircle className="w-2.5 h-2.5 mr-0.5 shrink-0" />
+                  <span>เคสค้าง</span>
+                </button>
                 <button
                   type="button"
                   onClick={onOpenReassign}
@@ -2122,16 +2187,23 @@ const CaseCard: React.FC<CaseCardProps> = ({
   onOpenContract,
   onTakeOver,
   onOpenReassign,
+  onOpenHoldModal,
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
+  const isStuck = isStuckCase(data);
+  const isNew = isNewCase(data);
 
   return (
     <div className={clsx(
       "bg-white dark:bg-slate-900 rounded-2xl shadow-xs border p-4 sm:p-5 flex flex-col justify-between transition hover:shadow-md",
-      statusInfo.borderClass,
+      data.status === 'pending'
+        ? isStuck
+          ? "border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10"
+          : "border-indigo-200 dark:border-indigo-800/60"
+        : statusInfo.borderClass,
       data.remarks ? "ring-1 ring-amber-400/30" : "",
       data.contractNumber ? "border-blue-200 dark:border-blue-900/60" : "",
       data.status === 'closed' ? "opacity-80 bg-slate-50/50 dark:bg-slate-900/50" : "",
@@ -2143,14 +2215,23 @@ const CaseCard: React.FC<CaseCardProps> = ({
           <div className="flex items-center gap-1.5">
             <span className={clsx(
               "px-2.5 py-1 rounded-lg text-xs font-semibold border flex items-center shrink-0",
-              statusInfo.badgeClass
+              data.status === 'pending'
+                ? isStuck
+                  ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700 font-bold"
+                  : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 font-bold"
+                : statusInfo.badgeClass
             )}>
-              {data.status === 'pending' && <Clock className="w-3 h-3 mr-1" />}
+              {data.status === 'pending' && isStuck && <PauseCircle className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400" />}
+              {data.status === 'pending' && isNew && <Clock className="w-3.5 h-3.5 mr-1 text-indigo-600 dark:text-indigo-400 animate-pulse" />}
               {data.status === 'credit_check' && <Search className="w-3 h-3 mr-1 text-blue-600 dark:text-blue-400" />}
               {data.status === 'processing' && <RefreshCw className="w-3 h-3 mr-1 text-amber-600 dark:text-amber-400 animate-spin" />}
               {data.status === 'closed' && <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600 dark:text-emerald-400" />}
               {data.status === 'cancelled' && <Ban className="w-3 h-3 mr-1 text-rose-600 dark:text-rose-400" />}
-              {statusInfo.label}
+              {data.status === 'pending'
+                ? isStuck
+                  ? 'เคสค้าง'
+                  : 'เคสใหม่'
+                : statusInfo.label}
             </span>
 
             {/* Contract Quick Badge in Header */}
@@ -2197,7 +2278,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
                   type="button"
                   onClick={onDelete}
                   className="ml-1.5 p-1 text-slate-300 dark:text-slate-600 hover:text-red-600 dark:hover:text-red-400 rounded transition cursor-pointer"
-                  title="ลบเคสนี้ (สิทธิ์แอดมิน gametpl)"
+                  title="ลบเคสนี้"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -2370,14 +2451,31 @@ const CaseCard: React.FC<CaseCardProps> = ({
       <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
         {data.status === 'pending' ? (
           <div className="space-y-2">
-            <button
-              type="button"
-              onClick={onAccept}
-              className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white text-xs font-bold shadow-sm shadow-indigo-200 dark:shadow-none transition flex items-center justify-center cursor-pointer"
-            >
-              <Check className="w-4 h-4 mr-1.5" />
-              กดรับเคสนี้ (เริ่มเช็คเครดิต)
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={onAccept}
+                className={clsx(
+                  "py-2.5 px-3 rounded-xl active:scale-[0.98] text-white text-xs font-bold shadow-sm transition flex items-center justify-center cursor-pointer",
+                  isStuck
+                    ? "bg-amber-600 hover:bg-amber-700 shadow-amber-200 dark:shadow-none"
+                    : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 dark:shadow-none"
+                )}
+              >
+                <Check className="w-4 h-4 mr-1.5" />
+                {isStuck ? 'รับเคสนี้ต่อ' : 'กดรับเคสนี้'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
+                className="py-2.5 px-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-xs font-bold transition flex items-center justify-center cursor-pointer shadow-2xs"
+                title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+              >
+                <PauseCircle className="w-4 h-4 mr-1.5 text-amber-600 dark:text-amber-400" />
+                <span>เคสค้าง</span>
+              </button>
+            </div>
             
             {/* Quick Contract on Pending */}
             <button
@@ -2535,7 +2633,16 @@ const CaseCard: React.FC<CaseCardProps> = ({
                         เสร็จสิ้น -&gt; จบเคส
                       </button>
 
-                      <div className="grid grid-cols-2 gap-1.5">
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
+                          className="py-1.5 px-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white text-xs font-bold transition flex items-center justify-center cursor-pointer whitespace-nowrap shadow-2xs"
+                          title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                        >
+                          <PauseCircle className="w-3.5 h-3.5 mr-1 shrink-0" />
+                          <span>เคสค้าง</span>
+                        </button>
                         <button
                           type="button"
                           onClick={onOpenReassign}

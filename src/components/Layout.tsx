@@ -5,6 +5,7 @@ import { Logo } from './Logo';
 import { AnimalAvatar } from './AnimalAvatar';
 import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { AvatarSelectorModal } from './AvatarSelectorModal';
+import { TeamChatBubble } from './TeamChatBubble';
 import { 
   LogOut, 
   BarChart3, 
@@ -191,22 +192,12 @@ export function Layout() {
                     >
                       ✏️
                     </span>
-                    {user?.role === 'admin' && (
-                      <span className="absolute -top-1.5 -left-1.5 text-[9px] sm:text-[11px] leading-none select-none filter drop-shadow">
-                        👑
-                      </span>
-                    )}
                   </div>
                   <div className="hidden lg:block text-left mr-2 shrink-0">
                     <div className="flex items-center space-x-1.5 whitespace-nowrap">
                       <span className="text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[110px] group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
                         {user?.name}
                       </span>
-                      {user?.role === 'admin' && (
-                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 whitespace-nowrap shrink-0">
-                          Admin
-                        </span>
-                      )}
                     </div>
                     <div className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center whitespace-nowrap">
                       <span>@{user?.username || 'member'}</span>
@@ -257,6 +248,9 @@ export function Layout() {
           }}
         />
       )}
+
+      {/* Real-time Team Chat Floating Bubble */}
+      {user && <TeamChatBubble />}
     </div>
   );
 }

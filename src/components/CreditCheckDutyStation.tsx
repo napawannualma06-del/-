@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useStore } from '../store/useStore';
+import { useStore, isUserAdmin } from '../store/useStore';
 import { DutyWorker, CreditCheckDuty } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { 
@@ -26,7 +26,7 @@ interface CreditCheckDutyStationProps {
 
 export function CreditCheckDutyStation({ onStatusChange, compact = false }: CreditCheckDutyStationProps) {
   const { user, clockIn } = useStore();
-  const isAdmin = user?.role === 'admin' && (user?.username?.toLowerCase() === 'gametpl' || user?.uid === 'admin_gametpl');
+  const isAdmin = isUserAdmin(user);
   const [workers, setWorkers] = useState<DutyWorker[]>([]);
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -275,9 +275,9 @@ export function CreditCheckDutyStation({ onStatusChange, compact = false }: Cred
                   type="button"
                   onClick={() => handleLeaveDuty(slot1.uid)}
                   className="text-[11px] text-rose-600 dark:text-rose-400 hover:underline font-medium cursor-pointer"
-                  title={isAdmin && slot1.uid !== user?.uid ? "ปลดพนักงานออกจากเวร (สิทธิ์แอดมิน)" : "ออกจากหน้าที่"}
+                  title={isAdmin && slot1.uid !== user?.uid ? "ปลดพนักงานออกจากเวร" : "ออกจากหน้าที่"}
                 >
-                  {slot1.uid === user?.uid ? 'สละหน้าที่' : 'ปลด (แอดมิน)'}
+                  {slot1.uid === user?.uid ? 'สละหน้าที่' : 'ปลดออก'}
                 </button>
               )
             ) : !isCurrentWorker && (
@@ -338,9 +338,9 @@ export function CreditCheckDutyStation({ onStatusChange, compact = false }: Cred
                   type="button"
                   onClick={() => handleLeaveDuty(slot2.uid)}
                   className="text-[11px] text-rose-600 dark:text-rose-400 hover:underline font-medium cursor-pointer"
-                  title={isAdmin && slot2.uid !== user?.uid ? "ปลดพนักงานออกจากเวร (สิทธิ์แอดมิน)" : "ออกจากหน้าที่"}
+                  title={isAdmin && slot2.uid !== user?.uid ? "ปลดพนักงานออกจากเวร" : "ออกจากหน้าที่"}
                 >
-                  {slot2.uid === user?.uid ? 'สละหน้าที่' : 'ปลด (แอดมิน)'}
+                  {slot2.uid === user?.uid ? 'สละหน้าที่' : 'ปลดออก'}
                 </button>
               )
             ) : !isCurrentWorker && (

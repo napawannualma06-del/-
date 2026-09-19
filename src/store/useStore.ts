@@ -9,7 +9,28 @@ export type { Role, WorkStatus, UserProfile };
 
 export const SUPER_ADMIN_USERNAME = 'gametpl';
 export const SUPER_ADMIN_PIN = 'gametpl';
-export const SUPER_ADMIN_NAME = 'คุณเกม (แอดมินสูงสุด)';
+export const SUPER_ADMIN_NAME = 'คุณเกม';
+
+export const isUserAdmin = (user?: { role?: string; username?: string; email?: string; name?: string; uid?: string } | null): boolean => {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const u = (user.username || '').trim().toLowerCase();
+  const e = (user.email || '').trim().toLowerCase();
+  const n = (user.name || '').trim().toLowerCase();
+  const id = (user.uid || '').trim().toLowerCase();
+  return (
+    u === 'gametpl' ||
+    u === 'napawan' ||
+    id === 'admin_gametpl' ||
+    id === 'admin_napawan' ||
+    n === 'gametpl' ||
+    n === 'napawan' ||
+    n.includes('napawan') ||
+    n.includes('นภวรรณ') ||
+    e.includes('napawan') ||
+    e.includes('gametpl')
+  );
+};
 
 let userDocUnsubscribe: (() => void) | null = null;
 let usersCollectionUnsubscribe: (() => void) | null = null;
@@ -133,23 +154,17 @@ export const useStore = create<AppState>((set, get) => ({
 
       docs.forEach((d) => {
         const data = d.data() as UserProfile;
-        const isGametpl = data.username?.toLowerCase() === SUPER_ADMIN_USERNAME || d.id === 'admin_gametpl';
-        const profile: UserProfile = isGametpl
-          ? {
-              ...data,
-              uid: d.id,
-              username: SUPER_ADMIN_USERNAME,
-              name: data.name || SUPER_ADMIN_NAME,
-              role: 'admin',
-              pin: SUPER_ADMIN_PIN,
-            }
-          : {
-              ...data,
-              uid: d.id,
-              role: 'employee',
-            };
+        const isAdmin = isUserAdmin({ ...data, uid: d.id });
+        const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
+        const profile: UserProfile = {
+          ...data,
+          uid: d.id,
+          name: cleanName || data.name || (isAdmin ? (data.username || 'Admin') : 'Employee'),
+          role: isAdmin ? 'admin' : 'employee',
+          ...(isAdmin && data.username?.toLowerCase() === SUPER_ADMIN_USERNAME ? { pin: SUPER_ADMIN_PIN } : {}),
+        };
 
-        if (isGametpl) {
+        if (isAdmin && (data.username?.toLowerCase() === SUPER_ADMIN_USERNAME || d.id === 'admin_gametpl')) {
           foundAdmin = true;
         }
         list.push(profile);
@@ -248,11 +263,13 @@ export const useStore = create<AppState>((set, get) => ({
           if (data.pin && data.pin !== cleanPin) {
             return { success: false, message: 'รหัสผ่านหรือ PIN ไม่ถูกต้อง' };
           }
-          // Only gametpl is admin
+          const isAdmin = isUserAdmin({ ...data, uid: directDoc.id, username: cleanUsername });
+          const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
           const profile: UserProfile = { 
             ...data, 
             uid: directDoc.id, 
-            role: 'employee' 
+            name: cleanName || data.name,
+            role: isAdmin ? 'admin' : 'employee' 
           };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
           set({ user: profile });
@@ -268,15 +285,19 @@ export const useStore = create<AppState>((set, get) => ({
         return { success: false, message: 'รหัสผ่านหรือ PIN ไม่ถูกต้อง' };
       }
 
-      // Only gametpl is admin
+      const isAdmin = isUserAdmin({ ...data, uid: userDoc.id, username: cleanUsername });
+      const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
       const profile: UserProfile = {
         ...data,
         uid: userDoc.id,
-        role: 'employee',
+        name: cleanName || data.name,
+        role: isAdmin ? 'admin' : 'employee',
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
       set({ user: profile });
+      setupUserSync(profile.uid, get, set);
+      return { success: true };
       setupUserSync(profile.uid, get, set);
       return { success: true };
     } catch (error) {
@@ -286,7 +307,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   registerEmployee: async (name: string, username: string, pin?: string) => {
-    const cleanName = name.trim();
+    const cleanName = name.trim().replace(/\(แอดมิน.*?\)/g, '').trim();
     const cleanUsername = username.trim().toLowerCase();
     const cleanPin = (pin || '').trim();
 
@@ -295,7 +316,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     if (cleanUsername === SUPER_ADMIN_USERNAME) {
-      return { success: false, message: 'ชื่อผู้ใช้ gametpl สงวนสิทธิ์สำหรับผู้ดูแลระบบ (แอดมิน) เท่านั้น กรุณาเข้าสู่ระบบ' };
+      return { success: false, message: 'ชื่อผู้ใช้ gametpl สงวนสิทธิ์สำหรับคุณเกม กรุณาเข้าสู่ระบบ' };
     }
 
     try {
@@ -308,12 +329,13 @@ export const useStore = create<AppState>((set, get) => ({
         return { success: false, message: 'ชื่อผู้ใช้/รหัสนี้มีอยู่ในระบบแล้ว กรุณาเข้าสู่ระบบ' };
       }
 
+      const isAdmin = isUserAdmin({ name: cleanName, username: cleanUsername });
       const profile: UserProfile = {
         uid: docId,
         name: cleanName,
         username: cleanUsername,
         pin: cleanPin,
-        role: 'employee',
+        role: isAdmin ? 'admin' : 'employee',
         createdAt: Date.now(),
       };
 
@@ -352,10 +374,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setUserDirectly: (profile: UserProfile) => {
-    const isSuperAdmin = profile.username?.toLowerCase() === SUPER_ADMIN_USERNAME || profile.uid === 'admin_gametpl';
+    const isAdmin = isUserAdmin(profile);
+    const cleanName = (profile.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
     const enforcedProfile: UserProfile = {
       ...profile,
-      role: isSuperAdmin ? 'admin' : 'employee'
+      name: cleanName || profile.name,
+      role: isAdmin ? 'admin' : 'employee'
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(enforcedProfile));
     set({ user: enforcedProfile });
@@ -371,6 +395,12 @@ export const useStore = create<AppState>((set, get) => ({
       const userDocRef = doc(db, 'users', googleUser.uid);
       const userDoc = await getDoc(userDocRef);
 
+      const isAdmin = isUserAdmin({
+        email: googleUser.email || '',
+        name: googleUser.displayName || '',
+        uid: googleUser.uid,
+      });
+
       let userProfile: UserProfile;
 
       if (!userDoc.exists()) {
@@ -378,15 +408,18 @@ export const useStore = create<AppState>((set, get) => ({
           uid: googleUser.uid,
           email: googleUser.email || '',
           username: (googleUser.email || '').split('@')[0] || 'user_' + googleUser.uid.substring(0, 5),
-          name: googleUser.displayName || 'พนักงาน Google',
-          role: role,
+          name: (googleUser.displayName || 'พนักงาน Google').replace(/\(แอดมิน.*?\)/g, '').trim(),
+          role: isAdmin ? 'admin' : role,
           createdAt: Date.now(),
         };
         await setDoc(userDocRef, userProfile);
       } else {
+        const data = userDoc.data() as UserProfile;
         userProfile = {
           uid: googleUser.uid,
-          ...(userDoc.data() as UserProfile),
+          ...data,
+          role: isAdmin ? 'admin' : (data.role || role),
+          name: (data.name || googleUser.displayName || 'พนักงาน Google').replace(/\(แอดมิน.*?\)/g, '').trim(),
         };
       }
 
@@ -519,11 +552,12 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           const parsed = JSON.parse(savedUserStr);
           if (parsed && parsed.uid && parsed.name) {
-            const isSuperAdmin = parsed.username?.toLowerCase() === SUPER_ADMIN_USERNAME || parsed.uid === 'admin_gametpl';
+            const isAdmin = isUserAdmin(parsed);
+            const cleanName = (parsed.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
             const enforcedProfile: UserProfile = {
               ...parsed,
-              role: isSuperAdmin ? 'admin' : 'employee',
-              name: isSuperAdmin ? SUPER_ADMIN_NAME : parsed.name,
+              role: isAdmin ? 'admin' : 'employee',
+              name: cleanName || (isAdmin ? SUPER_ADMIN_NAME : parsed.name),
             };
             set({ user: enforcedProfile, loading: false });
             setupUserSync(enforcedProfile.uid, get, set);

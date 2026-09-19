@@ -4,6 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Case, UserProfile } from '../types';
 import { CheckCircle2, X, AlertCircle, Smartphone, FileSignature, MapPin, Sparkles } from 'lucide-react';
 import { AnimalAvatar } from './AnimalAvatar';
+import { logActivity } from '../lib/activityService';
 
 interface CloseCaseModalProps {
   isOpen: boolean;
@@ -69,6 +70,19 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
       }
 
       await updateDoc(caseRef, updates);
+
+      // Log activity
+      await logActivity({
+        type: 'close_case',
+        actorId: currentUser?.uid || caseData.assigneeId || 'system',
+        actorName: currentUser?.name || caseData.assigneeName || 'พนักงาน',
+        actorAvatarEmoji: currentUser?.avatarEmoji,
+        description: `จบเคสสำเร็จ: ${caseData.iphoneModel} (สัญญา #${trimmedContract})`,
+        caseId: caseData.id,
+        iphoneModel: caseData.iphoneModel,
+        contractNumber: trimmedContract,
+      });
+
       onClose();
       onSuccess?.();
     } catch (error) {
