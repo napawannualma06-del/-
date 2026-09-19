@@ -56,12 +56,12 @@ import { CloseCaseModal } from './CloseCaseModal';
 import { HoldCaseModal } from './HoldCaseModal';
 import { RecentActivityFeed } from './RecentActivityFeed';
 import { AgentSelect, AgentManagerModal } from './AgentSelect';
-import { getPreviousAssignee, isStuckCase, isNewCase } from '../lib/caseUtils';
-import { DutyWorker, Case } from '../types';
+import { getPreviousAssignee, isStuckCase, isNewCase, isInProgressCase } from '../lib/caseUtils';
+import { DutyWorker, Case, UserProfile } from '../types';
 import { logActivity } from '../lib/activityService';
 
 export type { Case };
-export { isStuckCase, isNewCase };
+export { isStuckCase, isNewCase, isInProgressCase };
 
 export const statusMap: Record<Case['status'], { label: string; badgeClass: string; borderClass: string; stepNumber: number }> = {
   pending: {
@@ -678,9 +678,9 @@ export function Queue() {
       } else if (activeFilter === 'cancelled') {
         if (c.status !== 'cancelled') return false;
       } else if (activeFilter === 'in_progress') {
-        if ((c.status !== 'processing' && c.status !== 'credit_check') || c.status === 'closed' || c.status === 'cancelled') return false;
+        if (!isInProgressCase(c, registeredUsers)) return false;
       } else if (activeFilter === 'stuck' || activeFilter === 'remarks') {
-        if (!isStuckCase(c) || c.status === 'closed' || c.status === 'cancelled') return false;
+        if (!isStuckCase(c, registeredUsers) || c.status === 'closed' || c.status === 'cancelled') return false;
       } else {
         // ค่าเริ่มต้นเมื่อกดเลือกดูเคสของพนักงานแต่ละคน: แสดงเคสที่กำลังทำอยู่/เคสค้างทั้งหมดของพนักงานท่านนั้น
         if (c.status === 'closed' || c.status === 'cancelled') return false;
@@ -691,13 +691,13 @@ export function Queue() {
         if (c.status === 'closed' || c.status === 'cancelled') return false;
       } else if (activeFilter === 'pending' || activeFilter === 'new') {
         // เคสใหม่: ยังไม่มีใครรับ
-        if (!isNewCase(c)) return false;
+        if (!isNewCase(c, registeredUsers)) return false;
       } else if (activeFilter === 'in_progress') {
-        // เคสกำลังทำ: มีผู้รับเคสไปดำเนินการแล้ว
-        if ((c.status !== 'processing' && c.status !== 'credit_check') || c.status === 'closed' || c.status === 'cancelled') return false;
+        // เคสกำลังทำ: มีผู้รับเคสไปดำเนินการแล้วและยังไม่ออกงาน
+        if (!isInProgressCase(c, registeredUsers)) return false;
       } else if (activeFilter === 'stuck' || activeFilter === 'remarks') {
-        // เคสค้าง: ต้องมีคนเคยรับแล้ว หรือมีโน้ตค้าง
-        if (!isStuckCase(c) || c.status === 'closed' || c.status === 'cancelled') return false;
+        // เคสค้าง: ต้องเป็นเคสที่ถูกกดเคสค้าง หรือคนทำออกงานแล้ว
+        if (!isStuckCase(c, registeredUsers) || c.status === 'closed' || c.status === 'cancelled') return false;
       } else if (activeFilter === 'mine') {
         if (c.assigneeId !== user?.uid || c.status === 'closed' || c.status === 'cancelled') return false;
       } else if (activeFilter === 'closed') {
@@ -721,9 +721,9 @@ export function Queue() {
     return true;
   });
 
-  const newCount = cases.filter(c => isNewCase(c)).length;
-  const inProgressCount = cases.filter(c => (c.status === 'processing' || c.status === 'credit_check') && c.status !== 'closed' && c.status !== 'cancelled').length;
-  const stuckCount = cases.filter(c => isStuckCase(c) && c.status !== 'closed' && c.status !== 'cancelled').length;
+  const newCount = cases.filter(c => isNewCase(c, registeredUsers)).length;
+  const inProgressCount = cases.filter(c => isInProgressCase(c, registeredUsers)).length;
+  const stuckCount = cases.filter(c => isStuckCase(c, registeredUsers) && c.status !== 'closed' && c.status !== 'cancelled').length;
   const myCount = cases.filter(c => c.assigneeId === user?.uid && c.status !== 'closed' && c.status !== 'cancelled').length;
   const closedCount = cases.filter(c => c.status === 'closed').length;
   const cancelledCount = cases.filter(c => c.status === 'cancelled').length;
@@ -958,14 +958,14 @@ export function Queue() {
       )}
 
       {/* Filter Tabs & Search Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 bg-white dark:bg-slate-900 p-2 sm:p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-        {/* Filter Pills */}
-        <div className="flex items-center flex-wrap gap-1 sm:gap-1.5">
+      <div className="flex items-center justify-between gap-2 sm:gap-3 bg-white dark:bg-slate-900 p-2 sm:p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        {/* Filter Pills - Always strictly on 1 single line (flex-nowrap) */}
+        <div className="flex items-center flex-nowrap overflow-x-auto no-scrollbar gap-1 sm:gap-1.5 min-w-0 py-0.5">
           <button
             type="button"
             onClick={() => setActiveFilter('all')}
             className={clsx(
-              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition cursor-pointer",
               activeFilter === 'all'
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -979,7 +979,7 @@ export function Queue() {
             type="button"
             onClick={() => setActiveFilter('pending')}
             className={clsx(
-              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition flex items-center cursor-pointer",
               activeFilter === 'pending' || activeFilter === 'new'
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1001,7 +1001,7 @@ export function Queue() {
             type="button"
             onClick={() => setActiveFilter('in_progress')}
             className={clsx(
-              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition flex items-center cursor-pointer",
               activeFilter === 'in_progress'
                 ? "bg-amber-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1024,7 +1024,7 @@ export function Queue() {
             type="button"
             onClick={() => setActiveFilter('stuck')}
             className={clsx(
-              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition flex items-center cursor-pointer",
               activeFilter === 'stuck' || activeFilter === 'remarks'
                 ? "bg-amber-500 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1047,7 +1047,7 @@ export function Queue() {
             type="button"
             onClick={() => setActiveFilter('mine')}
             className={clsx(
-              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition flex items-center cursor-pointer",
               activeFilter === 'mine'
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1069,7 +1069,7 @@ export function Queue() {
             type="button"
             onClick={() => setActiveFilter('closed')}
             className={clsx(
-              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition flex items-center cursor-pointer",
               activeFilter === 'closed'
                 ? "bg-indigo-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1083,7 +1083,7 @@ export function Queue() {
             type="button"
             onClick={() => setActiveFilter('cancelled')}
             className={clsx(
-              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center cursor-pointer",
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition flex items-center cursor-pointer",
               activeFilter === 'cancelled'
                 ? "bg-rose-600 text-white shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1094,8 +1094,8 @@ export function Queue() {
           </button>
         </div>
 
-        {/* Search Box - Clean & Right Aligned */}
-        <div className="relative w-full sm:w-56 md:w-64 shrink-0 sm:ml-auto">
+        {/* Search Box - Clean & Right Aligned on same single row */}
+        <div className="relative w-36 sm:w-48 md:w-56 shrink-0 sm:ml-auto">
           <input
             type="text"
             placeholder="ค้นหาตัวแทน, รุ่น, จังหวัด..."
@@ -1208,6 +1208,7 @@ export function Queue() {
               data={c}
               currentUserId={user?.uid}
               isAdmin={isAdmin}
+              registeredUsers={registeredUsers}
               onAccept={() => handleAcceptCase(c.id)}
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
               onCloseCase={() => handleOpenCloseCase(c)}
@@ -1232,6 +1233,7 @@ export function Queue() {
               data={c}
               currentUserId={user?.uid}
               isAdmin={isAdmin}
+              registeredUsers={registeredUsers}
               onAccept={() => handleAcceptCase(c.id)}
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
               onCloseCase={() => handleOpenCloseCase(c)}
@@ -1256,6 +1258,7 @@ export function Queue() {
               data={c}
               currentUserId={user?.uid}
               isAdmin={isAdmin}
+              registeredUsers={registeredUsers}
               onAccept={() => handleAcceptCase(c.id)}
               onUpdateStatus={(status) => handleUpdateStatus(c.id, status)}
               onCloseCase={() => handleOpenCloseCase(c)}
@@ -1556,6 +1559,7 @@ interface CaseCardProps {
   data: Case;
   currentUserId?: string;
   isAdmin?: boolean;
+  registeredUsers?: UserProfile[];
   onAccept: () => void;
   onUpdateStatus: (status: 'processing' | 'closed') => void;
   onCloseCase?: () => void;
@@ -1574,6 +1578,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
   data,
   currentUserId,
   isAdmin = false,
+  registeredUsers,
   onAccept,
   onUpdateStatus,
   onCloseCase,
@@ -1591,8 +1596,8 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
-  const isStuck = isStuckCase(data);
-  const isNew = isNewCase(data);
+  const isStuck = isStuckCase(data, registeredUsers);
+  const isNew = isNewCase(data, registeredUsers);
 
   return (
     <div className={clsx(
@@ -1905,6 +1910,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
   data,
   currentUserId,
   isAdmin = false,
+  registeredUsers,
   onAccept,
   onUpdateStatus,
   onCloseCase,
@@ -1922,8 +1928,8 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
-  const isStuck = isStuckCase(data);
-  const isNew = isNewCase(data);
+  const isStuck = isStuckCase(data, registeredUsers);
+  const isNew = isNewCase(data, registeredUsers);
 
   return (
     <div className={clsx(
@@ -2230,6 +2236,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
   data,
   currentUserId,
   isAdmin = false,
+  registeredUsers,
   onAccept,
   onUpdateStatus,
   onCloseCase,
@@ -2247,8 +2254,8 @@ const CaseCard: React.FC<CaseCardProps> = ({
   const canManage = isAssignee || isAdmin;
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
-  const isStuck = isStuckCase(data);
-  const isNew = isNewCase(data);
+  const isStuck = isStuckCase(data, registeredUsers);
+  const isNew = isNewCase(data, registeredUsers);
 
   return (
     <div className={clsx(

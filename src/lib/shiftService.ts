@@ -94,8 +94,17 @@ export async function clockOutEmployee(
         
         const updatePayload: Record<string, unknown> = {
           status: 'pending',
+          isStuck: true,
           assigneeId: '',
           assigneeName: '',
+          previousAssigneeName: caseData.assigneeName || employeeName || '',
+          previousAssigneeId: caseData.assigneeId || employeeId || '',
+          stuckAt: now,
+          stuckBy: employeeName || 'พนักงานเลิกงาน',
+          stuckReason: 'พนักงานออกงาน/เลิกงาน',
+          returnedAt: now,
+          returnedBy: employeeName || 'พนักงานเลิกงาน',
+          returnedReason: 'พนักงานออกงาน/เลิกงาน',
           updatedAt: now,
           remarks: safeRemarks,
           remarksUpdatedAt: now,

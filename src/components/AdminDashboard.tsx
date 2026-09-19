@@ -219,9 +219,9 @@ export function AdminDashboard() {
   const contractedCases = filteredCases.filter(c => !!c.contractNumber?.trim());
   
   // Separated New vs Stuck cases
-  const stuckCases = filteredCases.filter(c => isStuckCase(c) && c.status !== 'closed' && c.status !== 'cancelled');
-  const newCases = filteredCases.filter(c => isNewCase(c));
-  const totalNewAndStuckCases = filteredCases.filter(c => (isStuckCase(c) || isNewCase(c)) && c.status !== 'closed' && c.status !== 'cancelled');
+  const stuckCases = filteredCases.filter(c => isStuckCase(c, employees) && c.status !== 'closed' && c.status !== 'cancelled');
+  const newCases = filteredCases.filter(c => isNewCase(c, employees));
+  const totalNewAndStuckCases = filteredCases.filter(c => (isStuckCase(c, employees) || isNewCase(c, employees)) && c.status !== 'closed' && c.status !== 'cancelled');
 
   // Merge registered employees with any assignee found in cases
   const employeeMap: Record<string, EmployeeProfile> = {};
