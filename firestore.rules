@@ -66,10 +66,10 @@ service cloud.firestore {
              data.senderName is string && data.senderName.size() <= 128 &&
              data.text is string && data.text.size() > 0 && data.text.size() <= 2000 &&
              data.createdAt is number &&
-             (!('senderUsername' in data) || (data.senderUsername is string && data.senderUsername.size() <= 128)) &&
-             (!('senderRole' in data) || (data.senderRole is string && data.senderRole.size() <= 64)) &&
-             (!('senderAvatarEmoji' in data) || (data.senderAvatarEmoji is string && data.senderAvatarEmoji.size() <= 64)) &&
-             (!('mentions' in data) || (data.mentions is list && data.mentions.size() <= 20));
+             (!('senderUsername' in data) || data.senderUsername == null || (data.senderUsername is string && data.senderUsername.size() <= 128)) &&
+             (!('senderRole' in data) || data.senderRole == null || (data.senderRole is string && data.senderRole.size() <= 64)) &&
+             (!('senderAvatarEmoji' in data) || data.senderAvatarEmoji == null || (data.senderAvatarEmoji is string && data.senderAvatarEmoji.size() <= 64)) &&
+             (!('mentions' in data) || data.mentions == null || (data.mentions is list && data.mentions.size() <= 20));
     }
 
     match /users/{userId} {

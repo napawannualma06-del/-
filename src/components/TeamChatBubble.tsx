@@ -14,7 +14,9 @@ import {
   Sparkles, 
   Users, 
   Minimize2,
-  Bell
+  Bell,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -23,7 +25,7 @@ import { clsx } from 'clsx';
 const QUICK_EMOJIS = ['👍', '👌', '🙏', '🎉', '❤️', '🔥', 'รับทราบครับ', 'รับทราบค่ะ'];
 
 export const TeamChatBubble: React.FC = () => {
-  const { user, registeredUsers } = useStore();
+  const { user, registeredUsers, userAvatars } = useStore();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
@@ -32,6 +34,8 @@ export const TeamChatBubble: React.FC = () => {
   const [mentionFilter, setMentionFilter] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -133,37 +137,69 @@ export const TeamChatBubble: React.FC = () => {
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!user) return;
+    if (isSending) return;
+
+    if (!user) {
+      setErrorMessage('กรุณาเข้าสู่ระบบก่อนส่งข้อความ');
+      return;
+    }
+
     const trimmed = inputText.trim();
     if (!trimmed) return;
 
     // Detect mentions in text: @Name or @username
     const mentions: string[] = [];
     registeredUsers.forEach((u) => {
-      if (trimmed.includes(`@${u.name}`) || trimmed.includes(`@${u.username}`)) {
-        mentions.push(u.username);
+      const uName = (u.name || '').trim();
+      const uUsername = (u.username || '').trim();
+      if (uUsername && (trimmed.includes(`@${uName}`) || trimmed.includes(`@${uUsername}`))) {
+        mentions.push(uUsername);
       }
     });
 
-    const payload: Omit<ChatMessage, 'id'> = {
-      senderId: user.uid,
-      senderName: user.name,
-      senderUsername: user.username,
-      senderRole: user.role,
-      senderAvatarEmoji: user.avatarEmoji,
+    // Sanitize user fields to ensure no undefined values are passed to Firestore
+    const currentName = (user.name || '').replace(/\(แอดมิน.*?\)/g, '').trim() || 'พนักงาน';
+    const currentUid = (user.uid || '').trim() || ('emp_' + (user.username || Date.now()));
+    const currentUsername = (user.username || currentName).toLowerCase().trim();
+    const currentRole = (user.role || 'employee').trim();
+    
+    // Resolve avatar emoji from profile or store cache
+    const storeEmoji = userAvatars ? (
+      (currentUid ? (userAvatars[currentUid] || userAvatars[currentUid.toLowerCase()]) : undefined) ||
+      (currentUsername ? userAvatars[currentUsername] : undefined) ||
+      (currentName ? userAvatars[currentName.toLowerCase()] : undefined)
+    ) : undefined;
+    const resolvedEmoji = (user.avatarEmoji || storeEmoji || '').trim();
+
+    // Strictly valid payload without any undefined or null keys
+    const payload: Record<string, any> = {
+      senderId: currentUid,
+      senderName: currentName,
+      senderUsername: currentUsername,
+      senderRole: currentRole,
       text: trimmed,
-      mentions,
+      mentions: mentions,
       createdAt: Date.now(),
     };
 
-    setInputText('');
-    setShowMentionList(false);
-    setShowEmojiPicker(false);
+    // Only include senderAvatarEmoji if it is a non-empty string
+    if (resolvedEmoji) {
+      payload.senderAvatarEmoji = resolvedEmoji;
+    }
+
+    setIsSending(true);
+    setErrorMessage(null);
 
     try {
       await addDoc(collection(db, 'team_chats'), payload);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'team_chats');
+      setInputText('');
+      setShowMentionList(false);
+      setShowEmojiPicker(false);
+    } catch (error: any) {
+      console.error('Failed to send team chat message:', error);
+      setErrorMessage('ไม่สามารถส่งข้อความได้: ' + (error?.message || 'ข้อผิดพลาดระบบ'));
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -441,6 +477,46 @@ export const TeamChatBubble: React.FC = () => {
 
           {/* Input Form */}
           <div className="p-2.5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shrink-0">
+            {/* Sender indicator */}
+            <div className="flex items-center justify-between gap-1 text-[11px] text-slate-500 dark:text-slate-400 px-1 mb-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[10px] text-slate-400">ส่งในชื่อ:</span>
+                {user ? (
+                  <div className="flex items-center gap-1 font-semibold text-slate-700 dark:text-slate-200 truncate">
+                    <AnimalAvatar 
+                      identifier={user.uid} 
+                      name={user.name} 
+                      avatarEmoji={user.avatarEmoji} 
+                      size="xs" 
+                      showTooltip={false} 
+                    />
+                    <span className="truncate">{user.name}</span>
+                  </div>
+                ) : (
+                  <span className="text-rose-500 font-bold text-[10px]">ยังไม่ได้เข้าสู่ระบบ</span>
+                )}
+              </div>
+              <span className="shrink-0 text-[10px] text-slate-400">
+                {isSending ? 'กำลังส่ง...' : 'กด Enter เพื่อส่ง'}
+              </span>
+            </div>
+
+            {errorMessage && (
+              <div className="mb-2 px-2 py-1 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-lg text-rose-700 dark:text-rose-300 text-[11px] flex items-center justify-between gap-1">
+                <div className="flex items-center gap-1 min-w-0 truncate">
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <span className="truncate">{errorMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setErrorMessage(null)}
+                  className="text-rose-400 hover:text-rose-600 dark:hover:text-rose-200 text-xs px-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center gap-1.5 mb-1.5">
               <button
                 type="button"
@@ -465,10 +541,6 @@ export const TeamChatBubble: React.FC = () => {
                 <Smile className="w-3 h-3 text-amber-500" />
                 <span>อีโมจิ</span>
               </button>
-
-              <span className="text-[10px] text-slate-400 ml-auto">
-                กด Enter เพื่อส่ง
-              </span>
             </div>
 
             <form onSubmit={handleSendMessage} className="flex items-end gap-1.5">
@@ -477,18 +549,19 @@ export const TeamChatBubble: React.FC = () => {
                 value={inputText}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder="พิมพ์ข้อความ... หรือพิมพ์ @ เพื่อแท็กเพื่อน"
+                disabled={isSending || !user}
+                placeholder={user ? "พิมพ์ข้อความ... หรือพิมพ์ @ เพื่อแท็กเพื่อน" : "กรุณาเข้าสู่ระบบก่อนส่งข้อความ"}
                 rows={1}
-                className="flex-1 px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none max-h-20"
+                className="flex-1 px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none max-h-20 disabled:opacity-60"
               />
 
               <button
                 type="submit"
-                disabled={!inputText.trim()}
-                className="p-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl shadow-xs transition disabled:opacity-40 disabled:pointer-events-none cursor-pointer shrink-0"
+                disabled={!inputText.trim() || isSending || !user}
+                className="p-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl shadow-xs transition disabled:opacity-40 disabled:pointer-events-none cursor-pointer shrink-0 flex items-center justify-center"
                 title="ส่งข้อความ"
               >
-                <Send className="w-4 h-4" />
+                {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </button>
             </form>
           </div>
