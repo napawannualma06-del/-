@@ -243,6 +243,22 @@
         }
       },
       "required": ["name", "createdAt"]
+    },
+    "VoiceRoom": {
+      "title": "VoiceRoom",
+      "description": "Discord-like voice channel for discussing cases or team topics",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "caseId": { "type": "string" },
+        "category": { "type": "string" },
+        "createdById": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "isClosed": { "type": "boolean" }
+      },
+      "required": ["name", "createdById", "createdByName", "createdAt"]
     }
   },
   "firestore": {
@@ -265,6 +281,10 @@
     "team_chats/{messageId}": {
       "schema": "TeamChat",
       "description": "Real-time team chat messages"
+    },
+    "voice_rooms/{roomId}": {
+      "schema": "VoiceRoom",
+      "description": "Voice chat rooms"
     }
   }
 }
