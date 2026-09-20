@@ -11,8 +11,6 @@ import { Queue } from './components/Queue';
 import { AdminDashboard } from './components/AdminDashboard';
 import { Layout } from './components/Layout';
 
-import { VoiceChatProvider } from './context/VoiceChatContext';
-
 export default function App() {
   const { initAuth, user, loading } = useStore();
 
@@ -29,17 +27,15 @@ export default function App() {
   }
 
   return (
-    <VoiceChatProvider>
-      <HashRouter>
-        <Routes>
-          <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
-          
-          <Route element={user ? <Layout /> : <Navigate to="/login" />}>
-            <Route path="/" element={<Queue />} />
-            <Route path="/admin" element={<AdminDashboard />} />
-          </Route>
-        </Routes>
-      </HashRouter>
-    </VoiceChatProvider>
+    <HashRouter>
+      <Routes>
+        <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
+        
+        <Route element={user ? <Layout /> : <Navigate to="/login" />}>
+          <Route path="/" element={<Queue />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+        </Route>
+      </Routes>
+    </HashRouter>
   );
 }

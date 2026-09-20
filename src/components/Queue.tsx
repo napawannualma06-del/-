@@ -8,14 +8,10 @@ import {
   deleteDoc, 
   doc, 
   orderBy,
-  runTransaction,
-  where,
-  getDocs
+  runTransaction 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
-import { useVoiceChat } from '../context/VoiceChatContext';
-import { VoiceRoom } from '../types/voice';
 import { 
   Clock, 
   CheckCircle2, 
@@ -50,8 +46,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
-  ChevronsRight,
-  Volume2
+  ChevronsRight
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -262,7 +257,6 @@ function playNotificationChime() {
 export function Queue() {
   const { user, registeredUsers, clockIn } = useStore();
   const isAdmin = isUserAdmin(user);
-  const { joinRoom } = useVoiceChat();
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | 'new' | 'pending' | 'in_progress' | 'stuck' | 'remarks' | 'mine' | 'closed' | 'cancelled'>('all');
@@ -307,39 +301,6 @@ export function Queue() {
   const [activeRemarkCase, setActiveRemarkCase] = useState<Case | null>(null);
   const [remarkInput, setRemarkInput] = useState('');
   const [isSavingRemark, setIsSavingRemark] = useState(false);
-
-  // Voice Chat for specific case
-  const handleStartCaseVoice = async (caseItem: Case) => {
-    try {
-      const q = query(
-        collection(db, 'voice_rooms'),
-        where('caseId', '==', caseItem.id),
-        where('isClosed', '!=', true)
-      );
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const d = snap.docs[0];
-        await joinRoom({ id: d.id, ...d.data() } as VoiceRoom);
-        return;
-      }
-
-      const newRoomData = {
-        name: `คุยเคส ${caseItem.agentName} (${caseItem.iphoneModel})`,
-        category: 'case' as const,
-        caseId: caseItem.id,
-        description: `เคส: ${caseItem.agentName} | รุ่น: ${caseItem.iphoneModel} | สถานะ: ${caseItem.status}`,
-        createdById: user?.uid || 'anonymous',
-        createdByName: user?.name || 'พนักงาน',
-        createdAt: Date.now(),
-        participantCount: 0,
-        isClosed: false,
-      };
-      const docRef = await addDoc(collection(db, 'voice_rooms'), newRoomData);
-      await joinRoom({ id: docRef.id, ...newRoomData } as VoiceRoom);
-    } catch (err) {
-      console.error('Error starting case voice room:', err);
-    }
-  };
 
   // Contract Modal State (Add/Edit contract at any time after acceptance)
   const [activeContractCase, setActiveContractCase] = useState<Case | null>(null);
@@ -1369,7 +1330,6 @@ export function Queue() {
               onTakeOver={() => handleTakeOverCase(c.id)}
               onOpenReassign={() => handleOpenReassign(c)}
               onOpenHoldModal={(target) => setActiveHoldCase(target)}
-              onStartVoiceChat={handleStartCaseVoice}
             />
           ))}
         </div>
@@ -1395,7 +1355,6 @@ export function Queue() {
               onTakeOver={() => handleTakeOverCase(c.id)}
               onOpenReassign={() => handleOpenReassign(c)}
               onOpenHoldModal={(target) => setActiveHoldCase(target)}
-              onStartVoiceChat={handleStartCaseVoice}
             />
           ))}
         </div>
@@ -1421,7 +1380,6 @@ export function Queue() {
               onTakeOver={() => handleTakeOverCase(c.id)}
               onOpenReassign={() => handleOpenReassign(c)}
               onOpenHoldModal={(target) => setActiveHoldCase(target)}
-              onStartVoiceChat={handleStartCaseVoice}
             />
           ))}
         </div>
@@ -1883,7 +1841,6 @@ interface CaseCardProps {
   onTakeOver: () => void;
   onOpenReassign: () => void;
   onOpenHoldModal?: (c: Case) => void;
-  onStartVoiceChat?: (c: Case) => void;
 }
 
 const RowCaseItem: React.FC<CaseCardProps> = ({
@@ -1903,7 +1860,6 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
   onTakeOver,
   onOpenReassign,
   onOpenHoldModal,
-  onStartVoiceChat,
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
@@ -2220,17 +2176,6 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
             </button>
           )}
 
-          {onStartVoiceChat && (
-            <button
-              type="button"
-              onClick={() => onStartVoiceChat(data)}
-              className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded transition cursor-pointer"
-              title="เปิดห้องคุยเสียงเคสนี้ (Discord Voice)"
-            >
-              <Volume2 className="w-3.5 h-3.5" />
-            </button>
-          )}
-
           {isAdmin && (
             <button
               type="button"
@@ -2264,7 +2209,6 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
   onTakeOver,
   onOpenReassign,
   onOpenHoldModal,
-  onStartVoiceChat,
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
@@ -2318,16 +2262,6 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
             className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 gap-1 font-mono shrink-0 whitespace-nowrap"
             title={format(data.createdAt, 'd MMMM yyyy HH:mm:ss น.', { locale: th })}
           >
-            {onStartVoiceChat && (
-              <button
-                type="button"
-                onClick={() => onStartVoiceChat(data)}
-                className="p-0.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded transition cursor-pointer"
-                title="เปิดห้องคุยเสียงเคสนี้ (Discord Voice)"
-              >
-                <Volume2 className="w-3 h-3" />
-              </button>
-            )}
             <span>{format(data.createdAt, 'd MMM HH:mm น.', { locale: th })}</span>
             {isAdmin && (
               <button
@@ -2618,7 +2552,6 @@ const CaseCard: React.FC<CaseCardProps> = ({
   onTakeOver,
   onOpenReassign,
   onOpenHoldModal,
-  onStartVoiceChat,
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
@@ -2698,19 +2631,6 @@ const CaseCard: React.FC<CaseCardProps> = ({
               <StickyNote className="w-3.5 h-3.5 mr-1 text-amber-500" />
               <span>{data.remarks ? 'หมายเหตุ' : '+ หมายเหตุ'}</span>
             </button>
-
-            {/* Voice Chat for Case */}
-            {onStartVoiceChat && (
-              <button
-                type="button"
-                onClick={() => onStartVoiceChat(data)}
-                className="inline-flex items-center px-2 py-1 rounded-lg text-xs font-medium transition cursor-pointer border bg-indigo-50/70 dark:bg-indigo-950/50 border-indigo-200/80 dark:border-indigo-800/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 hover:border-indigo-400"
-                title="เปิดห้องคุยเสียงเคสนี้ (Discord Voice)"
-              >
-                <Volume2 className="w-3.5 h-3.5 mr-1 text-indigo-600 dark:text-indigo-400" />
-                <span>คุยเสียง</span>
-              </button>
-            )}
 
             <div 
               className="flex items-center text-slate-400 dark:text-slate-500 text-xs shrink-0 whitespace-nowrap"

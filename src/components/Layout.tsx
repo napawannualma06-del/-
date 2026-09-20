@@ -8,10 +8,7 @@ import { AvatarSelectorModal } from './AvatarSelectorModal';
 import { TeamChatBubble } from './TeamChatBubble';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { NotificationCenter, TechNotificationItem } from './NotificationCenter';
-import { VoiceRoomModal } from './VoiceRoomModal';
-import { VoiceBar } from './VoiceBar';
-import { useVoiceChat } from '../context/VoiceChatContext';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { playNotificationChime } from '../lib/sound';
 import { 
@@ -27,8 +24,7 @@ import {
   CheckCircle2,
   Clock,
   X,
-  ExternalLink,
-  Volume2
+  ExternalLink
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -51,9 +47,6 @@ export function Layout() {
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [showTechModal, setShowTechModal] = useState(false);
   const [pendingTechCount, setPendingTechCount] = useState(0);
-  const [showVoiceModal, setShowVoiceModal] = useState(false);
-  const [voiceRoomsCount, setVoiceRoomsCount] = useState(0);
-  const { isConnected, openRoomModal, setOpenRoomModal } = useVoiceChat();
   const [activeTechToast, setActiveTechToast] = useState<TechStatusToast | null>(null);
   const [techNotifications, setTechNotifications] = useState<TechNotificationItem[]>([]);
   const [highlightTechIssueId, setHighlightTechIssueId] = useState<string | undefined>(undefined);
@@ -127,29 +120,6 @@ export function Layout() {
     saveReadKeys(updated);
     setTechNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
-
-  // Listen to openRoomModal trigger from context
-  useEffect(() => {
-    if (openRoomModal) {
-      setShowVoiceModal(true);
-      setOpenRoomModal(false);
-    }
-  }, [openRoomModal, setOpenRoomModal]);
-
-  // Listen to active voice rooms count
-  useEffect(() => {
-    const q = query(collection(db, 'voice_rooms'), where('isClosed', '!=', true));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setVoiceRoomsCount(snap.size);
-      },
-      (err) => {
-        console.warn('Voice rooms count listener error:', err);
-      }
-    );
-    return () => unsub();
-  }, []);
 
   // Listen to technical_issues for pending badge and employee status update notifications
   useEffect(() => {
@@ -334,33 +304,6 @@ export function Layout() {
                     </span>
                   )}
                 </button>
-
-                {/* ปุ่มห้องคุยเสียง (Voice Channels) */}
-                <button
-                  type="button"
-                  onClick={() => setShowVoiceModal(true)}
-                  className={clsx(
-                    'relative inline-flex items-center px-2 py-1.5 sm:px-3 sm:py-1.5 md:px-3.5 md:py-2 rounded-xl text-[11px] sm:text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
-                    isConnected
-                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shadow-2xs'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-                  )}
-                  title="ห้องคุยเสียง (Voice Channels สไตล์ Discord)"
-                >
-                  <Volume2 className={clsx("w-3.5 h-3.5 sm:w-4 sm:h-4 mr-0.5 sm:mr-1.5 shrink-0", isConnected ? "text-emerald-500 animate-pulse" : "text-indigo-600 dark:text-indigo-400")} />
-                  <span className="hidden sm:inline">ห้องคุยเสียง</span>
-                  <span className="inline sm:hidden">คุยเสียง</span>
-                  {isConnected ? (
-                    <span className="ml-1 sm:ml-1.5 flex h-2 w-2 relative">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </span>
-                  ) : voiceRoomsCount > 0 ? (
-                    <span className="ml-1 sm:ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                      {voiceRoomsCount}
-                    </span>
-                  ) : null}
-                </button>
               </div>
             </div>
  
@@ -532,17 +475,6 @@ export function Layout() {
           highlightIssueId={highlightTechIssueId}
         />
       )}
-
-      {/* Voice Channels Modal */}
-      {user && (
-        <VoiceRoomModal
-          isOpen={showVoiceModal}
-          onClose={() => setShowVoiceModal(false)}
-        />
-      )}
-
-      {/* Persistent Discord-like Bottom Voice Bar */}
-      {user && <VoiceBar onOpenModal={() => setShowVoiceModal(true)} />}
 
       {/* Floating Status Notification for Employee */}
       {activeTechToast && (

@@ -127,39 +127,10 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    function isValidVoiceRoom(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
-             data.createdById is string && data.createdById.size() <= 128 &&
-             data.createdByName is string && data.createdByName.size() <= 128 &&
-             data.createdAt is number &&
-             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 1000)) &&
-             (!('caseId' in data) || data.caseId == null || (data.caseId is string && data.caseId.size() <= 128)) &&
-             (!('category' in data) || data.category == null || (data.category is string && data.category.size() <= 64)) &&
-             (!('isClosed' in data) || data.isClosed == null || (data.isClosed is bool)) &&
-             (!('participantCount' in data) || data.participantCount == null || (data.participantCount is number)) &&
-             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is number));
-    }
-
     match /technical_issues/{issueId} {
       allow read: if true;
       allow create, update: if isValidTechnicalIssue(incoming());
       allow delete: if true;
-    }
-
-    match /voice_rooms/{roomId} {
-      allow read: if true;
-      allow create, update: if isValidVoiceRoom(incoming());
-      allow delete: if true;
-
-      match /peers/{peerId} {
-        allow read: if true;
-        allow create, update, delete: if true;
-      }
-
-      match /signals/{signalId} {
-        allow read: if true;
-        allow create, delete: if true;
-      }
     }
   }
 }
