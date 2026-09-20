@@ -43,6 +43,7 @@ import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { TransferCaseModal } from './TransferCaseModal';
 import { ReturnCaseModal } from './ReturnCaseModal';
 import { CloseCaseModal } from './CloseCaseModal';
+import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { getPreviousAssignee } from '../lib/caseUtils';
 import { 
   getExpiredCases, 
@@ -51,6 +52,7 @@ import {
 } from '../lib/autoCancelService';
 import { clockInEmployee } from '../lib/shiftService';
 import { useStore, isUserAdmin } from '../store/useStore';
+import { Wrench } from 'lucide-react';
 
 interface EmployeeProfile {
   uid: string;
@@ -86,6 +88,24 @@ export function AdminDashboard() {
   const [activeReassignCase, setActiveReassignCase] = useState<Case | null>(null);
   const [activeReturnCase, setActiveReturnCase] = useState<Case | null>(null);
   const [activeCloseCase, setActiveCloseCase] = useState<Case | null>(null);
+  const [showTechModal, setShowTechModal] = useState(false);
+  const [pendingTechCount, setPendingTechCount] = useState(0);
+
+  // Subscribe to technical_issues count
+  useEffect(() => {
+    const q = query(collection(db, 'technical_issues'));
+    const unsub = onSnapshot(q, (snap) => {
+      let count = 0;
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (d.status === 'pending' || d.status === 'in_progress') {
+          count++;
+        }
+      });
+      setPendingTechCount(count);
+    }, () => {});
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     // 1. Subscribe to cases collection
@@ -331,6 +351,31 @@ export function AdminDashboard() {
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 sm:mt-1">
               สรุปข้อมูลการดำเนินงาน สถิติปิดเคส และตารางอันดับผลงาน (ระบบตัดรอบเวลาเที่ยงคืน 00:00 - 23:59 น.)
             </p>
+          </div>
+
+          {/* Case action modals */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowTechModal(true)}
+              className={clsx(
+                "px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap",
+                pendingTechCount > 0
+                  ? "bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-100"
+                  : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+              )}
+              title="ดูรายการแจ้งปัญหาด้านเทคนิค"
+            >
+              <Wrench className="w-3.5 h-3.5 text-rose-500" />
+              <span>ปัญหาเทคนิค</span>
+              {pendingTechCount > 0 ? (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-bold animate-pulse">
+                  รอแก้ {pendingTechCount}
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-400 font-normal">(ปกติ)</span>
+              )}
+            </button>
           </div>
 
           {/* Timeframe Presets */}
@@ -751,6 +796,15 @@ export function AdminDashboard() {
           caseData={activeCloseCase}
           currentUser={user}
           onSuccess={() => setActiveCloseCase(null)}
+        />
+      )}
+
+      {/* Technical Issues Modal */}
+      {showTechModal && (
+        <TechnicalIssueModal
+          isOpen={showTechModal}
+          onClose={() => setShowTechModal(false)}
+          defaultTab="list"
         />
       )}
     </div>

@@ -29,3 +29,14 @@ body {
   scrollbar-width: none;  /* Firefox */
 }
 
+@keyframes bell-ring {
+  0%, 100% { transform: rotate(0deg); }
+  20%, 60% { transform: rotate(14deg); }
+  40%, 80% { transform: rotate(-14deg); }
+}
+
+.animate-bell-ring {
+  animation: bell-ring 1.8s ease-in-out infinite;
+}
+
+

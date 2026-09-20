@@ -74,6 +74,23 @@ service cloud.firestore {
              (!('mentions' in data) || data.mentions == null || (data.mentions is list && data.mentions.size() <= 20));
     }
 
+    function isValidTechnicalIssue(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+             data.serialNumber is string && data.serialNumber.size() <= 150 &&
+             data.description is string && data.description.size() > 0 && data.description.size() <= 10000 &&
+             data.status in ['pending', 'in_progress', 'resolved'] &&
+             data.reporterId is string && data.reporterId.size() <= 128 &&
+             data.reporterName is string && data.reporterName.size() <= 128 &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             (!('reporterUsername' in data) || data.reporterUsername == null || (data.reporterUsername is string && data.reporterUsername.size() <= 128)) &&
+             (!('reporterAvatarEmoji' in data) || data.reporterAvatarEmoji == null || (data.reporterAvatarEmoji is string && data.reporterAvatarEmoji.size() <= 64)) &&
+             (!('adminNote' in data) || data.adminNote == null || (data.adminNote is string && data.adminNote.size() <= 5000)) &&
+             (!('statusChangedBy' in data) || data.statusChangedBy == null || (data.statusChangedBy is string && data.statusChangedBy.size() <= 128)) &&
+             (!('resolvedBy' in data) || data.resolvedBy == null || (data.resolvedBy is string && data.resolvedBy.size() <= 128)) &&
+             (!('resolvedAt' in data) || data.resolvedAt == null || (data.resolvedAt is number));
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create, update: if isValidUser(incoming());
@@ -108,6 +125,12 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isValidTeamChat(incoming());
       allow update, delete: if false;
+    }
+
+    match /technical_issues/{issueId} {
+      allow read: if true;
+      allow create, update: if isValidTechnicalIssue(incoming());
+      allow delete: if true;
     }
   }
 }

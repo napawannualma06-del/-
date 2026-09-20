@@ -90,3 +90,24 @@ export interface ChatMessage {
   mentions?: string[];
   createdAt: number;
 }
+
+export type TechnicalIssueStatus = 'pending' | 'in_progress' | 'resolved';
+
+export interface TechnicalIssue {
+  id: string;
+  title: string;              // หัวข้อ
+  serialNumber: string;       // เลข SN
+  description: string;        // กล่อง Text รายละเอียด
+  status: TechnicalIssueStatus; // รอแก้ ('pending') | รับเรื่อง ('in_progress') | เสร็จสิ้น ('resolved')
+  reporterId: string;         // รหัสผู้ส่งแจ้ง
+  reporterName: string;       // ชื่อผู้ส่งแจ้ง
+  reporterUsername?: string;  // @username ผู้ส่งแจ้ง
+  reporterAvatarEmoji?: string;
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt?: number;
+  resolvedBy?: string;
+  adminNote?: string;         // บันทึก/หมายเหตุตอบกลับจากแอดมิน
+  statusChangedBy?: string;   // ผู้เปลี่ยนสถานะล่าสุด (เช่น แอดมิน)
+}
+
