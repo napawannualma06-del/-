@@ -264,6 +264,32 @@ export function AdminDashboard() {
     }
   });
 
+  // Also include registeredUsers from store if not in employeeMap
+  registeredUsers.forEach(u => {
+    if (u.uid && !employeeMap[u.uid]) {
+      employeeMap[u.uid] = {
+        uid: u.uid,
+        name: u.name,
+        username: u.username || u.uid,
+        role: u.role,
+        workStatus: u.workStatus || 'working',
+        offWorkAt: u.offWorkAt,
+      };
+    }
+  });
+
+  // Ensure current logged in user (Napawan) is present in employeeMap
+  if (user && user.uid && !employeeMap[user.uid]) {
+    employeeMap[user.uid] = {
+      uid: user.uid,
+      name: user.name || 'Napawan',
+      username: user.username || 'napawan',
+      role: user.role || 'admin',
+      workStatus: user.workStatus || 'working',
+      offWorkAt: user.offWorkAt,
+    };
+  }
+
   // Also include any assignee who worked on a case if not in users list
   cases.forEach(c => {
     if (c.assigneeId && !employeeMap[c.assigneeId]) {
@@ -276,10 +302,26 @@ export function AdminDashboard() {
     }
   });
 
-  // Unique list of operational employees (excluding admin as admin is supervisor, not an employee to count as idle/busy)
+  // Unique list of operational employees and team members (including Napawan)
   const allEmployees: EmployeeProfile[] = Array.from(
     new Map(Object.values(employeeMap).map(e => [e.uid, e])).values()
-  ).filter(emp => !isUserAdmin(emp));
+  ).filter(emp => {
+    const isNapawan = 
+      emp.username?.toLowerCase() === 'napawan' ||
+      emp.name?.toLowerCase().includes('napawan') ||
+      emp.uid === 'admin_napawan' ||
+      ((emp as any).email && (emp as any).email.toLowerCase().includes('napawan'));
+
+    if (isNapawan) return true; // Explicitly ensure Napawan is included in performance and dashboard
+
+    // Only exclude technical super-admin gametpl if they don't have any cases
+    if (emp.username?.toLowerCase() === 'gametpl' || emp.uid === 'admin_gametpl') {
+      const hasCases = cases.some(c => c.assigneeId === emp.uid || c.assigneeName?.toLowerCase() === emp.name?.toLowerCase());
+      return hasCases;
+    }
+
+    return true;
+  });
 
   // Compute workload for each employee based on current live cases
   interface EmployeeWorkload {
@@ -620,7 +662,7 @@ export function AdminDashboard() {
             <div className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-900 dark:text-white">
               {allEmployees.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">คน</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">ไม่รวมแอดมิน</p>
+            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">รวมทีมงานและแอดมิน</p>
           </div>
         </div>
       </div>
@@ -667,6 +709,11 @@ export function AdminDashboard() {
                     <div className="truncate">
                       <p className="text-sm font-semibold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
                         {employee.name}
+                        {isUserAdmin(employee) && (
+                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-medium">
+                            แอดมิน
+                          </span>
+                        )}
                         {isBusy ? (
                           isOnCreditCheckDuty && activeCases.length === 0 ? (
                             <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-normal">

@@ -14,10 +14,8 @@ import {
   ChevronDown, 
   ChevronUp, 
   Crown,
-  Briefcase,
   Moon,
-  LogOut,
-  Play
+  LogOut
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -136,10 +134,10 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
       "bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden transition-all",
       className
     )}>
-      {/* Header Bar */}
+      {/* Header Bar (Original style with summary chips) */}
       <div className="px-3.5 py-2.5 sm:px-4 sm:py-3 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+          <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 shrink-0">
             <Users className="w-4 h-4" />
           </div>
           <div className="min-w-0">
@@ -167,12 +165,12 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {selectedEmployeeName && onSelectEmployee && (
             <button
               type="button"
               onClick={() => onSelectEmployee(null)}
-              className="text-[11px] px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 font-semibold cursor-pointer"
+              className="text-[11px] px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100 font-semibold cursor-pointer border border-indigo-200 dark:border-indigo-800"
             >
               แสดงทุกคน
             </button>
@@ -188,7 +186,7 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
         </div>
       </div>
 
-      {/* Simple Employee List / Grid */}
+      {/* Employee List Grid (Clean, readable, same compact card format) */}
       {isExpanded && (
         <div className="p-3 sm:p-3.5">
           {regularEmployees.length === 0 ? (
@@ -196,7 +194,7 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
               ยังไม่มีข้อมูลพนักงานในระบบ
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
               {regularEmployees.map((emp) => {
                 const isSelected = selectedEmployeeName === emp.name;
                 const canManage = isAdmin || emp.uid === currentUser?.uid;
@@ -206,12 +204,12 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                     key={emp.uid}
                     onClick={() => onSelectEmployee && onSelectEmployee(isSelected ? null : emp.name)}
                     className={clsx(
-                      "p-2 sm:p-2.5 rounded-xl border transition-all text-left flex items-center justify-between gap-2 select-none group",
+                      "p-2 rounded-xl border transition-all text-left flex items-center gap-2 select-none group min-h-[56px]",
                       onSelectEmployee ? "cursor-pointer hover:shadow-xs active:scale-[0.98]" : "",
                       isSelected
-                        ? "ring-2 ring-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-700"
+                        ? "ring-2 ring-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-700 shadow-xs"
                         : emp.isOffWork
-                        ? "bg-slate-50/50 dark:bg-slate-900/30 border-slate-200/60 dark:border-slate-800/80 opacity-80 hover:opacity-100"
+                        ? "bg-slate-50/70 dark:bg-slate-900/30 border-slate-200/70 dark:border-slate-800/80 opacity-75 hover:opacity-100"
                         : emp.activeCount > 0
                         ? "bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60"
                         : emp.isOnDuty
@@ -219,195 +217,156 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                         : "bg-emerald-50/20 dark:bg-emerald-950/10 border-slate-200/80 dark:border-slate-800"
                     )}
                   >
-                    {/* Left: Animal Avatar + Name */}
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <div className="relative shrink-0">
-                        <AnimalAvatar 
-                          avatarEmoji={emp.avatarEmoji} 
-                          identifier={emp.username || emp.uid} 
-                          name={emp.name} 
-                          size="sm" 
-                        />
-                        {emp.isOffWork ? (
-                          <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-slate-400 ring-1 ring-white dark:ring-slate-900" title="เลิกงานแล้ว" />
-                        ) : emp.isBusy ? (
-                          <span className={clsx(
-                            "absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-white dark:ring-slate-900",
-                            emp.isOnDuty && emp.activeCount === 0 ? "bg-indigo-600" : "bg-amber-500 animate-ping"
-                          )} />
-                        ) : (
-                          <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-slate-900" />
+                    {/* Left: Animal Avatar with status indicator */}
+                    <div className="relative shrink-0">
+                      <AnimalAvatar 
+                        avatarEmoji={emp.avatarEmoji} 
+                        identifier={emp.username || emp.uid} 
+                        name={emp.name} 
+                        size="sm" 
+                      />
+                      {emp.isOffWork ? (
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-slate-400 ring-1 ring-white dark:ring-slate-900" title="เลิกงานแล้ว" />
+                      ) : emp.isBusy ? (
+                        <span className={clsx(
+                          "absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-white dark:ring-slate-900",
+                          emp.isOnDuty && emp.activeCount === 0 ? "bg-indigo-600" : "bg-amber-500 animate-pulse"
+                        )} />
+                      ) : (
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-slate-900" />
+                      )}
+                    </div>
+
+                    {/* Right: Info in 2 rows for maximum readability */}
+                    <div className="min-w-0 flex-1 flex flex-col justify-center">
+                      {/* Row 1: Name + Logout button */}
+                      <div className="flex items-center justify-between gap-1 min-w-0">
+                        <span 
+                          className={clsx(
+                            "text-xs sm:text-[13px] font-bold truncate leading-tight",
+                            emp.isOffWork ? "text-slate-600 dark:text-slate-400" : "text-slate-900 dark:text-slate-100"
+                          )}
+                          title={emp.name}
+                        >
+                          {emp.name}
+                        </span>
+
+                        {canManage && !emp.isOffWork && (
+                          <button
+                            type="button"
+                            title="คลิกเพื่อบันทึกเลิกงาน (คืนเคสกลับไปรอรับเคส)"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const found = employees.find((x) => x.uid === emp.uid) || {
+                                uid: emp.uid,
+                                name: emp.name,
+                                username: emp.username,
+                                role: 'employee',
+                                createdAt: Date.now(),
+                              };
+                              setClockOutTarget(found);
+                            }}
+                            className="p-0.5 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-100/70 dark:hover:bg-amber-950/60 transition cursor-pointer shrink-0"
+                          >
+                            <LogOut className="w-3 h-3" />
+                          </button>
                         )}
                       </div>
 
-                      <div className="min-w-0 flex-1">
-                        <span className={clsx(
-                          "text-xs font-bold block truncate leading-tight",
-                          emp.isOffWork ? "text-slate-500 dark:text-slate-400" : "text-slate-800 dark:text-slate-200"
-                        )}>
-                          {emp.name}
-                        </span>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          {emp.isOnDuty && !emp.isOffWork && (
-                            <span className="text-[9px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-100/70 dark:bg-indigo-950/70 px-1 rounded flex items-center shrink-0">
+                      {/* Row 2: Badges (Never wrap weirdly, easily readable) */}
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        {emp.isOffWork ? (
+                          <>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 whitespace-nowrap">
+                              <Moon className="w-2.5 h-2.5 mr-0.5 text-slate-400 shrink-0" />
+                              เลิกงาน
+                            </span>
+                            {canManage && (
+                              <button
+                                type="button"
+                                title="คลิกเพื่อบันทึกเข้างาน"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (currentUser && (currentUser.uid === emp.uid || currentUser.username === emp.username)) {
+                                    await clockIn();
+                                  } else {
+                                    await clockInEmployee(emp.uid);
+                                    fetchRegisteredUsers();
+                                  }
+                                }}
+                                className="px-1.5 py-0.5 rounded text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 hover:bg-emerald-200 border border-emerald-300 dark:border-emerald-800 transition cursor-pointer shrink-0 whitespace-nowrap"
+                              >
+                                เข้างาน
+                              </button>
+                            )}
+                          </>
+                        ) : emp.activeCount > 0 ? (
+                          <>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-500 text-white shadow-2xs whitespace-nowrap">
+                              <Clock className="w-2.5 h-2.5 mr-0.5 shrink-0" />
+                              {emp.activeCount} เคส
+                            </span>
+                            {emp.isOnDuty && (
+                              <span className="text-[9px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-100/70 dark:bg-indigo-950/70 px-1 py-0.5 rounded inline-flex items-center shrink-0 whitespace-nowrap border border-indigo-200/60 dark:border-indigo-800/60">
+                                <ShieldCheck className="w-2.5 h-2.5 mr-0.5" />
+                                เวรเช็ค
+                              </span>
+                            )}
+                          </>
+                        ) : emp.isOnDuty ? (
+                          <>
+                            <span className="text-[9px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-100/70 dark:bg-indigo-950/70 px-1 py-0.5 rounded inline-flex items-center shrink-0 whitespace-nowrap border border-indigo-200/60 dark:border-indigo-800/60">
                               <ShieldCheck className="w-2.5 h-2.5 mr-0.5" />
                               เวรเช็ค
                             </span>
-                          )}
-                          {emp.isOffWork && (
-                            <span className="text-[9px] text-slate-400">
-                              เลิกงานแล้ว
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
+                              ว่าง
                             </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right: Case Count Badge or Status + Action */}
-                    <div className="shrink-0 flex items-center gap-1">
-                      {emp.isOffWork ? (
-                        <div className="flex items-center gap-1">
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-lg text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 whitespace-nowrap">
-                            <Moon className="w-2.5 h-2.5 mr-0.5 text-slate-400 shrink-0" />
-                            เลิกงาน
-                          </span>
-                          {canManage && (
-                            <button
-                              type="button"
-                              title="คลิกเพื่อบันทึกเข้างาน"
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                if (currentUser && (currentUser.uid === emp.uid || currentUser.username === emp.username)) {
-                                  await clockIn();
-                                } else {
-                                  await clockInEmployee(emp.uid);
-                                  fetchRegisteredUsers();
-                                }
-                              }}
-                              className="px-1.5 py-0.5 rounded text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 hover:bg-emerald-200 border border-emerald-300 dark:border-emerald-800 transition cursor-pointer shrink-0"
-                            >
-                              เข้างาน
-                            </button>
-                          )}
-                        </div>
-                      ) : emp.activeCount > 0 ? (
-                        <div className="flex items-center gap-1">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-500 text-white shadow-2xs whitespace-nowrap">
-                            <Clock className="w-3 h-3 mr-1" />
-                            {emp.activeCount} เคส
-                          </span>
-                          {canManage && (
-                            <button
-                              type="button"
-                              title="คลิกเพื่อบันทึกเลิกงาน (คืนเคสกลับไปรอรับเคส)"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const found = employees.find((x) => x.uid === emp.uid) || {
-                                  uid: emp.uid,
-                                  name: emp.name,
-                                  username: emp.username,
-                                  role: 'employee',
-                                  createdAt: Date.now(),
-                                };
-                                setClockOutTarget(found);
-                              }}
-                              className="p-1 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-100/70 dark:hover:bg-amber-950/60 transition cursor-pointer"
-                            >
-                              <LogOut className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      ) : emp.isOnDuty ? (
-                        <div className="flex items-center gap-1">
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-lg text-[10px] font-semibold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 whitespace-nowrap">
-                            0 เคส
-                          </span>
-                          {canManage && (
-                            <button
-                              type="button"
-                              title="คลิกเพื่อบันทึกเลิกงาน"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const found = employees.find((x) => x.uid === emp.uid) || {
-                                  uid: emp.uid,
-                                  name: emp.name,
-                                  username: emp.username,
-                                  role: 'employee',
-                                  createdAt: Date.now(),
-                                };
-                                setClockOutTarget(found);
-                              }}
-                              className="p-1 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-100/70 dark:hover:bg-amber-950/60 transition cursor-pointer"
-                            >
-                              <LogOut className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-lg text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
-                            <UserCheck className="w-2.5 h-2.5 mr-0.5 text-emerald-600" />
+                          </>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
+                            <UserCheck className="w-2.5 h-2.5 mr-0.5 text-emerald-600 shrink-0" />
                             ว่าง
                           </span>
-                          {canManage && (
-                            <button
-                              type="button"
-                              title="คลิกเพื่อบันทึกเลิกงาน"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const found = employees.find((x) => x.uid === emp.uid) || {
-                                  uid: emp.uid,
-                                  name: emp.name,
-                                  username: emp.username,
-                                  role: 'employee',
-                                  createdAt: Date.now(),
-                                };
-                                setClockOutTarget(found);
-                              }}
-                              className="p-1 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-100/70 dark:hover:bg-amber-950/60 transition cursor-pointer"
-                            >
-                              <LogOut className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
               })}
 
-              {/* Admin Profile (Separate, not counted as regular employee) */}
+              {/* Admin Profile (Original compact bottom card) */}
               {adminWorker && (
-                <div className="p-2 sm:p-2.5 rounded-xl border border-dashed border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10 flex items-center justify-between gap-2 text-left">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="p-2 rounded-xl border border-dashed border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10 flex items-center gap-2 text-left min-h-[56px]">
+                  <div className="relative shrink-0">
                     <AnimalAvatar 
                       avatarEmoji={adminWorker.avatarEmoji} 
                       identifier={adminWorker.username || adminWorker.uid} 
                       name={adminWorker.name} 
                       size="sm" 
                     />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1">
-                        <Crown className="w-3 h-3 text-amber-500 shrink-0" />
-                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                          {adminWorker.name}
-                        </span>
-                      </div>
-                      <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                        แอดมินระบบ
+                  </div>
+                  <div className="min-w-0 flex-1 flex flex-col justify-center">
+                    <div className="flex items-center gap-1">
+                      <Crown className="w-3 h-3 text-amber-500 shrink-0" />
+                      <span className="text-xs sm:text-[13px] font-bold text-slate-900 dark:text-slate-100 truncate">
+                        {adminWorker.name}
                       </span>
                     </div>
-                  </div>
-                  <div className="shrink-0">
-                    {adminWorker.activeCount > 0 ? (
-                      <span className="px-2 py-0.5 rounded-lg text-xs font-bold bg-amber-500 text-white">
-                        {adminWorker.activeCount} เคส
+                    <div className="flex items-center gap-1 mt-1">
+                      <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
+                        แอดมิน
                       </span>
-                    ) : (
-                      <span className="text-[10px] text-slate-400 font-medium">
-                        ดูแลระบบ
-                      </span>
-                    )}
+                      {adminWorker.activeCount > 0 ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-white shadow-2xs">
+                          {adminWorker.activeCount} เคส
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          ดูแลระบบ
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -434,3 +393,5 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
     </div>
   );
 };
+
+
