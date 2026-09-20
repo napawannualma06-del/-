@@ -20,6 +20,8 @@ service cloud.firestore {
              data.iphoneModel is string && data.iphoneModel.size() <= 128 &&
              data.province is string && data.province.size() <= 128 &&
              data.status in ['pending', 'credit_check', 'processing', 'closed', 'cancelled'] &&
+             (!('cancelledAt' in data) || (data.cancelledAt is number)) &&
+             (!('cancelledBy' in data) || (data.cancelledBy is string && data.cancelledBy.size() <= 128)) &&
              (!('contractNumber' in data) || (data.contractNumber is string && data.contractNumber.size() <= 128)) &&
              (!('contractUpdatedBy' in data) || (data.contractUpdatedBy is string && data.contractUpdatedBy.size() <= 128)) &&
              (!('contractUpdatedAt' in data) || (data.contractUpdatedAt is number)) &&

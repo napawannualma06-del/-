@@ -41,7 +41,12 @@ import {
   Moon,
   LogOut,
   Building2,
-  PauseCircle
+  PauseCircle,
+  ClockAlert,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -59,6 +64,12 @@ import { AgentSelect, AgentManagerModal } from './AgentSelect';
 import { getPreviousAssignee, isStuckCase, isNewCase, isInProgressCase } from '../lib/caseUtils';
 import { DutyWorker, Case, UserProfile } from '../types';
 import { logActivity } from '../lib/activityService';
+import {
+  getExpiredCases,
+  autoCancelExpiredCases,
+  isCaseOlderThan3Days,
+  AUTO_CANCEL_REMARK
+} from '../lib/autoCancelService';
 
 export type { Case };
 export { isStuckCase, isNewCase, isInProgressCase };
@@ -254,6 +265,14 @@ export function Queue() {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode] = useState<'row' | 'compact' | 'card'>('compact');
 
+  // Pagination State (แสดงสูงสุด 30 เคสต่อหน้า)
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // เมื่อเปลี่ยนตัวกรองค้นหา หรือเปลี่ยนแท็บ ให้กลับไปหน้า 1 เสมอ
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeFilter, selectedEmployeeFilter, searchQuery]);
+
   const [showAddForm, setShowAddForm] = useState(false);
   const [showAgentManagerModal, setShowAgentManagerModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -295,6 +314,9 @@ export function Queue() {
   const [activeHoldCase, setActiveHoldCase] = useState<Case | null>(null);
 
   const initialLoadRef = useRef(true);
+  const [isCheckingAutoCancel, setIsCheckingAutoCancel] = useState(false);
+  const [autoCancelToast, setAutoCancelToast] = useState<string | null>(null);
+  const lastAutoCancelCheckRef = useRef<number>(0);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -332,13 +354,64 @@ export function Queue() {
       setCases(casesData);
       setLoading(false);
       initialLoadRef.current = false;
+
+      // Auto-cancel check: only stuck cases & new cases older than 3 days (never cancel closed cases)
+      const now = Date.now();
+      if (now - lastAutoCancelCheckRef.current > 30000) {
+        lastAutoCancelCheckRef.current = now;
+        const expired = getExpiredCases(casesData, now, registeredUsers);
+        if (expired.length > 0) {
+          autoCancelExpiredCases(expired, 'auto', registeredUsers).catch((err) => {
+            console.error('Error auto-cancelling expired cases:', err);
+          });
+        }
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'cases');
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [registeredUsers]);
+
+  // Periodic check every 3 minutes for cases that cross 3 days
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const expired = getExpiredCases(cases, Date.now(), registeredUsers);
+      if (expired.length > 0) {
+        autoCancelExpiredCases(expired, 'auto', registeredUsers).catch((err) => {
+          console.error('Periodic auto-cancel error:', err);
+        });
+      }
+    }, 3 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [cases, registeredUsers]);
+
+  // Manual trigger for checking and cancelling cases older than 3 days (stuck & new cases only)
+  const handleManualAutoCancelCheck = async () => {
+    setIsCheckingAutoCancel(true);
+    try {
+      const expired = getExpiredCases(cases, Date.now(), registeredUsers);
+      if (expired.length === 0) {
+        setAutoCancelToast('ไม่พบเคสค้างหรือเคสใหม่ที่อยู่เกิน 3 วัน (เคสจบแล้วจะไม่ถูกยกเลิก)');
+        setTimeout(() => setAutoCancelToast(null), 4000);
+        return;
+      }
+      const res = await autoCancelExpiredCases(expired, 'manual', registeredUsers);
+      if (res.count > 0) {
+        setAutoCancelToast(`ย้ายเคสค้าง/เคสใหม่ที่เกิน 3 วันไปยังสถานะยกเลิกแล้ว ${res.count} เคส`);
+      } else {
+        setAutoCancelToast('กำลังดำเนินการยกเลิกเคส...');
+      }
+      setTimeout(() => setAutoCancelToast(null), 5000);
+    } catch (e) {
+      console.error('Error in handleManualAutoCancelCheck:', e);
+      setAutoCancelToast('เกิดข้อผิดพลาดในการตรวจสอบเคส');
+      setTimeout(() => setAutoCancelToast(null), 4000);
+    } finally {
+      setIsCheckingAutoCancel(false);
+    }
+  };
 
   const requestNotification = async () => {
     if ('Notification' in window) {
@@ -728,6 +801,16 @@ export function Queue() {
   const closedCount = cases.filter(c => c.status === 'closed').length;
   const cancelledCount = cases.filter(c => c.status === 'cancelled').length;
   const allActiveCount = cases.filter(c => c.status !== 'closed' && c.status !== 'cancelled').length;
+  const expiredCount = cases.filter(c => isCaseOlderThan3Days(c, Date.now(), registeredUsers)).length;
+
+  // Pagination: แสดงเคสสูงสุด 30 เคสต่อหน้า
+  const CASES_PER_PAGE = 30;
+  const totalCases = filteredCases.length;
+  const totalPages = Math.max(1, Math.ceil(totalCases / CASES_PER_PAGE));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * CASES_PER_PAGE;
+  const endIndex = Math.min(startIndex + CASES_PER_PAGE, totalCases);
+  const paginatedCases = filteredCases.slice(startIndex, endIndex);
 
   if (loading) {
     return (
@@ -1092,6 +1175,32 @@ export function Queue() {
             <Ban className="w-3 h-3 mr-1 text-rose-500" />
             ยกเลิก ({cancelledCount})
           </button>
+
+          {/* ตรวจสอบเคสเกิน 3 วัน */}
+          <button
+            type="button"
+            onClick={handleManualAutoCancelCheck}
+            disabled={isCheckingAutoCancel}
+            className={clsx(
+              "px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition flex items-center gap-1.5 cursor-pointer border",
+              expiredCount > 0
+                ? "bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-100"
+                : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+            )}
+            title="ระบบตรวจสอบเคสที่อยู่เกิน 3 วัน และยกเลิกให้อัตโนมัติ (คลิกเพื่อสั่งตรวจสอบทันที)"
+          >
+            <ClockAlert className={clsx("w-3.5 h-3.5", expiredCount > 0 ? "text-rose-500 animate-pulse" : "text-slate-400")} />
+            <span>เคสเกิน 3 วัน</span>
+            {expiredCount > 0 ? (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-bold">
+                {expiredCount}
+              </span>
+            ) : (
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-normal">
+                (ปกติ)
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Search Box - Clean & Right Aligned on same single row */}
@@ -1202,7 +1311,7 @@ export function Queue() {
       ) : viewMode === 'row' ? (
         /* ROW / LIST VIEW: single line / compact horizontal strip per case */
         <div className="space-y-1.5 sm:space-y-2">
-          {filteredCases.map((c) => (
+          {paginatedCases.map((c) => (
             <RowCaseItem
               key={c.id}
               data={c}
@@ -1227,7 +1336,7 @@ export function Queue() {
       ) : viewMode === 'compact' ? (
         /* COMPACT GRID: 2 columns on mobile so multiple cases fit on screen! */
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3">
-          {filteredCases.map((c) => (
+          {paginatedCases.map((c) => (
             <CompactCaseCard
               key={c.id}
               data={c}
@@ -1252,7 +1361,7 @@ export function Queue() {
       ) : (
         /* FULL CARD GRID */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-          {filteredCases.map((c) => (
+          {paginatedCases.map((c) => (
             <CaseCard
               key={c.id}
               data={c}
@@ -1273,6 +1382,149 @@ export function Queue() {
               onOpenHoldModal={(target) => setActiveHoldCase(target)}
             />
           ))}
+        </div>
+      )}
+
+      {/* PAGINATION (ระบบแบ่งหน้า - แสดงสูงสุด 30 เคสต่อหน้า) */}
+      {totalPages > 1 && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3 sm:p-4 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+          {/* Information & Summary */}
+          <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+            <span className="font-semibold text-slate-900 dark:text-white">
+              หน้า {safeCurrentPage} / {totalPages}
+            </span>
+            <span className="text-slate-300 dark:text-slate-700">•</span>
+            <span>
+              แสดงเคสที่ <strong className="text-slate-800 dark:text-slate-200">{startIndex + 1} - {endIndex}</strong> จากทั้งหมด <strong className="text-indigo-600 dark:text-indigo-400">{totalCases}</strong> เคส
+            </span>
+            <span className="hidden md:inline text-[11px] text-slate-400 dark:text-slate-500">
+              (สูงสุด 30 เคส/หน้า)
+            </span>
+          </div>
+
+          {/* Page navigation buttons */}
+          <div className="flex items-center gap-1">
+            {/* First Page */}
+            {totalPages > 4 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPage(1);
+                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                }}
+                disabled={safeCurrentPage <= 1}
+                className={clsx(
+                  "p-1.5 rounded-lg border text-xs font-medium transition cursor-pointer flex items-center justify-center",
+                  safeCurrentPage <= 1
+                    ? "border-slate-200 dark:border-slate-800 text-slate-300 dark:text-slate-700 cursor-not-allowed opacity-50"
+                    : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700"
+                )}
+                title="หน้าแรก"
+              >
+                <ChevronsLeft className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* Previous Page */}
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentPage((prev) => Math.max(1, prev - 1));
+                window.scrollTo({ top: 300, behavior: 'smooth' });
+              }}
+              disabled={safeCurrentPage <= 1}
+              className={clsx(
+                "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition cursor-pointer flex items-center gap-1",
+                safeCurrentPage <= 1
+                  ? "border-slate-200 dark:border-slate-800 text-slate-300 dark:text-slate-700 cursor-not-allowed opacity-50"
+                  : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-2xs"
+              )}
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">ก่อนหน้า</span>
+            </button>
+
+            {/* Numbered Page Buttons with Smart Window */}
+            <div className="flex items-center gap-1 mx-0.5">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+                if (
+                  totalPages > 6 &&
+                  pageNum !== 1 &&
+                  pageNum !== totalPages &&
+                  Math.abs(pageNum - safeCurrentPage) > 1
+                ) {
+                  if (pageNum === 2 || pageNum === totalPages - 1) {
+                    return (
+                      <span key={pageNum} className="w-6 text-center text-slate-400 dark:text-slate-600 select-none">
+                        ...
+                      </span>
+                    );
+                  }
+                  return null;
+                }
+
+                const isActive = pageNum === safeCurrentPage;
+                return (
+                  <button
+                    key={pageNum}
+                    type="button"
+                    onClick={() => {
+                      setCurrentPage(pageNum);
+                      window.scrollTo({ top: 300, behavior: 'smooth' });
+                    }}
+                    className={clsx(
+                      "min-w-8 h-8 px-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center",
+                      isActive
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                    )}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Next Page */}
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+                window.scrollTo({ top: 300, behavior: 'smooth' });
+              }}
+              disabled={safeCurrentPage >= totalPages}
+              className={clsx(
+                "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition cursor-pointer flex items-center gap-1",
+                safeCurrentPage >= totalPages
+                  ? "border-slate-200 dark:border-slate-800 text-slate-300 dark:text-slate-700 cursor-not-allowed opacity-50"
+                  : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-2xs"
+              )}
+            >
+              <span className="hidden sm:inline">ถัดไป</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Last Page */}
+            {totalPages > 4 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPage(totalPages);
+                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                }}
+                disabled={safeCurrentPage >= totalPages}
+                className={clsx(
+                  "p-1.5 rounded-lg border text-xs font-medium transition cursor-pointer flex items-center justify-center",
+                  safeCurrentPage >= totalPages
+                    ? "border-slate-200 dark:border-slate-800 text-slate-300 dark:text-slate-700 cursor-not-allowed opacity-50"
+                    : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700"
+                )}
+                title="หน้าสุดท้าย"
+              >
+                <ChevronsRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -1551,6 +1803,23 @@ export function Queue() {
           }}
         />
       )}
+
+      {/* Auto Cancel Notification Toast */}
+      {autoCancelToast && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-3 rounded-2xl shadow-xl border border-slate-700 dark:border-slate-200 text-xs font-medium flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="flex items-center gap-2 min-w-0">
+            <ClockAlert className="w-4 h-4 text-amber-400 dark:text-amber-600 shrink-0" />
+            <span className="truncate">{autoCancelToast}</span>
+          </div>
+          <button 
+            type="button" 
+            onClick={() => setAutoCancelToast(null)} 
+            className="text-slate-400 hover:text-white dark:hover:text-slate-900 cursor-pointer text-xs ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1641,8 +1910,11 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
         </span>
 
         {/* Time */}
-        <span className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 font-mono shrink-0">
-          {format(data.createdAt, 'HH:mm น.', { locale: th })}
+        <span 
+          className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 font-mono shrink-0 whitespace-nowrap"
+          title={format(data.createdAt, 'd MMMM yyyy HH:mm:ss น.', { locale: th })}
+        >
+          {format(data.createdAt, 'd MMM HH:mm น.', { locale: th })}
         </span>
 
         {/* Model */}
@@ -1682,7 +1954,12 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
         {/* Remarks badge */}
         {data.remarks ? (
           <div
-            className="px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200 flex flex-col items-start max-w-[280px] shrink-0 text-left"
+            className={clsx(
+              "px-2.5 py-1.5 rounded-lg border text-[10px] flex flex-col items-start max-w-[280px] shrink-0 text-left",
+              data.remarks.includes(AUTO_CANCEL_REMARK)
+                ? "bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-900/60 text-rose-900 dark:text-rose-200"
+                : "bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200"
+            )}
             title={data.remarks}
           >
             <div className="flex items-start justify-between w-full gap-1">
@@ -1690,13 +1967,22 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                 onClick={() => onOpenRemark(data)}
                 className="flex items-start gap-1 flex-1 min-w-0 cursor-pointer hover:opacity-80"
               >
-                <StickyNote className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                {data.remarks.includes(AUTO_CANCEL_REMARK) ? (
+                  <ClockAlert className="w-2.5 h-2.5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                ) : (
+                  <StickyNote className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                )}
                 <span className="break-words whitespace-pre-wrap font-medium leading-relaxed">{data.remarks}</span>
               </div>
               <button
                 type="button"
                 onClick={() => onOpenRemark(data)}
-                className="text-[9px] text-amber-600 dark:text-amber-400 underline font-normal shrink-0 hover:text-amber-800 cursor-pointer ml-1"
+                className={clsx(
+                  "text-[9px] underline font-normal shrink-0 cursor-pointer ml-1",
+                  data.remarks.includes(AUTO_CANCEL_REMARK)
+                    ? "text-rose-600 dark:text-rose-400 hover:text-rose-800"
+                    : "text-amber-600 dark:text-amber-400 hover:text-amber-800"
+                )}
                 title="แก้ไขหมายเหตุ"
               >
                 แก้
@@ -1972,8 +2258,11 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
               : statusInfo.label}
           </span>
 
-          <div className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 gap-1 font-mono">
-            <span>{format(data.createdAt, 'HH:mm', { locale: th })}</span>
+          <div 
+            className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 gap-1 font-mono shrink-0 whitespace-nowrap"
+            title={format(data.createdAt, 'd MMMM yyyy HH:mm:ss น.', { locale: th })}
+          >
+            <span>{format(data.createdAt, 'd MMM HH:mm น.', { locale: th })}</span>
             {isAdmin && (
               <button
                 type="button"
@@ -2027,7 +2316,12 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
 
           {data.remarks ? (
             <div
-              className="w-full text-left p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-900 dark:text-amber-200"
+              className={clsx(
+                "w-full text-left p-1.5 rounded-lg border text-[10px]",
+                data.remarks.includes(AUTO_CANCEL_REMARK)
+                  ? "bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-900/60 text-rose-900 dark:text-rose-200"
+                  : "bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200"
+              )}
             >
               <div className="flex items-start justify-between gap-1.5">
                 <div
@@ -2035,7 +2329,11 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
                   className="flex items-start gap-1 flex-1 min-w-0 cursor-pointer hover:opacity-85 transition"
                   title="คลิกเพื่อดูหรือแก้ไขหมายเหตุ"
                 >
-                  <StickyNote className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  {data.remarks.includes(AUTO_CANCEL_REMARK) ? (
+                    <ClockAlert className="w-2.5 h-2.5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <StickyNote className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  )}
                   <span className="font-medium text-slate-800 dark:text-slate-200 break-words whitespace-pre-wrap leading-relaxed">
                     {data.remarks}
                   </span>
@@ -2043,7 +2341,12 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenRemark(data)}
-                  className="text-[9px] text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 underline font-normal shrink-0 ml-1 cursor-pointer pt-0.5"
+                  className={clsx(
+                    "text-[9px] underline font-normal shrink-0 ml-1 cursor-pointer pt-0.5",
+                    data.remarks.includes(AUTO_CANCEL_REMARK)
+                      ? "text-rose-600 dark:text-rose-400 hover:text-rose-800"
+                      : "text-amber-600 dark:text-amber-400 hover:text-amber-800"
+                  )}
                   title="แก้ไขหมายเหตุ"
                 >
                   แก้
@@ -2329,9 +2632,12 @@ const CaseCard: React.FC<CaseCardProps> = ({
               <span>{data.remarks ? 'หมายเหตุ' : '+ หมายเหตุ'}</span>
             </button>
 
-            <div className="flex items-center text-slate-400 dark:text-slate-500 text-xs">
+            <div 
+              className="flex items-center text-slate-400 dark:text-slate-500 text-xs shrink-0 whitespace-nowrap"
+              title={format(data.createdAt, 'd MMMM yyyy HH:mm:ss น.', { locale: th })}
+            >
               <Clock className="w-3 h-3 mr-1" />
-              <span>{format(data.createdAt, 'HH:mm น.', { locale: th })}</span>
+              <span>{format(data.createdAt, 'd MMM HH:mm น.', { locale: th })}</span>
               
               {/* DELETE BUTTON: ONLY VISIBLE AND ACCESSIBLE TO SOLE ADMIN (gametpl) */}
               {isAdmin && (
@@ -2468,25 +2774,54 @@ const CaseCard: React.FC<CaseCardProps> = ({
 
         {/* Remarks Box if present */}
         {data.remarks ? (
-          <div className="mb-3 p-2.5 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl">
-            <div className="flex items-center justify-between text-xs font-bold text-amber-800 dark:text-amber-300 mb-1">
+          <div className={clsx(
+            "mb-3 p-2.5 rounded-xl border",
+            data.remarks.includes(AUTO_CANCEL_REMARK)
+              ? "bg-rose-50/90 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/60"
+              : "bg-amber-50/90 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/60"
+          )}>
+            <div className={clsx(
+              "flex items-center justify-between text-xs font-bold mb-1",
+              data.remarks.includes(AUTO_CANCEL_REMARK)
+                ? "text-rose-800 dark:text-rose-300"
+                : "text-amber-800 dark:text-amber-300"
+            )}>
               <span className="flex items-center">
-                <StickyNote className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400" />
-                สาเหตุงานค้าง / หมายเหตุ:
+                {data.remarks.includes(AUTO_CANCEL_REMARK) ? (
+                  <ClockAlert className="w-3.5 h-3.5 mr-1 text-rose-600 dark:text-rose-400" />
+                ) : (
+                  <StickyNote className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400" />
+                )}
+                {data.remarks.includes(AUTO_CANCEL_REMARK) ? 'ยกเลิกอัตโนมัติ / หมายเหตุ:' : 'สาเหตุงานค้าง / หมายเหตุ:'}
               </span>
               <button
                 type="button"
                 onClick={() => onOpenRemark(data)}
-                className="text-[11px] text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-white underline font-medium cursor-pointer"
+                className={clsx(
+                  "text-[11px] underline font-medium cursor-pointer",
+                  data.remarks.includes(AUTO_CANCEL_REMARK)
+                    ? "text-rose-700 dark:text-rose-300 hover:text-rose-900"
+                    : "text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-white"
+                )}
               >
                 แก้ไข
               </button>
             </div>
-            <p className="text-xs text-slate-800 dark:text-slate-200 font-medium leading-relaxed break-words whitespace-pre-wrap">
+            <p className={clsx(
+              "text-xs font-medium leading-relaxed break-words whitespace-pre-wrap",
+              data.remarks.includes(AUTO_CANCEL_REMARK)
+                ? "text-rose-950 dark:text-rose-200"
+                : "text-slate-800 dark:text-slate-200"
+            )}>
               {data.remarks}
             </p>
             {data.remarksUpdatedBy && (
-              <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 flex items-center justify-between border-t border-amber-200/50 dark:border-amber-900/40 pt-1">
+              <div className={clsx(
+                "text-[10px] mt-1.5 flex items-center justify-between border-t pt-1",
+                data.remarks.includes(AUTO_CANCEL_REMARK)
+                  ? "text-rose-500/80 dark:text-rose-400/80 border-rose-200/50 dark:border-rose-900/40"
+                  : "text-slate-400 dark:text-slate-500 border-amber-200/50 dark:border-amber-900/40"
+              )}>
                 <span>บันทึกโดย: {data.remarksUpdatedBy}</span>
                 {data.remarksUpdatedAt && (
                   <span>{format(data.remarksUpdatedAt, 'HH:mm น.', { locale: th })}</span>
@@ -2613,8 +2948,11 @@ const CaseCard: React.FC<CaseCardProps> = ({
                 <span className="truncate">จบเคสแล้ว โดย {data.assigneeName || 'พนักงาน'}</span>
               </span>
               {data.completedAt && (
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                  {format(data.completedAt, 'HH:mm น.', { locale: th })}
+                <span 
+                  className="text-[10px] text-emerald-600 dark:text-emerald-400 shrink-0 whitespace-nowrap"
+                  title={format(data.completedAt, 'd MMMM yyyy HH:mm:ss น.', { locale: th })}
+                >
+                  {format(data.completedAt, 'd MMM HH:mm น.', { locale: th })}
                 </span>
               )}
             </div>

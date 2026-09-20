@@ -113,6 +113,14 @@
           "type": "number",
           "description": "Timestamp when case was closed"
         },
+        "cancelledAt": {
+          "type": "number",
+          "description": "Timestamp when case was cancelled"
+        },
+        "cancelledBy": {
+          "type": "string",
+          "description": "Name or system identifier of who cancelled the case"
+        },
         "isStuck": {
           "type": "boolean",
           "description": "Whether case is marked as stuck/held"

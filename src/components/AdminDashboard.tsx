@@ -32,7 +32,8 @@ import {
   Moon,
   LogOut,
   ArrowRightLeft,
-  RotateCcw
+  RotateCcw,
+  ClockAlert
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -43,6 +44,11 @@ import { TransferCaseModal } from './TransferCaseModal';
 import { ReturnCaseModal } from './ReturnCaseModal';
 import { CloseCaseModal } from './CloseCaseModal';
 import { getPreviousAssignee } from '../lib/caseUtils';
+import { 
+  getExpiredCases, 
+  autoCancelExpiredCases, 
+  AUTO_CANCEL_REMARK 
+} from '../lib/autoCancelService';
 import { clockInEmployee } from '../lib/shiftService';
 import { useStore, isUserAdmin } from '../store/useStore';
 
@@ -91,6 +97,12 @@ export function AdminDashboard() {
       });
       setCases(casesData);
       setLoading(false);
+
+      // Auto-cancel cases older than 3 days
+      const expired = getExpiredCases(casesData);
+      if (expired.length > 0) {
+        autoCancelExpiredCases(expired, 'auto').catch(() => {});
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'cases');
       setLoading(false);
@@ -540,7 +552,14 @@ export function AdminDashboard() {
             <div className="text-lg sm:text-xl lg:text-2xl font-bold text-rose-600 dark:text-rose-400">
               {cancelledCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">เคสที่ถูกยกเลิก</p>
+            <div className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1">
+              <span>เคสที่ถูกยกเลิก</span>
+              {cancelledCases.filter(c => c.remarks?.includes(AUTO_CANCEL_REMARK)).length > 0 && (
+                <span className="text-rose-600 dark:text-rose-400 font-medium">
+                  (เกิน 3 วัน {cancelledCases.filter(c => c.remarks?.includes(AUTO_CANCEL_REMARK)).length})
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -659,8 +678,11 @@ export function AdminDashboard() {
                 <div key={c.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-800 text-xs space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-slate-900 dark:text-white truncate">{c.iphoneModel}</span>
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                      {c.completedAt ? format(c.completedAt, 'HH:mm น.', { locale: th }) : ''}
+                    <span 
+                      className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 whitespace-nowrap"
+                      title={c.completedAt ? format(c.completedAt, 'd MMMM yyyy HH:mm:ss น.', { locale: th }) : ''}
+                    >
+                      {c.completedAt ? format(c.completedAt, 'd MMM HH:mm น.', { locale: th }) : ''}
                     </span>
                   </div>
                   <div className="text-slate-500 dark:text-slate-400 text-[11px] flex justify-between">

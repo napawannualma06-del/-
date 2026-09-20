@@ -63,6 +63,7 @@ export interface Case {
   updatedAt: number;
   completedAt?: number;
   cancelledAt?: number;
+  cancelledBy?: string;
 }
 
 export interface ActivityLog {
