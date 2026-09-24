@@ -24,9 +24,13 @@ import {
   CheckCircle2,
   Clock,
   X,
-  ExternalLink
+  ExternalLink,
+  Zap
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { RefinanceGuideModal } from './RefinanceGuideModal';
+import { OvertimeModal } from './OvertimeModal';
+import { isUserAdmin } from '../store/useStore';
 
 interface TechStatusToast {
   id: string;
@@ -46,6 +50,11 @@ export function Layout() {
   const [showClockOutModal, setShowClockOutModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [showTechModal, setShowTechModal] = useState(false);
+  const [showOTModal, setShowOTModal] = useState(false);
+  const [otDefaultTab, setOtDefaultTab] = useState<'my' | 'admin' | 'new'>('my');
+  const [pendingOTCount, setPendingOTCount] = useState(0);
+  const [showRefinanceModal, setShowRefinanceModal] = useState(false);
+  const [refinanceModalModel, setRefinanceModalModel] = useState<string | undefined>(undefined);
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [activeTechToast, setActiveTechToast] = useState<TechStatusToast | null>(null);
   const [techNotifications, setTechNotifications] = useState<TechNotificationItem[]>([]);
@@ -207,8 +216,22 @@ export function Layout() {
       setPendingTechCount(count);
     }, () => {});
 
+    // Listen to overtime_requests for pending badge (for admins)
+    const otQuery = query(collection(db, 'overtime_requests'));
+    const unsubOT = onSnapshot(otQuery, (snap) => {
+      let pendingCount = 0;
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (d.status === 'pending') {
+          pendingCount++;
+        }
+      });
+      setPendingOTCount(pendingCount);
+    }, () => {});
+
     return () => {
       unsub();
+      unsubOT();
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     };
   }, [user]);
@@ -217,6 +240,29 @@ export function Layout() {
     if ('Notification' in window) {
       setNotifGranted(Notification.permission === 'granted');
     }
+  }, []);
+
+  useEffect(() => {
+    const handleOpenRefinance = (e: any) => {
+      if (e.detail?.model) {
+        setRefinanceModalModel(e.detail.model);
+      }
+      setShowRefinanceModal(true);
+    };
+
+    const handleOpenOT = (e: any) => {
+      if (e.detail?.tab) {
+        setOtDefaultTab(e.detail.tab);
+      }
+      setShowOTModal(true);
+    };
+
+    window.addEventListener('open-refinance-guide', handleOpenRefinance);
+    window.addEventListener('open-ot-modal', handleOpenOT);
+    return () => {
+      window.removeEventListener('open-refinance-guide', handleOpenRefinance);
+      window.removeEventListener('open-ot-modal', handleOpenOT);
+    };
   }, []);
 
   const handleRequestNotification = async () => {
@@ -284,6 +330,46 @@ export function Layout() {
                   <span className="hidden md:inline">แดชบอร์ด & สถิติ</span>
                   <span className="hidden sm:inline md:hidden">แดชบอร์ด</span>
                 </Link>
+
+                {/* ตารางรีไฟแนนซ์ iPhone (ผ่อนรายเดือน) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRefinanceModalModel(undefined);
+                    setShowRefinanceModal(true);
+                  }}
+                  className="inline-flex items-center px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/90 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-900/60 hover:bg-blue-100 dark:hover:bg-blue-900/40 shadow-2xs transition whitespace-nowrap shrink-0 cursor-pointer"
+                  title="ตารางรีไฟแนนซ์ iPhone (ผ่อนรายเดือน & หักสุขภาพแบต)"
+                >
+                  <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5 shrink-0 text-amber-500 fill-amber-500" />
+                  <span className="hidden lg:inline">ตารางรีไฟแนนซ์</span>
+                  <span className="inline lg:hidden">เรทผ่อน</span>
+                </button>
+
+                {/* ปุ่มระบบขอและอนุมัติ OT */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+                    setShowOTModal(true);
+                  }}
+                  className={clsx(
+                    'relative inline-flex items-center px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
+                    isUserAdmin(user) && pendingOTCount > 0
+                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 shadow-2xs hover:bg-amber-100 dark:hover:bg-amber-900/40'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                  )}
+                  title="ระบบขอและอนุมัติ OT (ตัดรอบทุกวันที่ 25)"
+                >
+                  <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5 shrink-0 text-indigo-500" />
+                  <span className="hidden lg:inline">ระบบ OT</span>
+                  <span className="inline lg:hidden">OT</span>
+                  {isUserAdmin(user) && pendingOTCount > 0 && (
+                    <span className="sm:ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse">
+                      {pendingOTCount}
+                    </span>
+                  )}
+                </button>
 
                 {/* ปุ่มแจ้งปัญหาเทคนิค */}
                 <button
@@ -466,6 +552,22 @@ export function Layout() {
             setHighlightTechIssueId(undefined);
           }}
           highlightIssueId={highlightTechIssueId}
+        />
+      )}
+
+      {/* Refinance Rates & Installment Guide Modal */}
+      <RefinanceGuideModal
+        isOpen={showRefinanceModal}
+        onClose={() => setShowRefinanceModal(false)}
+        initialModel={refinanceModalModel}
+      />
+
+      {/* Overtime Request & Approval Modal */}
+      {user && (
+        <OvertimeModal
+          isOpen={showOTModal}
+          onClose={() => setShowOTModal(false)}
+          defaultTab={otDefaultTab}
         />
       )}
 

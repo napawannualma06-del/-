@@ -222,7 +222,7 @@ export const useStore = create<AppState>((set, get) => ({
     // 1. Check for Super Admin gametpl / gametpl
     if (cleanUsername === SUPER_ADMIN_USERNAME) {
       if (cleanPin !== SUPER_ADMIN_PIN) {
-        return { success: false, message: 'รหัสผ่านสำหรับแอดมิน gametpl ไม่ถูกต้อง' };
+        return { success: false, message: 'รหัสผ่านไม่ถูกต้อง' };
       }
 
       const adminProfile: UserProfile = {
@@ -356,7 +356,7 @@ export const useStore = create<AppState>((set, get) => ({
     const isEmp = role === 'employee';
     const demoProfile: UserProfile = {
       uid: isEmp ? 'demo_employee_1' : 'demo_admin_1',
-      name: isEmp ? 'สมชาย ใจบริการ (พนักงาน)' : 'ผู้ดูแลระบบ (แอดมิน)',
+      name: isEmp ? 'สมชาย ใจบริการ' : 'ผู้ดูแลระบบ',
       username: isEmp ? 'somchai' : 'admin',
       role: role,
       createdAt: Date.now(),

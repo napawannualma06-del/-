@@ -13,7 +13,6 @@ import {
   ShieldCheck, 
   ChevronDown, 
   ChevronUp, 
-  Crown,
   Moon,
   LogOut
 } from 'lucide-react';
@@ -113,9 +112,12 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
     };
   });
 
-  // Separate regular employees and admin
-  const regularEmployees = workloads.filter((w) => !w.isAdmin);
-  const adminWorker = workloads.find((w) => w.isAdmin);
+  // Filter team members to show (hide inactive dummy system account if no cases)
+  const regularEmployees = workloads.filter((w) => {
+    const isSystemAdmin = w.username?.toLowerCase() === 'gametpl' || w.uid === 'admin_gametpl';
+    if (isSystemAdmin && w.activeCount === 0) return false;
+    return true;
+  });
 
   // Sort: Busy employees first, then on duty, then idle, then off-work at the bottom
   regularEmployees.sort((a, b) => {
@@ -334,42 +336,6 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                   </div>
                 );
               })}
-
-              {/* Admin Profile (Original compact bottom card) */}
-              {adminWorker && (
-                <div className="p-2 rounded-xl border border-dashed border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10 flex items-center gap-2 text-left min-h-[56px]">
-                  <div className="relative shrink-0">
-                    <AnimalAvatar 
-                      avatarEmoji={adminWorker.avatarEmoji} 
-                      identifier={adminWorker.username || adminWorker.uid} 
-                      name={adminWorker.name} 
-                      size="sm" 
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1 flex flex-col justify-center">
-                    <div className="flex items-center gap-1">
-                      <Crown className="w-3 h-3 text-amber-500 shrink-0" />
-                      <span className="text-xs sm:text-[13px] font-bold text-slate-900 dark:text-slate-100 truncate">
-                        {adminWorker.name}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 mt-1">
-                      <span className="text-[9px] text-amber-600 dark:text-amber-400 font-medium">
-                        แอดมิน
-                      </span>
-                      {adminWorker.activeCount > 0 ? (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-white shadow-2xs">
-                          {adminWorker.activeCount} เคส
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-slate-400 font-medium">
-                          ดูแลระบบ
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>

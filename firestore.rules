@@ -91,6 +91,25 @@ service cloud.firestore {
              (!('resolvedAt' in data) || data.resolvedAt == null || (data.resolvedAt is number));
     }
 
+    function isValidOvertimeRequest(data) {
+      return data.employeeId is string && data.employeeId.size() <= 128 &&
+             data.employeeName is string && data.employeeName.size() <= 128 &&
+             data.date is string && data.date.size() <= 20 &&
+             data.startTime is string && data.startTime.size() <= 10 &&
+             data.endTime is string && data.endTime.size() <= 10 &&
+             (data.hours is number || data.hours is int) && data.hours > 0 && data.hours <= 24 &&
+             data.reason is string && data.reason.size() > 0 && data.reason.size() <= 2000 &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.cyclePeriod is string && data.cyclePeriod.size() <= 64 &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             (!('employeeUsername' in data) || data.employeeUsername == null || (data.employeeUsername is string && data.employeeUsername.size() <= 128)) &&
+             (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&
+             (!('approvedById' in data) || data.approvedById == null || (data.approvedById is string && data.approvedById.size() <= 128)) &&
+             (!('reviewedAt' in data) || data.reviewedAt == null || (data.reviewedAt is number)) &&
+             (!('adminComment' in data) || data.adminComment == null || (data.adminComment is string && data.adminComment.size() <= 1000));
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create, update: if isValidUser(incoming());
@@ -130,6 +149,12 @@ service cloud.firestore {
     match /technical_issues/{issueId} {
       allow read: if true;
       allow create, update: if isValidTechnicalIssue(incoming());
+      allow delete: if true;
+    }
+
+    match /overtime_requests/{requestId} {
+      allow read: if true;
+      allow create, update: if isValidOvertimeRequest(incoming());
       allow delete: if true;
     }
   }

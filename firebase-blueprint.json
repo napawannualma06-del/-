@@ -243,6 +243,77 @@
         }
       },
       "required": ["name", "createdAt"]
+    },
+    "OvertimeRequest": {
+      "title": "OvertimeRequest",
+      "description": "Employee overtime request for approval",
+      "type": "object",
+      "properties": {
+        "employeeId": {
+          "type": "string",
+          "description": "Employee user ID"
+        },
+        "employeeName": {
+          "type": "string",
+          "description": "Employee display name"
+        },
+        "employeeUsername": {
+          "type": "string",
+          "description": "Employee username"
+        },
+        "date": {
+          "type": "string",
+          "description": "OT Date in YYYY-MM-DD format"
+        },
+        "startTime": {
+          "type": "string",
+          "description": "Start time in HH:mm"
+        },
+        "endTime": {
+          "type": "string",
+          "description": "End time in HH:mm"
+        },
+        "hours": {
+          "type": "number",
+          "description": "Calculated or entered total OT hours"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason for working overtime"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Approval status"
+        },
+        "approvedBy": {
+          "type": "string",
+          "description": "Name of admin who approved or rejected"
+        },
+        "approvedById": {
+          "type": "string",
+          "description": "ID of admin who reviewed"
+        },
+        "reviewedAt": {
+          "type": "number",
+          "description": "Timestamp when review occurred"
+        },
+        "adminComment": {
+          "type": "string",
+          "description": "Admin review note"
+        },
+        "cyclePeriod": {
+          "type": "string",
+          "description": "Payroll billing cycle (e.g. 2026-09: 26 Aug - 25 Sep)"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": ["employeeId", "employeeName", "date", "startTime", "endTime", "hours", "reason", "status", "cyclePeriod", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -265,6 +336,10 @@
     "team_chats/{messageId}": {
       "schema": "TeamChat",
       "description": "Real-time team chat messages"
+    },
+    "overtime_requests/{requestId}": {
+      "schema": "OvertimeRequest",
+      "description": "Employee overtime requests"
     }
   }
 }

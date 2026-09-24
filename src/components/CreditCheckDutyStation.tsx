@@ -127,7 +127,7 @@ export function CreditCheckDutyStation({ onStatusChange, compact = false }: Cred
 
     // Only worker themself or admin can remove
     if (uidToRemove !== user.uid && !isAdmin) {
-      alert('คุณไม่มีสิทธิ์ปลดเจ้าหน้าที่ท่านนี้ (เฉพาะเจ้าตัวเองหรือแอดมินเท่านั้น)');
+      alert('คุณไม่มีสิทธิ์ปลดเจ้าหน้าที่ท่านนี้ (เฉพาะเจ้าตัวเองเท่านั้น)');
       return;
     }
 

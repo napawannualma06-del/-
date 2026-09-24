@@ -179,29 +179,29 @@ export function TechnicalIssueModal({
       const updateData: Partial<TechnicalIssue> = {
         status: newStatus,
         updatedAt: now,
-        statusChangedBy: user?.name || 'แอดมิน',
+        statusChangedBy: user?.name || 'ทีมงาน',
       };
 
       if (newStatus === 'resolved') {
         updateData.resolvedAt = now;
-        updateData.resolvedBy = user?.name || 'แอดมิน';
+        updateData.resolvedBy = user?.name || 'ทีมงาน';
       }
 
       await updateDoc(issueRef, updateData);
 
-      // Notify in team chat if admin moves to in_progress or resolved
+      // Notify in team chat if moves to in_progress or resolved
       const target = issues.find((i) => i.id === issueId);
       if (target && target.reporterUsername && (newStatus === 'in_progress' || newStatus === 'resolved')) {
         try {
           const isProgress = newStatus === 'in_progress';
           const titleText = target.title;
           const snText = target.serialNumber && target.serialNumber !== '-' ? `(SN: ${target.serialNumber})` : '';
-          const statusLabel = isProgress ? '🛠️ แอดมินรับเรื่องแล้ว' : '✅ ปัญหาได้รับการแก้ไขเสร็จสิ้น';
+          const statusLabel = isProgress ? '🛠️ รับเรื่องแล้ว' : '✅ ปัญหาได้รับการแก้ไขเสร็จสิ้น';
 
           await addDoc(collection(db, 'team_chats'), {
-            senderId: user?.uid || 'admin',
-            senderName: user?.name || 'แอดมิน',
-            senderUsername: user?.username || 'admin',
+            senderId: user?.uid || 'support',
+            senderName: user?.name || 'ทีมงาน',
+            senderUsername: user?.username || 'support',
             senderRole: 'admin',
             senderAvatarEmoji: isProgress ? '🛠️' : '✅',
             text: `${statusLabel}: เรื่อง "${titleText}" ${snText} ของ @${target.reporterUsername}`,
@@ -296,7 +296,7 @@ export function TechnicalIssueModal({
                 )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                แจ้งเรื่องส่งตรงถึงแอดมิน ติดตามสถานะได้แบบเรียลไทม์
+                แจ้งเรื่องปัญหาเทคนิค ติดตามสถานะได้แบบเรียลไทม์
               </p>
             </div>
           </div>
@@ -353,7 +353,7 @@ export function TechnicalIssueModal({
               {submitSuccess && (
                 <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>ส่งข้อมูลแจ้งปัญหาให้แอดมินเรียบร้อยแล้ว! ระบบกำลังนำไปหน้ารายการ...</span>
+                  <span>ส่งข้อมูลแจ้งปัญหาเรียบร้อยแล้ว! ระบบกำลังนำไปหน้ารายการ...</span>
                 </div>
               )}
 
@@ -369,13 +369,10 @@ export function TechnicalIssueModal({
                   <div>
                     <span className="text-[11px] text-slate-400 dark:text-slate-500 block">ผู้ส่งแจ้ง</span>
                     <span className="font-bold text-slate-800 dark:text-slate-200">
-                      {user?.name || 'พนักงาน'} {user?.username ? `(@${user.username})` : ''}
+                      {user?.name || 'สมาชิก'} {user?.username ? `(@${user.username})` : ''}
                     </span>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                  {isAdmin ? 'แอดมิน' : 'พนักงาน'}
-                </span>
               </div>
 
               {/* 1. หัวข้อ */}
@@ -464,7 +461,7 @@ export function TechnicalIssueModal({
                   )}
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{isSubmitting ? 'กำลังส่งแจ้ง...' : 'ส่งแจ้งแอดมิน'}</span>
+                  <span>{isSubmitting ? 'กำลังส่งแจ้ง...' : 'ส่งแจ้งปัญหา'}</span>
                 </button>
               </div>
             </form>
@@ -665,7 +662,7 @@ export function TechnicalIssueModal({
                             <div className="flex items-center justify-between text-[11px] font-semibold text-indigo-900 dark:text-indigo-300">
                               <span className="flex items-center gap-1">
                                 <MessageSquare className="w-3.5 h-3.5 text-indigo-600" />
-                                หมายเหตุ / การตอบกลับจากแอดมิน:
+                                หมายเหตุ / การตอบกลับ:
                               </span>
                               {isAdmin && (
                                 <button
@@ -686,11 +683,11 @@ export function TechnicalIssueModal({
                           </div>
                         )}
 
-                        {/* Edit Note Form (Admin) */}
+                        {/* Edit Note Form */}
                         {isEditingNote && (
                           <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-indigo-200 dark:border-indigo-800 text-xs">
                             <label className="font-bold text-slate-700 dark:text-slate-300 block">
-                              บันทึกหมายเหตุแอดมิน:
+                              บันทึกหมายเหตุ:
                             </label>
                             <textarea
                               rows={2}

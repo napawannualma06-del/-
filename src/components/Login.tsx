@@ -85,7 +85,7 @@ export function Login() {
       try {
         const res = await loginWithUsername('gametpl', 'gametpl');
         if (!res.success) {
-          setErrorMsg(res.message || 'เข้าสู่ระบบแอดมินไม่สำเร็จ');
+          setErrorMsg(res.message || 'เข้าสู่ระบบไม่สำเร็จ');
         }
       } finally {
         setLoading(false);

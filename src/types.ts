@@ -111,3 +111,27 @@ export interface TechnicalIssue {
   statusChangedBy?: string;   // ผู้เปลี่ยนสถานะล่าสุด (เช่น แอดมิน)
 }
 
+export type OvertimeStatus = 'pending' | 'approved' | 'rejected';
+
+export interface OvertimeRequest {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeUsername?: string;
+  employeeAvatarEmoji?: string;
+  date: string;               // YYYY-MM-DD
+  startTime: string;          // HH:mm
+  endTime: string;            // HH:mm
+  hours: number;              // Total hours e.g. 2.5
+  reason: string;             // Reason
+  status: OvertimeStatus;     // 'pending' | 'approved' | 'rejected'
+  approvedBy?: string;
+  approvedById?: string;
+  reviewedAt?: number;
+  adminComment?: string;
+  cyclePeriod: string;        // e.g. "2026-09" (26 Aug - 25 Sep)
+  createdAt: number;
+  updatedAt: number;
+}
+
+

@@ -46,11 +46,13 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  Zap
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { clsx } from 'clsx';
+import { findRefinanceRate, getForeignMachineMatchingRate, getRefurbishedMatchingRate, getPreviousLowerTierRate } from '../data/refinanceRates';
 import { CreditCheckDutyStation } from './CreditCheckDutyStation';
 import { SimpleEmployeeWorkload } from './SimpleEmployeeWorkload';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -108,15 +110,17 @@ export const statusMap: Record<Case['status'], { label: string; badgeClass: stri
 };
 
 export const POPULAR_IPHONES = [
+  'iPhone 17 Pro Max 2TB',
   'iPhone 17 Pro Max',
   'iPhone 17 Pro',
   'iPhone 17 Air',
-  'iPhone 17 Plus',
   'iPhone 17',
+  'iPhone 17e',
   'iPhone 16 Pro Max',
   'iPhone 16 Pro',
   'iPhone 16 Plus',
   'iPhone 16',
+  'iPhone 16e',
   'iPhone 15 Pro Max',
   'iPhone 15 Pro',
   'iPhone 15 Plus',
@@ -942,9 +946,22 @@ export function Queue() {
 
               {/* iPhone Model */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                  รุ่น iPhone *
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    รุ่น iPhone *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('open-refinance-guide', { detail: { model: formData.iphoneModel } }));
+                    }}
+                    className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1 cursor-pointer transition"
+                    title="เปิดดูเรทเงินและค่างวดของรุ่นนี้"
+                  >
+                    <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                    ดูเรทเงิน & ค่างวดรุ่นนี้
+                  </button>
+                </div>
                 <div className="relative">
                   <select
                     value={formData.iphoneModel}
@@ -958,6 +975,38 @@ export function Queue() {
                   </select>
                   <Smartphone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 </div>
+
+                {/* Instant Rate Hint */}
+                {(() => {
+                  const rate = findRefinanceRate(formData.iphoneModel);
+                  if (!rate) return null;
+                  const foreignRes = getForeignMachineMatchingRate(rate);
+                  const refRes = getRefurbishedMatchingRate(rate.loanAmount);
+                  const repairTier = getPreviousLowerTierRate(rate.loanAmount);
+                  return (
+                    <div 
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('open-refinance-guide', { detail: { model: formData.iphoneModel } }));
+                      }}
+                      className="mt-1.5 p-2 rounded-lg bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-900/40 text-[11px] text-blue-700 dark:text-blue-300 cursor-pointer hover:bg-blue-100/60 transition"
+                      title="กดเพื่อเปิดคำนวณและดูเรทเต็ม"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold flex items-center gap-1">
+                          ⚡ ยอดจัดปกติ (ศูนย์ไทย): <span className="font-bold text-blue-800 dark:text-blue-200">{rate.loanAmount.toLocaleString()} บ.</span>
+                        </span>
+                        <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium underline">
+                          เปิดเครื่องคำนวณ &gt;
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                        <span>• เครื่องนอก: <strong>{foreignRes.matchedRate.loanAmount.toLocaleString()} บ.</strong> (ยึด {foreignRes.matchedRate.model})</span>
+                        <span>• รีเฟอร์บิช: <strong>{refRes.matchedRate.loanAmount.toLocaleString()} บ.</strong> (ยึด {refRes.matchedRate.model})</span>
+                        <span>• หักเปลี่ยนจอ/กล้อง: <strong>{repairTier.loanAmount.toLocaleString()} บ.</strong> (ยึด {repairTier.model})</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Province */}
@@ -2661,7 +2710,21 @@ const CaseCard: React.FC<CaseCardProps> = ({
               <Smartphone className="w-4 h-4 mr-2 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
               <div>
                 <span className="text-[11px] text-slate-400 dark:text-slate-500 block font-medium">รุ่น iPhone</span>
-                <span className="text-base font-bold text-slate-900 dark:text-white">{data.iphoneModel}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-bold text-slate-900 dark:text-white">{data.iphoneModel}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.dispatchEvent(new CustomEvent('open-refinance-guide', { detail: { model: data.iphoneModel } }));
+                    }}
+                    className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition cursor-pointer"
+                    title="เปิดดูเรทเงินและค่างวดของรุ่นนี้"
+                  >
+                    <Zap className="w-2.5 h-2.5 mr-0.5 text-amber-500 fill-amber-500" />
+                    เรทผ่อน
+                  </button>
+                </div>
               </div>
             </div>
 

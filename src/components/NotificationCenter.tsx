@@ -150,7 +150,7 @@ export function NotificationCenter({
                   ยังไม่มีการแจ้งเตือน
                 </p>
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 max-w-[240px] mx-auto leading-relaxed">
-                  เมื่อแอดมินกดรับเรื่องหรือแก้ไขปัญหาของคุณ จะมีแจ้งเตือนขึ้นที่นี่ทันที
+                  เมื่อมีผู้รับเรื่องหรือแก้ไขปัญหาของคุณ จะมีแจ้งเตือนขึ้นที่นี่ทันที
                 </p>
               </div>
             ) : (
@@ -195,7 +195,7 @@ export function NotificationCenter({
                               : 'bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800'
                           )}
                         >
-                          {isResolved ? '✅ แก้ไขเสร็จสิ้น' : '🛠️ แอดมินรับเรื่องแล้ว'}
+                          {isResolved ? '✅ แก้ไขเสร็จสิ้น' : '🛠️ รับเรื่องแล้ว'}
                         </span>
 
                         <span className="text-[10px] text-slate-400 shrink-0">

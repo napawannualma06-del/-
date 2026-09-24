@@ -399,6 +399,18 @@ export function AdminDashboard() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('open-ot-modal', { detail: { tab: 'admin' } }));
+              }}
+              className="px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+              title="ระบบตรวจอนุมัติและสรุปยอด OT พนักงาน"
+            >
+              <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>ระบบ OT (ตัดรอบ 25)</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowTechModal(true)}
               className={clsx(
                 "px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap",
