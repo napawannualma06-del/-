@@ -179,11 +179,9 @@ export function OvertimeModal({
     setIsSubmitting(true);
     try {
       const cycleInfo = getOTCycleFromDate(date);
-      const newOT: Omit<OvertimeRequest, 'id'> = {
+      const newOT: any = {
         employeeId: user.uid,
         employeeName: user.name || 'พนักงาน',
-        employeeUsername: user.username,
-        employeeAvatarEmoji: user.avatarEmoji,
         date,
         startTime,
         endTime,
@@ -195,18 +193,28 @@ export function OvertimeModal({
         updatedAt: Date.now(),
       };
 
+      if (user.username) {
+        newOT.employeeUsername = user.username;
+      }
+      if (user.avatarEmoji) {
+        newOT.employeeAvatarEmoji = user.avatarEmoji;
+      }
+
       await addDoc(collection(db, 'overtime_requests'), newOT);
 
       // Audit log activity
       try {
-        await addDoc(collection(db, 'activities'), {
+        const actData: any = {
           type: 'request_ot',
           actorId: user.uid,
           actorName: user.name || 'พนักงาน',
-          actorAvatarEmoji: user.avatarEmoji || '⏰',
           description: `ยื่นขอ OT วันที่ ${date} (${effectiveHours} ชม.) - "${reason.trim().slice(0, 30)}"`,
           timestamp: Date.now(),
-        });
+        };
+        if (user.avatarEmoji) {
+          actData.actorAvatarEmoji = user.avatarEmoji;
+        }
+        await addDoc(collection(db, 'activities'), actData);
       } catch (err) {
         console.warn('Could not record activity:', err);
       }
@@ -220,7 +228,7 @@ export function OvertimeModal({
       }, 1500);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'overtime_requests');
-      alert('เกิดข้อผิดพลาดในการบันทึกคำขอ กรุณาลองใหม่อีกครั้งค่ะ');
+      alert('เกิดข้อผิดพลาดในการบันทึกคำขอ: ' + (error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้งค่ะ'));
     } finally {
       setIsSubmitting(false);
     }
@@ -249,7 +257,6 @@ export function OvertimeModal({
           type: status === 'approved' ? 'approve_ot' : 'reject_ot',
           actorId: user.uid,
           actorName: user.name || 'แอดมิน',
-          actorAvatarEmoji: user.avatarEmoji || '🛡️',
           description: `${status === 'approved' ? 'อนุมัติ' : 'ไม่อนุมัติ'} OT ของ ${targetReq?.employeeName || 'พนักงาน'} (${targetReq?.hours || 0} ชม.)`,
           timestamp: Date.now(),
         });
@@ -282,7 +289,21 @@ export function OvertimeModal({
   // Filter requests based on selected cycle and tabs
   const myRequests = useMemo(() => {
     if (!user) return [];
-    return requests.filter(r => r.employeeId === user.uid || (user.username && r.employeeUsername === user.username));
+    const currentUid = (user.uid || '').toLowerCase();
+    const currentUsername = (user.username || '').toLowerCase();
+    const currentName = (user.name || '').toLowerCase();
+
+    return requests.filter(r => {
+      const rUid = (r.employeeId || '').toLowerCase();
+      const rUsername = (r.employeeUsername || '').toLowerCase();
+      const rName = (r.employeeName || '').toLowerCase();
+
+      return (
+        rUid === currentUid ||
+        (currentUsername && rUsername === currentUsername) ||
+        (currentName && rName === currentName)
+      );
+    });
   }, [requests, user]);
 
   const cycleFilteredRequests = useMemo(() => {
@@ -594,14 +615,14 @@ export function OvertimeModal({
                           จำนวนชั่วโมง OT รวม <span className="text-rose-500">*</span>
                         </label>
                         <span className="text-[10px] text-slate-400">
-                          (คำนวณอัตโนมัติ {autoHours} ชม. หรือระบุเองได้)
+                          (คำนวณอัตโนมัติ {autoHours} ชม. หรือแก้ไขตัวเลขได้)
                         </span>
                       </div>
                       <div className="relative">
                         <input
                           type="number"
-                          step="0.5"
-                          min="0.5"
+                          step="any"
+                          min="0.1"
                           max="24"
                           placeholder={`${autoHours}`}
                           value={manualHours}
@@ -618,9 +639,9 @@ export function OvertimeModal({
                           <button
                             type="button"
                             onClick={() => setManualHours('')}
-                            className="text-indigo-600 dark:text-indigo-400 underline text-[10px]"
+                            className="text-indigo-600 dark:text-indigo-400 underline text-[10px] cursor-pointer"
                           >
-                            ใช้ยอดคำนวณอัตโนมัติ ({autoHours} ชม.)
+                            รีเซ็ตใช้ยอดอัตโนมัติ ({autoHours} ชม.)
                           </button>
                         )}
                       </div>

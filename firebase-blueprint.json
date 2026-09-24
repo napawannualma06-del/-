@@ -261,6 +261,10 @@
           "type": "string",
           "description": "Employee username"
         },
+        "employeeAvatarEmoji": {
+          "type": "string",
+          "description": "Employee avatar emoji"
+        },
         "date": {
           "type": "string",
           "description": "OT Date in YYYY-MM-DD format"

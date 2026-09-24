@@ -58,9 +58,9 @@ service cloud.firestore {
              data.actorName is string && data.actorName.size() <= 128 &&
              data.description is string && data.description.size() <= 1000 &&
              data.timestamp is number &&
-             (!('actorAvatarEmoji' in data) || (data.actorAvatarEmoji is string && data.actorAvatarEmoji.size() <= 64)) &&
-             (!('caseId' in data) || (data.caseId is string && data.caseId.size() <= 128)) &&
-             (!('iphoneModel' in data) || (data.iphoneModel is string && data.iphoneModel.size() <= 128));
+             (!('actorAvatarEmoji' in data) || data.actorAvatarEmoji == null || (data.actorAvatarEmoji is string && data.actorAvatarEmoji.size() <= 64)) &&
+             (!('caseId' in data) || data.caseId == null || (data.caseId is string && data.caseId.size() <= 128)) &&
+             (!('iphoneModel' in data) || data.iphoneModel == null || (data.iphoneModel is string && data.iphoneModel.size() <= 128));
     }
 
     function isValidTeamChat(data) {
@@ -104,6 +104,7 @@ service cloud.firestore {
              data.createdAt is number &&
              data.updatedAt is number &&
              (!('employeeUsername' in data) || data.employeeUsername == null || (data.employeeUsername is string && data.employeeUsername.size() <= 128)) &&
+             (!('employeeAvatarEmoji' in data) || data.employeeAvatarEmoji == null || (data.employeeAvatarEmoji is string && data.employeeAvatarEmoji.size() <= 64)) &&
              (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&
              (!('approvedById' in data) || data.approvedById == null || (data.approvedById is string && data.approvedById.size() <= 128)) &&
              (!('reviewedAt' in data) || data.reviewedAt == null || (data.reviewedAt is number)) &&

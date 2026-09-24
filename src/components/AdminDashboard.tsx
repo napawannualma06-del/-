@@ -44,6 +44,7 @@ import { TransferCaseModal } from './TransferCaseModal';
 import { ReturnCaseModal } from './ReturnCaseModal';
 import { CloseCaseModal } from './CloseCaseModal';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
+import { AdminOTDashboard } from './AdminOTDashboard';
 import { getPreviousAssignee } from '../lib/caseUtils';
 import { 
   getExpiredCases, 
@@ -90,6 +91,8 @@ export function AdminDashboard() {
   const [activeCloseCase, setActiveCloseCase] = useState<Case | null>(null);
   const [showTechModal, setShowTechModal] = useState(false);
   const [pendingTechCount, setPendingTechCount] = useState(0);
+  const [pendingOTCount, setPendingOTCount] = useState(0);
+  const [mainTab, setMainTab] = useState<'cases' | 'ot'>('cases');
 
   // Subscribe to technical_issues count
   useEffect(() => {
@@ -162,10 +165,24 @@ export function AdminDashboard() {
       console.warn('Could not read credit check duty in admin dashboard:', err);
     });
 
+    // 4. Subscribe to overtime_requests count
+    const qOT = query(collection(db, 'overtime_requests'));
+    const unsubOT = onSnapshot(qOT, (snap) => {
+      let count = 0;
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (d.status === 'pending') {
+          count++;
+        }
+      });
+      setPendingOTCount(count);
+    }, () => {});
+
     return () => {
       unsubCases();
       unsubUsers();
       unsubDuty();
+      unsubOT();
     };
   }, []);
 
@@ -387,27 +404,53 @@ export function AdminDashboard() {
             <div className="flex items-center space-x-2">
               <Logo size="sm" />
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center">
-                แดชบอร์ดและสถิติภาพรวม
+                {mainTab === 'cases' ? 'แดชบอร์ดและสถิติภาพรวม' : 'แดชบอร์ด OT พนักงานทุกคน'}
               </h1>
             </div>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 sm:mt-1">
-              สรุปข้อมูลการดำเนินงาน สถิติปิดเคส และตารางอันดับผลงาน (ระบบตัดรอบเวลาเที่ยงคืน 00:00 - 23:59 น.)
+              {mainTab === 'cases'
+                ? 'สรุปข้อมูลการดำเนินงาน สถิติปิดเคส และตารางอันดับผลงาน (ระบบตัดรอบเวลาเที่ยงคืน 00:00 - 23:59 น.)'
+                : 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติ สรุปยอดชั่วโมง OT รายบุคคล และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'}
             </p>
           </div>
 
-          {/* Case action modals */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('open-ot-modal', { detail: { tab: 'admin' } }));
-              }}
-              className="px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
-              title="ระบบตรวจอนุมัติและสรุปยอด OT พนักงาน"
-            >
-              <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>ระบบ OT (ตัดรอบ 25)</span>
-            </button>
+          {/* Action Modals and Tab Switchers */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Main Section Switcher: แดชบอร์ดเคส vs แดชบอร์ด OT */}
+            <div className="flex items-center p-1 bg-slate-200/80 dark:bg-slate-800 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setMainTab('cases')}
+                className={clsx(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap",
+                  mainTab === 'cases'
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>แดชบอร์ดเคส</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMainTab('ot')}
+                className={clsx(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative",
+                  mainTab === 'ot'
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                <span>แดชบอร์ด OT (ตัดรอบ 25)</span>
+                {pendingOTCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse">
+                    {pendingOTCount}
+                  </span>
+                )}
+              </button>
+            </div>
 
             <button
               type="button"
@@ -432,91 +475,93 @@ export function AdminDashboard() {
             </button>
           </div>
 
-          {/* Timeframe Presets */}
-          <div className="flex items-center flex-wrap gap-1 bg-slate-200/80 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => setTimeFilter('today')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
-                timeFilter === 'today' 
-                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              วันนี้ ({format(new Date(), 'dd MMM', { locale: th })})
-            </button>
+          {/* Timeframe Presets - Only for cases dashboard */}
+          {mainTab === 'cases' && (
+            <div className="flex items-center flex-wrap gap-1 bg-slate-200/80 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setTimeFilter('today')}
+                className={clsx(
+                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  timeFilter === 'today' 
+                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                วันนี้ ({format(new Date(), 'dd MMM', { locale: th })})
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setTimeFilter('yesterday')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
-                timeFilter === 'yesterday' 
-                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              เมื่อวานนี้
-            </button>
+              <button
+                type="button"
+                onClick={() => setTimeFilter('yesterday')}
+                className={clsx(
+                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  timeFilter === 'yesterday' 
+                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                เมื่อวาน
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setTimeFilter('last7days')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
-                timeFilter === 'last7days' 
-                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              7 วันล่าสุด
-            </button>
+              <button
+                type="button"
+                onClick={() => setTimeFilter('last7days')}
+                className={clsx(
+                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  timeFilter === 'last7days' 
+                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                7 วันล่าสุด
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setTimeFilter('thisMonth')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
-                timeFilter === 'thisMonth' 
-                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              เดือนนี้
-            </button>
+              <button
+                type="button"
+                onClick={() => setTimeFilter('thisMonth')}
+                className={clsx(
+                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  timeFilter === 'thisMonth' 
+                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                เดือนนี้
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setTimeFilter('custom')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap flex items-center gap-1",
-                timeFilter === 'custom' 
-                  ? "bg-indigo-600 text-white shadow-xs font-bold" 
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              <Calendar className="w-3 h-3" />
-              <span>ระบุช่วงวัน</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setTimeFilter('custom')}
+                className={clsx(
+                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap flex items-center gap-1",
+                  timeFilter === 'custom' 
+                    ? "bg-indigo-600 text-white shadow-xs font-bold" 
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                <Calendar className="w-3 h-3" />
+                <span>ระบุช่วงวัน</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setTimeFilter('all')}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
-                timeFilter === 'all' 
-                  ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              ทั้งหมด ({cases.length})
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setTimeFilter('all')}
+                className={clsx(
+                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  timeFilter === 'all' 
+                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                ทั้งหมด ({cases.length})
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Custom Date Range Selector (Midnight Cutoff) */}
-        {timeFilter === 'custom' && (
+        {mainTab === 'cases' && timeFilter === 'custom' && (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-2xl">
             <div className="flex items-center gap-2 text-xs text-indigo-900 dark:text-indigo-200">
               <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
@@ -552,10 +597,15 @@ export function AdminDashboard() {
         )}
       </div>
 
-      {/* Credit Check Duty Station (2-person duty roster visible to everyone) */}
-      <CreditCheckDutyStation />
+      {/* Conditional Rendering based on Main Tab */}
+      {mainTab === 'ot' ? (
+        <AdminOTDashboard />
+      ) : (
+        <>
+          {/* Credit Check Duty Station (2-person duty roster visible to everyone) */}
+          <CreditCheckDutyStation />
 
-      {/* OVERVIEW STAT CARDS (Focused on Cases & Results) */}
+          {/* OVERVIEW STAT CARDS (Focused on Cases & Results) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-2 sm:gap-3">
         {/* Closed Cases */}
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
@@ -808,6 +858,8 @@ export function AdminDashboard() {
           </div>
         </div>
       </div>
+        </>
+      )}
 
       {/* Clock Out Confirm Modal for Admin */}
       {clockOutTarget && (
