@@ -92,13 +92,28 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
   const isAdmin = isUserAdmin(user);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'my' | 'admin' | 'new'>(defaultTab);
+  // Tabs
+  const [activeTab, setActiveTab] = useState<'my' | 'admin' | 'new'>(() => {
+    if (defaultTab === 'admin' && isAdmin) return 'admin';
+    return defaultTab === 'admin' ? 'my' : defaultTab;
+  });
 
   useEffect(() => {
     if (isOpen) {
-      setActiveTab(defaultTab);
+      if (defaultTab === 'admin' && !isAdmin) {
+        setActiveTab('my');
+      } else {
+        setActiveTab(defaultTab);
+      }
     }
-  }, [isOpen, defaultTab]);
+  }, [isOpen, defaultTab, isAdmin]);
+
+  // Strict Tab Guard: Non-admin can never enter or stay in 'admin' tab
+  useEffect(() => {
+    if (!isAdmin && activeTab === 'admin') {
+      setActiveTab('my');
+    }
+  }, [isAdmin, activeTab]);
 
   // Billing Cycle (Cutoff on the 25th of month)
   const availableCycles = useMemo(() => getAvailableOTCycles(), []);
@@ -139,7 +154,7 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
   // Lightbox View for Slips
   const [viewingSlipUrl, setViewingSlipUrl] = useState<{ url: string; title: string } | null>(null);
 
-  // Subscribe to advance_requests collection
+  // Subscribe to advance_requests collection (Strictly isolated by role)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -151,7 +166,28 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
       (snapshot) => {
         const list: AdvanceRequest[] = [];
         snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdvanceRequest, 'id'>) });
+          const req = { id: docSnap.id, ...(docSnap.data() as Omit<AdvanceRequest, 'id'>) };
+          if (isAdmin) {
+            list.push(req);
+          } else {
+            // Strictly guard: non-admin employee can ONLY access and see their own requests!
+            const currentUid = (user?.uid || '').toLowerCase();
+            const currentUsername = (user?.username || '').toLowerCase();
+            const currentName = (user?.name || '').toLowerCase();
+
+            const rUid = (req.employeeId || '').toLowerCase();
+            const rUsername = (req.employeeUsername || '').toLowerCase();
+            const rName = (req.employeeName || '').toLowerCase();
+
+            const isOwn =
+              (currentUid && rUid === currentUid) ||
+              (currentUsername && rUsername === currentUsername) ||
+              (currentName && rName === currentName);
+
+            if (isOwn) {
+              list.push(req);
+            }
+          }
         });
         setRequests(list);
         setLoading(false);
@@ -163,7 +199,7 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
     );
 
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, isAdmin, user]);
 
   // Handle file select for Admin Slip Attachment
   const handleAdminSlipChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -229,21 +265,6 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
 
       await addDoc(collection(db, 'advance_requests'), newAdvance);
 
-      // Audit log activity
-      try {
-        const actData: any = {
-          type: 'request_advance',
-          actorId: user.uid,
-          actorName: user.name || 'พนักงาน',
-          description: `ยื่นขอเบิกเงินแอดวานซ์ ${amountNum.toLocaleString()} บาท (รอบ 25) - "${reason.trim().slice(0, 30)}"`,
-          timestamp: Date.now(),
-        };
-        if (user.avatarEmoji) actData.actorAvatarEmoji = user.avatarEmoji;
-        await addDoc(collection(db, 'activities'), actData);
-      } catch (err) {
-        console.warn('Could not record activity:', err);
-      }
-
       setSubmitSuccess(true);
       setAmountStr('');
       setReason('');
@@ -296,21 +317,6 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
 
       await updateDoc(reqRef, updatePayload);
 
-      // Audit activity
-      try {
-        await addDoc(collection(db, 'activities'), {
-          type: status === 'approved' ? 'approve_advance' : 'reject_advance',
-          actorId: user.uid,
-          actorName: user.name || 'แอดมิน',
-          description: `${status === 'approved' ? 'อนุมัติ/โอนเงินแอดวานซ์' : 'ไม่อนุมัติแอดวานซ์'} ของ ${targetReq?.employeeName || 'พนักงาน'} (${targetReq?.amount.toLocaleString() || 0} บาท)${adminSlipData ? ' พร้อมแนบสลิป' : ''}`,
-          timestamp: Date.now(),
-        });
-      } catch (err) {
-        console.warn('Could not record activity:', err);
-      }
-
-      setReviewingId(null);
-      setAdminComment('');
       setReviewingId(null);
       setAdminComment('');
       setAdminSlipData(null);

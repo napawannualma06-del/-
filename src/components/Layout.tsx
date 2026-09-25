@@ -225,27 +225,43 @@ export function Layout() {
       setPendingTechCount(count);
     }, () => {});
 
-    // Listen to overtime_requests for pending badge (for admins)
+    // Listen to overtime_requests for pending badge (for admins: all, for employees: only own pending)
     const otQuery = query(collection(db, 'overtime_requests'));
     const unsubOT = onSnapshot(otQuery, (snap) => {
       let pendingCount = 0;
+      const isAdmin = isUserAdmin(user);
       snap.forEach((doc) => {
         const d = doc.data();
         if (d.status === 'pending') {
-          pendingCount++;
+          if (isAdmin) {
+            pendingCount++;
+          } else if (
+            user &&
+            (d.employeeId === user.uid || (user.username && d.employeeUsername === user.username))
+          ) {
+            pendingCount++;
+          }
         }
       });
       setPendingOTCount(pendingCount);
     }, () => {});
 
-    // Listen to advance_requests for pending badge (for admins)
+    // Listen to advance_requests for pending badge (for admins: all, for employees: only own pending)
     const advanceQuery = query(collection(db, 'advance_requests'));
     const unsubAdvance = onSnapshot(advanceQuery, (snap) => {
       let pendingCount = 0;
+      const isAdmin = isUserAdmin(user);
       snap.forEach((doc) => {
         const d = doc.data();
         if (d.status === 'pending') {
-          pendingCount++;
+          if (isAdmin) {
+            pendingCount++;
+          } else if (
+            user &&
+            (d.employeeId === user.uid || (user.username && d.employeeUsername === user.username))
+          ) {
+            pendingCount++;
+          }
         }
       });
       setPendingAdvanceCount(pendingCount);
@@ -399,7 +415,7 @@ export function Layout() {
                     {/* Badge รวมเตือนรายการรอดำเนินการ */}
                     {(pendingOTCount > 0 || pendingAdvanceCount > 0 || pendingTechCount > 0) && (
                       <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-rose-500 text-white shadow-2xs animate-pulse">
-                        {(isUserAdmin(user) ? (pendingOTCount + pendingAdvanceCount) : 0) + pendingTechCount}
+                        {(pendingOTCount + pendingAdvanceCount) + pendingTechCount}
                       </span>
                     )}
 
@@ -440,9 +456,9 @@ export function Layout() {
                           </div>
                         </div>
 
-                        {isUserAdmin(user) && pendingAdvanceCount > 0 && (
+                        {pendingAdvanceCount > 0 && (
                           <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-2xs animate-pulse shrink-0">
-                            {pendingAdvanceCount} รอ
+                            {pendingAdvanceCount} {isUserAdmin(user) ? 'รอ' : 'ของฉันรอผล'}
                           </span>
                         )}
                       </button>
@@ -471,9 +487,9 @@ export function Layout() {
                           </div>
                         </div>
 
-                        {isUserAdmin(user) && pendingOTCount > 0 && (
+                        {pendingOTCount > 0 && (
                           <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse shrink-0">
-                            {pendingOTCount} รอ
+                            {pendingOTCount} {isUserAdmin(user) ? 'รอ' : 'ของฉันรอผล'}
                           </span>
                         )}
                       </button>

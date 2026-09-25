@@ -41,7 +41,20 @@ export const RecentActivityFeed: React.FC = () => {
       (snapshot) => {
         const list: ActivityLog[] = [];
         snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() } as ActivityLog);
+          const item = { id: doc.id, ...doc.data() } as ActivityLog;
+          const typeStr = String(item.type || '').toLowerCase();
+          const descStr = String(item.description || '').toLowerCase();
+          // Exclude personal confidential activities (OT, advance, funds) from public ticker
+          if (
+            typeStr.includes('ot') ||
+            typeStr.includes('advance') ||
+            descStr.includes('ot') ||
+            descStr.includes('แอดวานซ์') ||
+            descStr.includes('เบิกเงิน')
+          ) {
+            return;
+          }
+          list.push(item);
         });
         setActivities(list);
       },

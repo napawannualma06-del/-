@@ -232,20 +232,6 @@ export function AdminOTDashboard() {
         updatedAt: Date.now(),
       });
 
-      // Audit activity
-      try {
-        const targetReq = requests.find((r) => r.id === requestId);
-        await addDoc(collection(db, 'activities'), {
-          type: status === 'approved' ? 'approve_ot' : 'reject_ot',
-          actorId: user.uid,
-          actorName: user.name || 'แอดมิน',
-          description: `${status === 'approved' ? 'อนุมัติ' : 'ไม่อนุมัติ'} OT ของ ${targetReq?.employeeName || 'พนักงาน'} (${targetReq?.hours || 0} ชม.)`,
-          timestamp: Date.now(),
-        });
-      } catch (err) {
-        console.warn('Could not record activity:', err);
-      }
-
       setReviewingId(null);
       setAdminComment('');
     } catch (error) {

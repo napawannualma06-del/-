@@ -5,7 +5,7 @@
 
 import { useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useStore } from './store/useStore';
+import { useStore, isUserAdmin } from './store/useStore';
 import { Login } from './components/Login';
 import { Queue } from './components/Queue';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -33,7 +33,7 @@ export default function App() {
         
         <Route element={user ? <Layout /> : <Navigate to="/login" />}>
           <Route path="/" element={<Queue />} />
-          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin" element={isUserAdmin(user) ? <AdminDashboard /> : <Navigate to="/" replace />} />
         </Route>
       </Routes>
     </HashRouter>

@@ -273,20 +273,6 @@ export function AdminAdvanceDashboard() {
 
       await updateDoc(reqRef, updatePayload);
 
-      // Audit activity
-      try {
-        const targetReq = requests.find((r) => r.id === requestId);
-        await addDoc(collection(db, 'activities'), {
-          type: status === 'approved' ? 'approve_advance' : 'reject_advance',
-          actorId: user.uid,
-          actorName: user.name || 'แอดมิน',
-          description: `${status === 'approved' ? 'อนุมัติ/โอนเงินแอดวานซ์' : 'ไม่อนุมัติแอดวานซ์'} ของ ${targetReq?.employeeName || 'พนักงาน'} (${targetReq?.amount.toLocaleString() || 0} บาท)${adminSlipData ? ' พร้อมแนบสลิป' : ''}`,
-          timestamp: Date.now(),
-        });
-      } catch (err) {
-        console.warn('Could not record activity:', err);
-      }
-
       setReviewingId(null);
       setAdminComment('');
       setAdminSlipData(null);

@@ -96,8 +96,15 @@ export function OvertimeModal({
   // Tab State: 'my' (OT ของฉัน) | 'admin' (แอดมินจัดการ) | 'new' (แบบฟอร์มขอ OT)
   const [activeTab, setActiveTab] = useState<'my' | 'admin' | 'new'>(() => {
     if (defaultTab === 'admin' && isAdmin) return 'admin';
-    return defaultTab;
+    return defaultTab === 'admin' ? 'my' : defaultTab;
   });
+
+  // Strict Tab Guard: Non-admin can never enter or stay in 'admin' tab
+  useEffect(() => {
+    if (!isAdmin && activeTab === 'admin') {
+      setActiveTab('my');
+    }
+  }, [isAdmin, activeTab]);
 
   const [requests, setRequests] = useState<OvertimeRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +134,7 @@ export function OvertimeModal({
   const [adminComment, setAdminComment] = useState('');
   const [isReviewing, setIsReviewing] = useState(false);
 
-  // Subscribe to overtime_requests collection
+  // Subscribe to overtime_requests collection (Strictly isolated by role)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -138,8 +145,29 @@ export function OvertimeModal({
       q,
       (snapshot) => {
         const list: OvertimeRequest[] = [];
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...(doc.data() as Omit<OvertimeRequest, 'id'>) });
+        snapshot.forEach((docSnap) => {
+          const req = { id: docSnap.id, ...(docSnap.data() as Omit<OvertimeRequest, 'id'>) };
+          if (isAdmin) {
+            list.push(req);
+          } else {
+            // Strictly guard: non-admin employee can ONLY access and see their own requests!
+            const currentUid = (user?.uid || '').toLowerCase();
+            const currentUsername = (user?.username || '').toLowerCase();
+            const currentName = (user?.name || '').toLowerCase();
+
+            const rUid = (req.employeeId || '').toLowerCase();
+            const rUsername = (req.employeeUsername || '').toLowerCase();
+            const rName = (req.employeeName || '').toLowerCase();
+
+            const isOwn =
+              (currentUid && rUid === currentUid) ||
+              (currentUsername && rUsername === currentUsername) ||
+              (currentName && rName === currentName);
+
+            if (isOwn) {
+              list.push(req);
+            }
+          }
         });
         setRequests(list);
         setLoading(false);
@@ -151,7 +179,7 @@ export function OvertimeModal({
     );
 
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, isAdmin, user]);
 
   // Submit Form: ขอทำ OT
   const handleSubmitRequest = async (e: React.FormEvent) => {
@@ -202,23 +230,6 @@ export function OvertimeModal({
 
       await addDoc(collection(db, 'overtime_requests'), newOT);
 
-      // Audit log activity
-      try {
-        const actData: any = {
-          type: 'request_ot',
-          actorId: user.uid,
-          actorName: user.name || 'พนักงาน',
-          description: `ยื่นขอ OT วันที่ ${date} (${effectiveHours} ชม.) - "${reason.trim().slice(0, 30)}"`,
-          timestamp: Date.now(),
-        };
-        if (user.avatarEmoji) {
-          actData.actorAvatarEmoji = user.avatarEmoji;
-        }
-        await addDoc(collection(db, 'activities'), actData);
-      } catch (err) {
-        console.warn('Could not record activity:', err);
-      }
-
       setSubmitSuccess(true);
       setReason('');
       setManualHours('');
@@ -249,20 +260,6 @@ export function OvertimeModal({
         adminComment: adminComment.trim() || null,
         updatedAt: Date.now(),
       });
-
-      // Audit activity
-      try {
-        const targetReq = requests.find(r => r.id === requestId);
-        await addDoc(collection(db, 'activities'), {
-          type: status === 'approved' ? 'approve_ot' : 'reject_ot',
-          actorId: user.uid,
-          actorName: user.name || 'แอดมิน',
-          description: `${status === 'approved' ? 'อนุมัติ' : 'ไม่อนุมัติ'} OT ของ ${targetReq?.employeeName || 'พนักงาน'} (${targetReq?.hours || 0} ชม.)`,
-          timestamp: Date.now(),
-        });
-      } catch (err) {
-        console.warn('Could not record activity:', err);
-      }
 
       setReviewingId(null);
       setAdminComment('');
@@ -344,12 +341,12 @@ export function OvertimeModal({
   // Export to Excel CSV
   const handleExportExcel = () => {
     // กรองเฉพาะรายการที่อนุมัติแล้ว หรือทั้งหมดในรอบบิล
-    const targetData = isAdmin ? cycleFilteredRequests : cycleFilteredMyRequests;
+    const targetData = isAdmin && activeTab === 'admin' ? cycleFilteredRequests : cycleFilteredMyRequests;
     if (targetData.length === 0) {
       alert(`ไม่พบข้อมูล OT ใน ${selectedCycleInfo.cycleLabel} ค่ะ`);
       return;
     }
-    const prefix = isAdmin ? 'สรุปยอด_OT_บริษัท_Thaiplus' : `สรุปยอด_OT_${user?.name || 'พนักงาน'}`;
+    const prefix = isAdmin && activeTab === 'admin' ? 'สรุปยอด_OT_บริษัท_Thaiplus' : `สรุปยอด_OT_${user?.name || 'พนักงาน'}`;
     exportOTToExcelCsv(targetData, selectedCycleInfo, prefix);
   };
 
