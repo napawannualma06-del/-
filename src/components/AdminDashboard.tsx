@@ -22,6 +22,7 @@ import {
   MapPin,
   ChevronRight,
   ShieldCheck,
+  Banknote,
   Sparkles,
   StickyNote,
   FileSignature,
@@ -45,6 +46,7 @@ import { ReturnCaseModal } from './ReturnCaseModal';
 import { CloseCaseModal } from './CloseCaseModal';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { AdminOTDashboard } from './AdminOTDashboard';
+import { AdminAdvanceDashboard } from './AdminAdvanceDashboard';
 import { getPreviousAssignee } from '../lib/caseUtils';
 import { 
   getExpiredCases, 
@@ -92,7 +94,8 @@ export function AdminDashboard() {
   const [showTechModal, setShowTechModal] = useState(false);
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [pendingOTCount, setPendingOTCount] = useState(0);
-  const [mainTab, setMainTab] = useState<'cases' | 'ot'>('cases');
+  const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
+  const [mainTab, setMainTab] = useState<'cases' | 'ot' | 'advance'>('cases');
 
   // Subscribe to technical_issues count
   useEffect(() => {
@@ -178,11 +181,25 @@ export function AdminDashboard() {
       setPendingOTCount(count);
     }, () => {});
 
+    // 5. Subscribe to advance_requests count
+    const qAdv = query(collection(db, 'advance_requests'));
+    const unsubAdv = onSnapshot(qAdv, (snap) => {
+      let count = 0;
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (d.status === 'pending') {
+          count++;
+        }
+      });
+      setPendingAdvanceCount(count);
+    }, () => {});
+
     return () => {
       unsubCases();
       unsubUsers();
       unsubDuty();
       unsubOT();
+      unsubAdv();
     };
   }, []);
 
@@ -404,49 +421,70 @@ export function AdminDashboard() {
             <div className="flex items-center space-x-2">
               <Logo size="sm" />
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center">
-                {mainTab === 'cases' ? 'แดชบอร์ดและสถิติภาพรวม' : 'แดชบอร์ด OT พนักงานทุกคน'}
+                {mainTab === 'cases' ? 'แดชบอร์ดและสถิติภาพรวม' : mainTab === 'ot' ? 'แดชบอร์ด OT พนักงานทุกคน' : 'แดชบอร์ดขอเบิกเงินแอดวานซ์ พนักงานทุกคน'}
               </h1>
             </div>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 sm:mt-1">
               {mainTab === 'cases'
                 ? 'สรุปข้อมูลการดำเนินงาน สถิติปิดเคส และตารางอันดับผลงาน (ระบบตัดรอบเวลาเที่ยงคืน 00:00 - 23:59 น.)'
-                : 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติ สรุปยอดชั่วโมง OT รายบุคคล และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'}
+                : mainTab === 'ot'
+                ? 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติ สรุปยอดชั่วโมง OT รายบุคคล และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
+                : 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติเบิกเงิน โอนเงิน แนบสลิปหลักฐาน และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'}
             </p>
           </div>
 
           {/* Action Modals and Tab Switchers */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Main Section Switcher: แดชบอร์ดเคส vs แดชบอร์ด OT */}
-            <div className="flex items-center p-1 bg-slate-200/80 dark:bg-slate-800 rounded-xl">
+            {/* Main Section Switcher: แดชบอร์ดเคส vs แดชบอร์ด OT vs แดชบอร์ดแอดวานซ์ */}
+            <div className="flex items-center p-1 bg-slate-200/80 dark:bg-slate-800 rounded-xl overflow-x-auto max-w-full">
               <button
                 type="button"
                 onClick={() => setMainTab('cases')}
                 className={clsx(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap",
+                  "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
                   mainTab === 'cases'
                     ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
-                <BarChart3 className="w-3.5 h-3.5" />
-                <span>แดชบอร์ดเคส</span>
+                <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+                <span>เคส</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setMainTab('ot')}
                 className={clsx(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative",
+                  "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
                   mainTab === 'ot'
                     ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
-                <Clock className="w-3.5 h-3.5 text-indigo-500" />
-                <span>แดชบอร์ด OT (ตัดรอบ 25)</span>
+                <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                <span>OT</span>
                 {pendingOTCount > 0 && (
                   <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse">
                     {pendingOTCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMainTab('advance')}
+                className={clsx(
+                  "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                  mainTab === 'advance'
+                    ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                <Banknote className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>แอดวานซ์</span>
+                {pendingAdvanceCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-2xs animate-pulse">
+                    {pendingAdvanceCount}
                   </span>
                 )}
               </button>
@@ -600,6 +638,8 @@ export function AdminDashboard() {
       {/* Conditional Rendering based on Main Tab */}
       {mainTab === 'ot' ? (
         <AdminOTDashboard />
+      ) : mainTab === 'advance' ? (
+        <AdminAdvanceDashboard />
       ) : (
         <>
           {/* Credit Check Duty Station (2-person duty roster visible to everyone) */}

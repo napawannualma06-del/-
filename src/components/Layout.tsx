@@ -25,11 +25,15 @@ import {
   Clock,
   X,
   ExternalLink,
-  Zap
+  Zap,
+  Banknote,
+  ChevronDown,
+  Layers
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
 import { OvertimeModal } from './OvertimeModal';
+import { AdvanceModal } from './AdvanceModal';
 import { isUserAdmin } from '../store/useStore';
 
 interface TechStatusToast {
@@ -53,6 +57,11 @@ export function Layout() {
   const [showOTModal, setShowOTModal] = useState(false);
   const [otDefaultTab, setOtDefaultTab] = useState<'my' | 'admin' | 'new'>('my');
   const [pendingOTCount, setPendingOTCount] = useState(0);
+  const [showAdvanceModal, setShowAdvanceModal] = useState(false);
+  const [advanceDefaultTab, setAdvanceDefaultTab] = useState<'my' | 'admin' | 'new'>('my');
+  const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
+  const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+  const toolsDropdownRef = useRef<HTMLDivElement | null>(null);
   const [showRefinanceModal, setShowRefinanceModal] = useState(false);
   const [refinanceModalModel, setRefinanceModalModel] = useState<string | undefined>(undefined);
   const [pendingTechCount, setPendingTechCount] = useState(0);
@@ -229,9 +238,23 @@ export function Layout() {
       setPendingOTCount(pendingCount);
     }, () => {});
 
+    // Listen to advance_requests for pending badge (for admins)
+    const advanceQuery = query(collection(db, 'advance_requests'));
+    const unsubAdvance = onSnapshot(advanceQuery, (snap) => {
+      let pendingCount = 0;
+      snap.forEach((doc) => {
+        const d = doc.data();
+        if (d.status === 'pending') {
+          pendingCount++;
+        }
+      });
+      setPendingAdvanceCount(pendingCount);
+    }, () => {});
+
     return () => {
       unsub();
       unsubOT();
+      unsubAdvance();
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     };
   }, [user]);
@@ -257,13 +280,38 @@ export function Layout() {
       setShowOTModal(true);
     };
 
+    const handleOpenAdvance = (e: any) => {
+      if (e.detail?.tab) {
+        setAdvanceDefaultTab(e.detail.tab);
+      }
+      setShowAdvanceModal(true);
+    };
+
     window.addEventListener('open-refinance-guide', handleOpenRefinance);
     window.addEventListener('open-ot-modal', handleOpenOT);
+    window.addEventListener('open-advance-modal', handleOpenAdvance);
     return () => {
       window.removeEventListener('open-refinance-guide', handleOpenRefinance);
       window.removeEventListener('open-ot-modal', handleOpenOT);
+      window.removeEventListener('open-advance-modal', handleOpenAdvance);
     };
   }, []);
+
+  // Click outside to close tools dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (toolsDropdownRef.current && !toolsDropdownRef.current.contains(e.target as Node)) {
+        setShowToolsDropdown(false);
+      }
+    };
+
+    if (showToolsDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showToolsDropdown]);
 
   const handleRequestNotification = async () => {
     if ('Notification' in window) {
@@ -277,14 +325,14 @@ export function Layout() {
       {/* Top Navbar */}
       <nav className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-20 shadow-xs transition-colors">
         <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
-          <div className="flex justify-between items-center h-14 sm:h-16 gap-1 sm:gap-3">
+          <div className="flex justify-between items-center h-14 sm:h-16 gap-1 sm:gap-2">
             
             {/* Logo & Navigation */}
-            <div className="flex items-center gap-1 sm:gap-2.5 md:gap-4 shrink-0">
-              <Link to="/" className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                <Logo size="sm" className="shrink-0" />
-                <div className="hidden md:block border-l border-slate-200 dark:border-slate-800 pl-2 shrink-0">
-                  <div className="flex items-center gap-1 sm:gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
+              <Link to="/" className="flex items-center gap-1 sm:gap-1.5 shrink-0" title="หน้าแรก">
+                <Logo size="sm" className="shrink-0 scale-90 sm:scale-100" />
+                <div className="hidden xl:block border-l border-slate-200 dark:border-slate-800 pl-2 shrink-0">
+                  <div className="flex items-center gap-1">
                     <span className="font-bold text-xs md:text-sm text-slate-900 dark:text-white leading-none block whitespace-nowrap">
                       ระบบจัดการคิว
                     </span>
@@ -293,110 +341,207 @@ export function Layout() {
                       ออนไลน์
                     </span>
                   </div>
-                  <span className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 font-medium whitespace-nowrap block mt-0.5">
+                  <span className="text-[9px] text-slate-400 dark:text-slate-500 font-medium whitespace-nowrap block mt-0.5">
                     ไทย พลัส+
                   </span>
                 </div>
               </Link>
  
               {/* Unified Nav Links */}
-              <div className="flex items-center gap-0.5 sm:gap-1.5 shrink-0">
+              <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
                 <Link
                   to="/"
                   className={clsx(
-                    'inline-flex items-center px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
+                    'inline-flex items-center px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
                     location.pathname === '/' 
-                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs' 
+                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold' 
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
                   )}
                   title="กระดานคิว"
                 >
-                  <ListTodo className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5 shrink-0" />
-                  <span className="hidden sm:inline">กระดานคิว</span>
-                  <span className="inline sm:hidden ml-1">คิว</span>
+                  <ListTodo className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1 shrink-0" />
+                  <span className="hidden sm:inline">คิวงาน</span>
                 </Link>
  
                 <Link
                   to="/admin"
                   className={clsx(
-                    'inline-flex items-center px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
+                    'inline-flex items-center px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
                     location.pathname === '/admin' 
-                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs' 
+                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold' 
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
                   )}
                   title="แดชบอร์ด & สถิติ"
                 >
-                  <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5 shrink-0" />
-                  <span className="hidden md:inline">แดชบอร์ด & สถิติ</span>
-                  <span className="hidden sm:inline md:hidden">แดชบอร์ด</span>
+                  <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1 shrink-0" />
+                  <span className="hidden sm:inline">แดชบอร์ด</span>
                 </Link>
 
-                {/* ตารางรีไฟแนนซ์ iPhone (ผ่อนรายเดือน) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRefinanceModalModel(undefined);
-                    setShowRefinanceModal(true);
-                  }}
-                  className="inline-flex items-center px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50/90 dark:bg-blue-950/60 border border-blue-200/80 dark:border-blue-900/60 hover:bg-blue-100 dark:hover:bg-blue-900/40 shadow-2xs transition whitespace-nowrap shrink-0 cursor-pointer"
-                  title="ตารางรีไฟแนนซ์ iPhone (ผ่อนรายเดือน & หักสุขภาพแบต)"
-                >
-                  <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5 shrink-0 text-amber-500 fill-amber-500" />
-                  <span className="hidden lg:inline">ตารางรีไฟแนนซ์</span>
-                  <span className="inline lg:hidden">เรทผ่อน</span>
-                </button>
+                {/* เมนูดรอปดาวน์รวมเครื่องมือและบริการ (เมนูสะอาด สบายตา ไม่ล้นจอ) */}
+                <div className="relative" ref={toolsDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowToolsDropdown(!showToolsDropdown)}
+                    className={clsx(
+                      'relative inline-flex items-center gap-1 sm:gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer shadow-2xs border',
+                      showToolsDropdown
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-500/20'
+                        : (pendingOTCount > 0 || pendingAdvanceCount > 0 || pendingTechCount > 0)
+                        ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-800 hover:bg-amber-100'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                    )}
+                    title="บริการและคำขอ (OT, เบิกแอดวานซ์, เรทผ่อน, แจ้งปัญหา)"
+                  >
+                    <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500 shrink-0" />
+                    <span className="font-bold hidden md:inline">บริการ & คำขอ</span>
+                    <span className="font-bold inline md:hidden">บริการ</span>
+                    
+                    {/* Badge รวมเตือนรายการรอดำเนินการ */}
+                    {(pendingOTCount > 0 || pendingAdvanceCount > 0 || pendingTechCount > 0) && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-rose-500 text-white shadow-2xs animate-pulse">
+                        {(isUserAdmin(user) ? (pendingOTCount + pendingAdvanceCount) : 0) + pendingTechCount}
+                      </span>
+                    )}
 
-                {/* ปุ่มระบบขอและอนุมัติ OT */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOtDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
-                    setShowOTModal(true);
-                  }}
-                  className={clsx(
-                    'relative inline-flex items-center px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
-                    isUserAdmin(user) && pendingOTCount > 0
-                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 shadow-2xs hover:bg-amber-100 dark:hover:bg-amber-900/40'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-                  )}
-                  title="ระบบขอและอนุมัติ OT (ตัดรอบทุกวันที่ 25)"
-                >
-                  <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5 shrink-0 text-indigo-500" />
-                  <span className="hidden lg:inline">ระบบ OT</span>
-                  <span className="inline lg:hidden">OT</span>
-                  {isUserAdmin(user) && pendingOTCount > 0 && (
-                    <span className="sm:ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse">
-                      {pendingOTCount}
-                    </span>
-                  )}
-                </button>
+                    <ChevronDown className={clsx(
+                      "w-3.5 h-3.5 transition-transform duration-200 shrink-0",
+                      showToolsDropdown && "rotate-180"
+                    )} />
+                  </button>
 
-                {/* ปุ่มแจ้งปัญหาเทคนิค */}
-                <button
-                  type="button"
-                  onClick={() => setShowTechModal(true)}
-                  className={clsx(
-                    'relative inline-flex items-center px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
-                    pendingTechCount > 0
-                      ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 shadow-2xs hover:bg-rose-100 dark:hover:bg-rose-900/40'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                  {/* Dropdown Menu Panel */}
+                  {showToolsDropdown && (
+                    <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3.5 py-2 border-b border-slate-100 dark:border-slate-800/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        บริการและแบบฟอร์ม
+                      </div>
+
+                      {/* 1. ขอเบิกเงินแอดวานซ์ */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setAdvanceDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+                          setShowAdvanceModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-emerald-50/70 dark:hover:bg-emerald-950/40 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 group-hover:scale-105 transition shrink-0">
+                            <Banknote className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-emerald-700 dark:group-hover:text-emerald-400">
+                              ขอเบิกเงินแอดวานซ์
+                            </span>
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              ตัดรอบทุกวันที่ 25 • แนบสลิปโอน
+                            </span>
+                          </div>
+                        </div>
+
+                        {isUserAdmin(user) && pendingAdvanceCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-2xs animate-pulse shrink-0">
+                            {pendingAdvanceCount} รอ
+                          </span>
+                        )}
+                      </button>
+
+                      {/* 2. ระบบขอและอนุมัติ OT */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setOtDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+                          setShowOTModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-indigo-50/70 dark:hover:bg-indigo-950/40 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 group-hover:scale-105 transition shrink-0">
+                            <Clock className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-700 dark:group-hover:text-indigo-400">
+                              ระบบขอและอนุมัติ OT
+                            </span>
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              บันทึกเวลาทำงานล่วงเวลา (ตัดรอบ 25)
+                            </span>
+                          </div>
+                        </div>
+
+                        {isUserAdmin(user) && pendingOTCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse shrink-0">
+                            {pendingOTCount} รอ
+                          </span>
+                        )}
+                      </button>
+
+                      {/* 3. ตารางรีไฟแนนซ์ iPhone */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setRefinanceModalModel(undefined);
+                          setShowRefinanceModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-blue-50/70 dark:hover:bg-blue-950/40 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 group-hover:scale-105 transition shrink-0">
+                            <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-blue-700 dark:group-hover:text-blue-400">
+                              ตารางรีไฟแนนซ์ iPhone
+                            </span>
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              ตารางคำนวณค่างวดผ่อน & สุขภาพแบต
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+
+                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                      {/* 4. แจ้งปัญหาเทคนิค */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setShowTechModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-rose-50/70 dark:hover:bg-rose-950/40 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400 group-hover:scale-105 transition shrink-0">
+                            <Wrench className="w-4 h-4 text-rose-500" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-rose-700 dark:group-hover:text-rose-400">
+                              แจ้งปัญหาเทคนิค
+                            </span>
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              รายงานระบบขัดข้องหรือปัญหาตัวเครื่อง
+                            </span>
+                          </div>
+                        </div>
+
+                        {pendingTechCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white shadow-2xs animate-pulse shrink-0">
+                            {pendingTechCount} รอแก้
+                          </span>
+                        )}
+                      </button>
+                    </div>
                   )}
-                  title="แจ้งปัญหาด้านเทคนิค ส่งแอดมิน"
-                >
-                  <Wrench className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5 shrink-0 text-rose-500" />
-                  <span className="hidden lg:inline">แจ้งปัญหาเทคนิค</span>
-                  <span className="hidden sm:inline lg:hidden">แจ้งปัญหา</span>
-                  {pendingTechCount > 0 && (
-                    <span className="sm:ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white shadow-2xs animate-pulse">
-                      {pendingTechCount}
-                    </span>
-                  )}
-                </button>
+                </div>
               </div>
             </div>
  
             {/* User Profile & Actions */}
-            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
               {/* Dark Mode Toggle */}
               <button
                 type="button"
@@ -442,7 +587,7 @@ export function Layout() {
                     }
                   }}
                   className={clsx(
-                    "px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-2xs whitespace-nowrap",
+                    "px-1.5 py-1.5 sm:px-2 sm:py-1.5 rounded-xl border text-xs font-semibold transition flex items-center gap-1 cursor-pointer shrink-0 shadow-2xs whitespace-nowrap",
                     isOffWork
                       ? "border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
                       : "border-emerald-300 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60"
@@ -453,22 +598,22 @@ export function Layout() {
                     "w-2 h-2 rounded-full shrink-0",
                     isOffWork ? "bg-slate-400" : "bg-emerald-500 animate-pulse"
                   )} />
-                  <span className="hidden md:inline">
+                  <span className="hidden xl:inline">
                     {isOffWork ? 'เลิกงานแล้ว' : 'เข้างานอยู่'}
                   </span>
-                  <span className="hidden sm:inline md:hidden">
+                  <span className="hidden md:inline xl:hidden">
                     {isOffWork ? 'เลิกงาน' : 'เข้างาน'}
                   </span>
                 </button>
               )}
 
               {/* Current Member Badge (Click to customize avatar) */}
-              <div className="flex items-center pl-1 sm:pl-2 border-l border-slate-200 dark:border-slate-800 shrink-0">
+              <div className="flex items-center pl-1 border-l border-slate-200 dark:border-slate-800 shrink-0">
                 <button
                   id="open-avatar-selector-btn"
                   type="button"
                   onClick={() => setShowAvatarModal(true)}
-                  className="group relative flex items-center p-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/80 transition cursor-pointer text-left focus:outline-hidden focus:ring-2 focus:ring-amber-500/50"
+                  className="group relative flex items-center p-0.5 sm:p-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/80 transition cursor-pointer text-left focus:outline-hidden focus:ring-2 focus:ring-amber-500/50 shrink-0"
                   title="คลิกเพื่อเปลี่ยนรูปตัวการ์ตูนประจำตัว"
                 >
                   <div className="relative shrink-0">
@@ -568,6 +713,15 @@ export function Layout() {
           isOpen={showOTModal}
           onClose={() => setShowOTModal(false)}
           defaultTab={otDefaultTab}
+        />
+      )}
+
+      {/* Advance Request & Approval Modal (with slip attachment) */}
+      {user && (
+        <AdvanceModal
+          isOpen={showAdvanceModal}
+          onClose={() => setShowAdvanceModal(false)}
+          defaultTab={advanceDefaultTab}
         />
       )}
 

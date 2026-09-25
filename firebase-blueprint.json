@@ -318,6 +318,101 @@
         }
       },
       "required": ["employeeId", "employeeName", "date", "startTime", "endTime", "hours", "reason", "status", "cyclePeriod", "createdAt", "updatedAt"]
+    },
+    "AdvanceRequest": {
+      "title": "AdvanceRequest",
+      "description": "Employee salary advance request with slip attachment support",
+      "type": "object",
+      "properties": {
+        "employeeId": {
+          "type": "string",
+          "description": "Employee user ID"
+        },
+        "employeeName": {
+          "type": "string",
+          "description": "Employee display name"
+        },
+        "employeeUsername": {
+          "type": "string",
+          "description": "Employee username"
+        },
+        "employeeAvatarEmoji": {
+          "type": "string",
+          "description": "Employee avatar emoji"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Requested advance amount in THB"
+        },
+        "requestDate": {
+          "type": "string",
+          "description": "Date of request in YYYY-MM-DD format"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason or purpose for advance request"
+        },
+        "bankName": {
+          "type": "string",
+          "description": "Destination bank name"
+        },
+        "accountNumber": {
+          "type": "string",
+          "description": "Bank account number"
+        },
+        "accountName": {
+          "type": "string",
+          "description": "Bank account owner name"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Advance approval status"
+        },
+        "cyclePeriod": {
+          "type": "string",
+          "description": "Payroll billing cycle cutoff 25 (e.g. 2026-09: 26 Aug - 25 Sep)"
+        },
+        "slipUrl": {
+          "type": "string",
+          "description": "Transfer slip image URL or base64 data"
+        },
+        "slipFileName": {
+          "type": "string",
+          "description": "Filename of attached slip"
+        },
+        "slipUploadedAt": {
+          "type": "number",
+          "description": "Timestamp when slip was attached"
+        },
+        "slipUploadedBy": {
+          "type": "string",
+          "description": "Name of user who attached the slip"
+        },
+        "approvedBy": {
+          "type": "string",
+          "description": "Name of admin who reviewed"
+        },
+        "approvedById": {
+          "type": "string",
+          "description": "User ID of admin who reviewed"
+        },
+        "reviewedAt": {
+          "type": "number",
+          "description": "Timestamp when reviewed"
+        },
+        "adminComment": {
+          "type": "string",
+          "description": "Admin review note"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": ["employeeId", "employeeName", "amount", "requestDate", "reason", "status", "cyclePeriod", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -344,6 +439,11 @@
     "overtime_requests/{requestId}": {
       "schema": "OvertimeRequest",
       "description": "Employee overtime requests"
+    },
+    "advance_requests/{requestId}": {
+      "schema": "AdvanceRequest",
+      "description": "Employee advance payment requests with slip support"
     }
   }
 }
+

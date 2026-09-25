@@ -134,4 +134,32 @@ export interface OvertimeRequest {
   updatedAt: number;
 }
 
+export type AdvanceStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AdvanceRequest {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeUsername?: string;
+  employeeAvatarEmoji?: string;
+  amount: number;             // จำนวนเงินที่ขอเบิกแอดวานซ์ (บาท)
+  requestDate: string;        // วันที่ขอเบิก YYYY-MM-DD
+  reason: string;             // เหตุผลหรือวัตถุประสงค์ในการขอเบิก
+  bankName?: string;          // ธนาคารที่ให้โอนเข้า (ตัวเลือก)
+  accountNumber?: string;     // เลขที่บัญชี (ตัวเลือก)
+  accountName?: string;       // ชื่อบัญชี (ตัวเลือก)
+  status: AdvanceStatus;      // 'pending' | 'approved' | 'rejected'
+  cyclePeriod: string;        // รอบบิลตัดยอด 25 (e.g. "2026-09" คือ 26 ส.ค. - 25 ก.ย.)
+  slipUrl?: string;           // รูปภาพสลิปการโอนเงิน (base64 data url)
+  slipFileName?: string;      // ชื่อไฟล์สลิป
+  slipUploadedAt?: number;    // วันเวลาที่แนบสลิป
+  slipUploadedBy?: string;    // ผู้แนบสลิป (เช่น แอดมิน หรือ พนักงาน)
+  approvedBy?: string;        // ชื่อแอดมินที่พิจารณา
+  approvedById?: string;      // ID แอดมิน
+  reviewedAt?: number;        // วันเวลาที่พิจารณา
+  adminComment?: string;      // หมายเหตุจากแอดมิน
+  createdAt: number;
+  updatedAt: number;
+}
+
 

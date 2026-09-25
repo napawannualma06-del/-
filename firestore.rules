@@ -111,6 +111,31 @@ service cloud.firestore {
              (!('adminComment' in data) || data.adminComment == null || (data.adminComment is string && data.adminComment.size() <= 1000));
     }
 
+    function isValidAdvanceRequest(data) {
+      return data.employeeId is string && data.employeeId.size() <= 128 &&
+             data.employeeName is string && data.employeeName.size() <= 128 &&
+             (data.amount is number || data.amount is int) && data.amount > 0 && data.amount <= 1000000 &&
+             data.requestDate is string && data.requestDate.size() <= 20 &&
+             data.reason is string && data.reason.size() > 0 && data.reason.size() <= 2000 &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.cyclePeriod is string && data.cyclePeriod.size() <= 64 &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             (!('employeeUsername' in data) || data.employeeUsername == null || (data.employeeUsername is string && data.employeeUsername.size() <= 128)) &&
+             (!('employeeAvatarEmoji' in data) || data.employeeAvatarEmoji == null || (data.employeeAvatarEmoji is string && data.employeeAvatarEmoji.size() <= 64)) &&
+             (!('bankName' in data) || data.bankName == null || (data.bankName is string && data.bankName.size() <= 128)) &&
+             (!('accountNumber' in data) || data.accountNumber == null || (data.accountNumber is string && data.accountNumber.size() <= 64)) &&
+             (!('accountName' in data) || data.accountName == null || (data.accountName is string && data.accountName.size() <= 128)) &&
+             (!('slipUrl' in data) || data.slipUrl == null || (data.slipUrl is string && data.slipUrl.size() <= 600000)) &&
+             (!('slipFileName' in data) || data.slipFileName == null || (data.slipFileName is string && data.slipFileName.size() <= 256)) &&
+             (!('slipUploadedAt' in data) || data.slipUploadedAt == null || (data.slipUploadedAt is number)) &&
+             (!('slipUploadedBy' in data) || data.slipUploadedBy == null || (data.slipUploadedBy is string && data.slipUploadedBy.size() <= 128)) &&
+             (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&
+             (!('approvedById' in data) || data.approvedById == null || (data.approvedById is string && data.approvedById.size() <= 128)) &&
+             (!('reviewedAt' in data) || data.reviewedAt == null || (data.reviewedAt is number)) &&
+             (!('adminComment' in data) || data.adminComment == null || (data.adminComment is string && data.adminComment.size() <= 1000));
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create, update: if isValidUser(incoming());
@@ -158,5 +183,12 @@ service cloud.firestore {
       allow create, update: if isValidOvertimeRequest(incoming());
       allow delete: if true;
     }
+
+    match /advance_requests/{requestId} {
+      allow read: if true;
+      allow create, update: if isValidAdvanceRequest(incoming());
+      allow delete: if true;
+    }
   }
 }
+
