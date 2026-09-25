@@ -36,14 +36,17 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
 
   if (!isOpen || !caseData) return null;
 
+  const isCustomTask = Boolean(caseData.isCustomTask || caseData.caseType === 'custom_task');
   const trimmedContract = contractNumber.trim();
   const isContractEmpty = trimmedContract.length === 0;
+  // สำหรับงานพิเศษ ไม่บังคับใส่เลขที่สัญญา
+  const isSubmitDisabled = isCustomTask ? false : isContractEmpty;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setHasAttemptedSubmit(true);
 
-    if (isContractEmpty) {
+    if (!isCustomTask && isContractEmpty) {
       return;
     }
 
@@ -54,17 +57,21 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
 
       const updates: Record<string, unknown> = {
         status: 'closed',
-        contractNumber: trimmedContract,
-        contractUpdatedAt: now,
-        contractUpdatedBy: currentUser?.name || caseData.assigneeName || 'พนักงาน',
         completedAt: now,
         updatedAt: now,
       };
 
+      if (trimmedContract) {
+        updates.contractNumber = trimmedContract;
+        updates.contractUpdatedAt = now;
+        updates.contractUpdatedBy = currentUser?.name || caseData.assigneeName || 'พนักงาน';
+      }
+
       const trimmedRemark = completionRemark.trim();
       if (trimmedRemark) {
         const existingRemarks = caseData.remarks ? `${caseData.remarks} | ` : '';
-        updates.remarks = `${existingRemarks}[จบเคส: ${trimmedRemark}]`;
+        const tag = isCustomTask ? 'จบงาน' : 'จบเคส';
+        updates.remarks = `${existingRemarks}[${tag}: ${trimmedRemark}]`;
         updates.remarksUpdatedAt = now;
         updates.remarksUpdatedBy = currentUser?.name || caseData.assigneeName || 'พนักงาน';
       }
@@ -72,15 +79,18 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
       await updateDoc(caseRef, updates);
 
       // Log activity
+      const taskName = caseData.taskTitle || caseData.iphoneModel.replace('[งานพิเศษ] ', '');
       await logActivity({
         type: 'close_case',
         actorId: currentUser?.uid || caseData.assigneeId || 'system',
         actorName: currentUser?.name || caseData.assigneeName || 'พนักงาน',
         actorAvatarEmoji: currentUser?.avatarEmoji,
-        description: `จบเคสสำเร็จ: ${caseData.iphoneModel} (สัญญา #${trimmedContract})`,
+        description: isCustomTask
+          ? `จบงานสำเร็จ: ${taskName}`
+          : `จบเคสสำเร็จ: ${caseData.iphoneModel} (สัญญา #${trimmedContract})`,
         caseId: caseData.id,
         iphoneModel: caseData.iphoneModel,
-        contractNumber: trimmedContract,
+        contractNumber: trimmedContract || undefined,
       });
 
       onClose();
@@ -103,13 +113,17 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <span>บันทึกจบเคส</span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
-                  บังคับใส่สัญญา
+                <span>{isCustomTask ? 'บันทึกจบงาน' : 'บันทึกจบเคส'}</span>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                  isCustomTask 
+                    ? 'bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300' 
+                    : 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300'
+                }`}>
+                  {isCustomTask ? 'งานพิเศษ' : 'บังคับใส่สัญญา'}
                 </span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                กรุณาระบุเลขที่สัญญาเพื่อยืนยันการจบเคสนี้
+                {isCustomTask ? 'ยืนยันการจบงานพิเศษ/งานมอบหมายนี้' : 'กรุณาระบุเลขที่สัญญาเพื่อยืนยันการจบเคสนี้'}
               </p>
             </div>
           </div>
@@ -129,30 +143,40 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="flex items-center text-xs font-bold text-slate-900 dark:text-white">
                 <Smartphone className="w-4 h-4 mr-1.5 text-emerald-600 dark:text-emerald-400" />
-                {caseData.iphoneModel}
+                {isCustomTask ? (caseData.taskTitle || caseData.iphoneModel.replace('[งานพิเศษ] ', '')) : caseData.iphoneModel}
               </span>
-              <span className="px-2 py-0.5 text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-md">
-                กำลังทำเคส
+              <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-md ${
+                isCustomTask
+                  ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300'
+                  : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+              }`}>
+                {isCustomTask ? 'กำลังทำงาน' : 'กำลังทำเคส'}
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
               <div className="truncate">
-                <span className="text-[10px] text-slate-400 block">ตัวแทน (ผู้ส่ง)</span>
-                <span className="font-medium truncate block">{caseData.agentName}</span>
+                <span className="text-[10px] text-slate-400 block">{isCustomTask ? 'ประเภทงาน' : 'ตัวแทน (ผู้ส่ง)'}</span>
+                <span className="font-medium truncate block">{isCustomTask ? 'งานมอบหมายโดยแอดมิน' : caseData.agentName}</span>
               </div>
               <div className="truncate">
-                <span className="text-[10px] text-slate-400 block">จังหวัด</span>
+                <span className="text-[10px] text-slate-400 block">{isCustomTask ? 'สถานะงาน' : 'จังหวัด'}</span>
                 <span className="font-medium truncate flex items-center">
-                  <MapPin className="w-3 h-3 mr-1 text-slate-400" />
-                  {caseData.province}
+                  {isCustomTask ? (
+                    'งานพิเศษ'
+                  ) : (
+                    <>
+                      <MapPin className="w-3 h-3 mr-1 text-slate-400" />
+                      {caseData.province}
+                    </>
+                  )}
                 </span>
               </div>
             </div>
 
             {caseData.assigneeName && (
               <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60 text-xs">
-                <span className="text-[10px] text-slate-400">ผู้รับผิดชอบเคส:</span>
+                <span className="text-[10px] text-slate-400">{isCustomTask ? 'ผู้รับผิดชอบงาน:' : 'ผู้รับผิดชอบเคส:'}</span>
                 <AnimalAvatar
                   identifier={caseData.assigneeId || caseData.assigneeName}
                   name={caseData.assigneeName}
@@ -165,55 +189,57 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
             )}
           </div>
 
-          {/* Contract Number Field (MANDATORY) */}
-          <div>
-            <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5 flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <FileSignature className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>เลขที่สัญญา (Contract Number)</span>
-                <span className="text-rose-500 text-xs font-bold">* บังคับกรอก</span>
-              </span>
-              {trimmedContract && (
-                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-                  <Sparkles className="w-3 h-3" />
-                  ระบุแล้ว
+          {/* Contract Number Field (MANDATORY ONLY FOR NORMAL CASES, HIDDEN/OPTIONAL FOR CUSTOM TASKS) */}
+          {!isCustomTask ? (
+            <div>
+              <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <FileSignature className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>เลขที่สัญญา (Contract Number)</span>
+                  <span className="text-rose-500 text-xs font-bold">* บังคับกรอก</span>
                 </span>
-              )}
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                autoFocus
-                required
-                value={contractNumber}
-                onChange={(e) => setContractNumber(e.target.value)}
-                placeholder="กรุณากรอกเลขที่สัญญา เช่น CNT-2025-0105 หรือ 6800123"
-                className={`w-full pl-9 pr-3.5 py-2.5 text-sm font-semibold rounded-xl bg-white dark:bg-slate-800 border transition ${
-                  hasAttemptedSubmit && isContractEmpty
-                    ? 'border-rose-500 focus:ring-2 focus:ring-rose-500 text-slate-900 dark:text-white ring-2 ring-rose-200 dark:ring-rose-950'
-                    : 'border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500'
-                }`}
-              />
-              <FileSignature className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-            </div>
+                {trimmedContract && (
+                  <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                    <Sparkles className="w-3 h-3" />
+                    ระบุแล้ว
+                  </span>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  autoFocus
+                  required
+                  value={contractNumber}
+                  onChange={(e) => setContractNumber(e.target.value)}
+                  placeholder="กรุณากรอกเลขที่สัญญา เช่น CNT-2025-0105 หรือ 6800123"
+                  className={`w-full pl-9 pr-3.5 py-2.5 text-sm font-semibold rounded-xl bg-white dark:bg-slate-800 border transition ${
+                    hasAttemptedSubmit && isContractEmpty
+                      ? 'border-rose-500 focus:ring-2 focus:ring-rose-500 text-slate-900 dark:text-white ring-2 ring-rose-200 dark:ring-rose-950'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500'
+                  }`}
+                />
+                <FileSignature className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              </div>
 
-            {/* Warning if empty */}
-            {hasAttemptedSubmit && isContractEmpty ? (
-              <p className="text-[11px] text-rose-500 dark:text-rose-400 mt-1.5 flex items-center gap-1 font-medium">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                จำเป็นต้องระบุเลขที่สัญญาก่อนจบเคส ไม่สามารถเว้นว่างได้
-              </p>
-            ) : (
-              <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
-                ระบบบังคับใส่เลขที่สัญญาเพื่อความถูกต้องในการติดตามงานและการคิดค่าคอมมิชชั่น
-              </p>
-            )}
-          </div>
+              {/* Warning if empty */}
+              {hasAttemptedSubmit && isContractEmpty ? (
+                <p className="text-[11px] text-rose-500 dark:text-rose-400 mt-1.5 flex items-center gap-1 font-medium">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  จำเป็นต้องระบุเลขที่สัญญาก่อนจบเคส ไม่สามารถเว้นว่างได้
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
+                  ระบบบังคับใส่เลขที่สัญญาเพื่อความถูกต้องในการติดตามงานและการคิดค่าคอมมิชชั่น
+                </p>
+              )}
+            </div>
+          ) : null}
 
           {/* Optional Completion Remarks */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              หมายเหตุเพิ่มเติมตอนจบเคส (ไม่บังคับ):
+              {isCustomTask ? 'หมายเหตุเพิ่มเติมตอนจบงาน (ไม่บังคับ):' : 'หมายเหตุเพิ่มเติมตอนจบเคส (ไม่บังคับ):'}
             </label>
             <textarea
               value={completionRemark}
@@ -228,7 +254,11 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
           <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-200/80 dark:border-emerald-900/40 flex items-start gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
             <div className="text-[11px] text-emerald-900 dark:text-emerald-300 leading-relaxed">
-              เมื่อกดยืนยันจบเคส เคสนี้จะย้ายไปยังแท็บ <span className="font-bold">"จบเคสแล้ว"</span> พร้อมบันทึกเลขที่สัญญาและเวลาที่ปิดงานโดยอัตโนมัติ
+              {isCustomTask ? (
+                <>เมื่อกดยืนยันจบงาน งานนี้จะย้ายไปยังแท็บ <span className="font-bold">"จบแล้ว"</span> พร้อมบันทึกเวลาที่ปิดงานโดยอัตโนมัติ</>
+              ) : (
+                <>เมื่อกดยืนยันจบเคส เคสนี้จะย้ายไปยังแท็บ <span className="font-bold">"จบเคสแล้ว"</span> พร้อมบันทึกเลขที่สัญญาและเวลาที่ปิดงานโดยอัตโนมัติ</>
+              )}
             </div>
           </div>
 
@@ -243,16 +273,18 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || isContractEmpty}
+              disabled={isSubmitting || isSubmitDisabled}
               className={`px-5 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5 ${
-                isContractEmpty
+                isSubmitDisabled
                   ? 'bg-slate-400 dark:bg-slate-700 cursor-not-allowed opacity-60'
                   : 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98]'
               }`}
-              title={isContractEmpty ? 'กรุณากรอกเลขที่สัญญาก่อนจบเคส' : 'บันทึกและจบเคส'}
+              title={isSubmitDisabled ? 'กรุณากรอกเลขที่สัญญาก่อนจบเคส' : isCustomTask ? 'บันทึกและจบงาน' : 'บันทึกและจบเคส'}
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              {isSubmitting ? 'กำลังบันทึกจบเคส...' : 'ยืนยันจบเคส'}
+              {isSubmitting 
+                ? (isCustomTask ? 'กำลังบันทึกจบงาน...' : 'กำลังบันทึกจบเคส...') 
+                : (isCustomTask ? 'ยืนยันจบงาน' : 'ยืนยันจบเคส')}
             </button>
           </div>
         </form>

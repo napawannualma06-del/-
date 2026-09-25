@@ -48,6 +48,7 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
 
   if (!isOpen || !caseData) return null;
 
+  const isCustomTask = Boolean(caseData.isCustomTask || caseData.caseType === 'custom_task');
   const targetUser = registeredUsers.find((u) => u.uid === selectedUserId || u.username === selectedUserId);
   const isTargetOffWork = targetUser?.workStatus === 'off_work';
 
@@ -62,7 +63,8 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
       const trimmedNote = transferNote.trim();
       const existingRemarks = caseData.remarks ? `${caseData.remarks} | ` : '';
       const noteSuffix = trimmedNote ? ` ข้อความ: ${trimmedNote}` : '';
-      const newRemarks = `${existingRemarks}[โยกเคสให้ ${targetUser.name} โดย ${currentUser.name}${noteSuffix}]`;
+      const actionName = isCustomTask ? 'โยกงานให้' : 'โยกเคสให้';
+      const newRemarks = `${existingRemarks}[${actionName} ${targetUser.name} โดย ${currentUser.name}${noteSuffix}]`;
 
       const updates: Record<string, unknown> = {
         assigneeId: targetUser.uid,
@@ -96,10 +98,10 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                โยกเคสให้พนักงานคนอื่นดูแลต่อ
+                {isCustomTask ? 'โยกงานให้พนักงานคนอื่นดูแลต่อ' : 'โยกเคสให้พนักงานคนอื่นดูแลต่อ'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                เลือกพนักงานที่ต้องการส่งต่องานเคสนี้ให้รับผิดชอบ
+                {isCustomTask ? 'เลือกพนักงานที่ต้องการส่งต่องานพิเศษนี้ให้รับผิดชอบ' : 'เลือกพนักงานที่ต้องการส่งต่องานเคสนี้ให้รับผิดชอบ'}
               </p>
             </div>
           </div>
@@ -119,15 +121,15 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="flex items-center text-xs font-bold text-slate-900 dark:text-white">
                 <Smartphone className="w-4 h-4 mr-1.5 text-indigo-500" />
-                {caseData.iphoneModel}
+                {isCustomTask ? (caseData.taskTitle || caseData.iphoneModel.replace('[งานพิเศษ] ', '')) : caseData.iphoneModel}
               </span>
               <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                {caseData.province}
+                {isCustomTask ? 'งานพิเศษ' : caseData.province}
               </span>
             </div>
 
             <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
-              <span className="truncate">ตัวแทน: <span className="font-semibold text-slate-800 dark:text-slate-200">{caseData.agentName}</span></span>
+              <span className="truncate">{isCustomTask ? 'ประเภท:' : 'ตัวแทน:'} <span className="font-semibold text-slate-800 dark:text-slate-200">{isCustomTask ? 'งานมอบหมายโดยแอดมิน' : caseData.agentName}</span></span>
               <span className="truncate text-slate-500">
                 ผู้รับเดิม: <span className="font-semibold text-slate-700 dark:text-slate-300">{caseData.assigneeName || 'ไม่มี'}</span>
               </span>
@@ -165,7 +167,9 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
               <div>
                 <span className="font-bold">พนักงานท่านนี้อยู่ในสถานะ "เลิกงานแล้ว":</span>
                 <p className="mt-0.5 text-[11px] text-rose-700 dark:text-rose-300/90">
-                  อาจไม่สะดวกรับเคสต่อในขณะนี้ หากต้องการให้ผู้อื่นทำ แนะนำเลือกพนักงานที่กำลังเข้างานอยู่
+                  {isCustomTask 
+                    ? 'อาจไม่สะดวกรับงานต่อในขณะนี้ หากต้องการให้ผู้อื่นทำ แนะนำเลือกพนักงานที่กำลังเข้างานอยู่'
+                    : 'อาจไม่สะดวกรับเคสต่อในขณะนี้ หากต้องการให้ผู้อื่นทำ แนะนำเลือกพนักงานที่กำลังเข้างานอยู่'}
                 </p>
               </div>
             </div>
@@ -179,7 +183,7 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
             <textarea
               value={transferNote}
               onChange={(e) => setTransferNote(e.target.value)}
-              placeholder="เช่น ลูกค้าส่งเอกสารครบแล้ว ฝากต่อได้เลยครับ, มีคุยติดไว้ตรง..."
+              placeholder={isCustomTask ? "เช่น ฝากต่อได้เลยครับ, ติดต่อลูกค้าไว้แล้ว..." : "เช่น ลูกค้าส่งเอกสารครบแล้ว ฝากต่อได้เลยครับ, มีคุยติดไว้ตรง..."}
               rows={2}
               className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
             />
@@ -200,7 +204,9 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
               className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
             >
               <ArrowRightLeft className="w-3.5 h-3.5" />
-              {isSubmitting ? 'กำลังโยกเคส...' : 'ยืนยันการโยกเคส'}
+              {isSubmitting 
+                ? (isCustomTask ? 'กำลังโยกงาน...' : 'กำลังโยกเคส...') 
+                : (isCustomTask ? 'ยืนยันการโยกงาน' : 'ยืนยันการโยกเคส')}
             </button>
           </div>
         </form>

@@ -922,32 +922,42 @@ export function AdminDashboard() {
                 ยังไม่มีเคสที่จบในรอบนี้
               </div>
             ) : (
-              closedCases.slice(0, 10).map((c) => (
-                <div key={c.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-800 text-xs space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-900 dark:text-white truncate">{c.iphoneModel}</span>
-                    <span 
-                      className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 whitespace-nowrap"
-                      title={c.completedAt ? format(c.completedAt, 'd MMMM yyyy HH:mm:ss น.', { locale: th }) : ''}
-                    >
-                      {c.completedAt ? format(c.completedAt, 'd MMM HH:mm น.', { locale: th }) : ''}
-                    </span>
-                  </div>
-                  <div className="text-slate-500 dark:text-slate-400 text-[11px] flex justify-between">
-                    <span>ตัวแทน: {c.agentName} ({c.province})</span>
-                    {c.contractNumber && (
-                      <span className="font-mono text-blue-600 dark:text-blue-400 font-semibold flex items-center">
-                        <FileSignature className="w-3 h-3 mr-0.5" />
-                        #{c.contractNumber}
+              closedCases.slice(0, 10).map((c) => {
+                const isCustom = Boolean(c.isCustomTask || c.caseType === 'custom_task');
+                return (
+                  <div key={c.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-800 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      {isCustom ? (
+                        <span className="font-semibold text-purple-700 dark:text-purple-300 truncate flex items-center gap-1">
+                          <span className="px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-950 text-[10px] font-bold">งานพิเศษ</span>
+                          <span className="truncate text-slate-900 dark:text-white">{c.taskTitle || c.iphoneModel.replace('[งานพิเศษ] ', '')}</span>
+                        </span>
+                      ) : (
+                        <span className="font-semibold text-slate-900 dark:text-white truncate">{c.iphoneModel}</span>
+                      )}
+                      <span 
+                        className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 whitespace-nowrap"
+                        title={c.completedAt ? format(c.completedAt, 'd MMMM yyyy HH:mm:ss น.', { locale: th }) : ''}
+                      >
+                        {c.completedAt ? format(c.completedAt, 'd MMM HH:mm น.', { locale: th }) : ''}
                       </span>
-                    )}
+                    </div>
+                    <div className="text-slate-500 dark:text-slate-400 text-[11px] flex justify-between">
+                      <span>{isCustom ? 'งานมอบหมายโดยแอดมิน' : `ตัวแทน: ${c.agentName} (${c.province})`}</span>
+                      {!isCustom && c.contractNumber && (
+                        <span className="font-mono text-blue-600 dark:text-blue-400 font-semibold flex items-center">
+                          <FileSignature className="w-3 h-3 mr-0.5" />
+                          #{c.contractNumber}
+                        </span>
+                      )}
+                    </div>
+                    <div className="pt-1 text-[11px] text-emerald-700 dark:text-emerald-400 font-medium flex items-center">
+                      <ShieldCheck className="w-3 h-3 mr-1 text-emerald-600 dark:text-emerald-400" />
+                      {isCustom ? `ผู้จบงาน: ${c.assigneeName || 'ไม่ระบุ'}` : `ผู้จบเคส: ${c.assigneeName || 'ไม่ระบุ'}`}
+                    </div>
                   </div>
-                  <div className="pt-1 text-[11px] text-emerald-700 dark:text-emerald-400 font-medium flex items-center">
-                    <ShieldCheck className="w-3 h-3 mr-1 text-emerald-600 dark:text-emerald-400" />
-                    ผู้จบเคส: {c.assigneeName || 'ไม่ระบุ'}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

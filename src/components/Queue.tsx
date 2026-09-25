@@ -808,7 +808,10 @@ export function Queue() {
   const newCount = cases.filter(c => isNewCase(c, registeredUsers)).length;
   const inProgressCount = cases.filter(c => isInProgressCase(c, registeredUsers)).length;
   const stuckCount = cases.filter(c => isStuckCase(c, registeredUsers) && c.status !== 'closed' && c.status !== 'cancelled').length;
-  const myCount = cases.filter(c => c.assigneeId === user?.uid && c.status !== 'closed' && c.status !== 'cancelled').length;
+  const myActiveItems = cases.filter(c => c.assigneeId === user?.uid && c.status !== 'closed' && c.status !== 'cancelled');
+  const myCount = myActiveItems.length;
+  const myRegularCount = myActiveItems.filter(c => !c.isCustomTask && c.caseType !== 'custom_task').length;
+  const myTaskCount = myActiveItems.filter(c => c.isCustomTask || c.caseType === 'custom_task').length;
   const closedCount = cases.filter(c => c.status === 'closed').length;
   const cancelledCount = cases.filter(c => c.status === 'cancelled').length;
   const allActiveCount = cases.filter(c => c.status !== 'closed' && c.status !== 'cancelled').length;
@@ -1461,13 +1464,20 @@ export function Queue() {
       {/* Active Workload & Quick Clock-Out for "My Cases" tab */}
       {activeFilter === 'mine' && user?.workStatus !== 'off_work' && myCount > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 rounded-xl text-xs text-amber-900 dark:text-amber-200">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-amber-800 dark:text-amber-300">คุณมีงานที่กำลังทำอยู่:</span>
-            <span className="px-2 py-0.5 rounded-md bg-amber-500 text-white font-bold text-[11px]">
-              {myCount} เคส
-            </span>
+            {myRegularCount > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-amber-500 text-white font-bold text-[11px]">
+                {myRegularCount} เคส
+              </span>
+            )}
+            {myTaskCount > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-purple-600 text-white font-bold text-[11px]">
+                {myTaskCount} งาน
+              </span>
+            )}
             <span className="text-amber-700/80 dark:text-amber-400/80 text-[11px] hidden sm:inline">
-              (เมื่อเลิกงาน สามารถกดบันทึกเพื่อคืนเคสทั้งหมดกลับไป "รอรับเคส" ได้ทันที)
+              (เมื่อเลิกงาน สามารถกดบันทึกเพื่อคืนเคส/งานทั้งหมดกลับไป "รอรับเคส" ได้ทันที)
             </span>
           </div>
           <button
@@ -1476,7 +1486,7 @@ export function Queue() {
             className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs transition"
           >
             <LogOut className="w-3.5 h-3.5 text-amber-600" />
-            <span>บันทึกเลิกงาน (คืน {myCount} เคส)</span>
+            <span>บันทึกเลิกงาน (คืน {myCount} รายการ)</span>
           </button>
         </div>
       )}
@@ -2047,6 +2057,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
+  const isCustomTask = Boolean(data.isCustomTask || data.caseType === 'custom_task');
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
   const isStuck = isStuckCase(data, registeredUsers);
@@ -2058,14 +2069,14 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
       data.status === 'pending'
         ? isStuck
           ? "border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10"
-          : "border-indigo-200 dark:border-indigo-800/60"
+          : (isCustomTask ? "border-purple-200 dark:border-purple-800/60" : "border-indigo-200 dark:border-indigo-800/60")
         : statusInfo.borderClass,
       data.remarks ? "ring-1 ring-amber-400/40" : "",
       data.contractNumber ? "border-blue-200 dark:border-blue-900/60" : "",
       data.status === 'closed' ? "opacity-85 bg-slate-50/50 dark:bg-slate-900/50" : "",
       data.status === 'cancelled' ? "opacity-80 bg-rose-50/30 dark:bg-rose-950/20" : ""
     )}>
-      {/* Left content: Status, Time, Model, Agent, Province, Contract, Remarks */}
+      {/* Left content: Status, Time, Model/Task, Agent, Province, Contract, Remarks */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0 flex-1">
         {/* Status Badge */}
         <span className={clsx(
@@ -2073,14 +2084,16 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
           data.status === 'pending'
             ? isStuck
               ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700"
-              : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800"
+              : (isCustomTask 
+                  ? "bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800"
+                  : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800")
             : statusInfo.badgeClass
         )}>
           {data.status === 'pending' && isStuck && (
             <PauseCircle className="w-3 h-3 mr-1 text-amber-600 dark:text-amber-400" />
           )}
           {data.status === 'pending' && isNew && (
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />
+            <span className={clsx("w-1.5 h-1.5 rounded-full animate-pulse mr-1", isCustomTask ? "bg-purple-500" : "bg-indigo-500")} />
           )}
           {data.status === 'credit_check' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-spin mr-1" />}
           {data.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />}
@@ -2088,9 +2101,11 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
           {data.status === 'cancelled' && <Ban className="w-3 h-3 mr-1 text-rose-600 dark:text-rose-400" />}
           {data.status === 'pending'
             ? isStuck
-              ? 'เคสค้าง'
-              : 'เคสใหม่'
-            : statusInfo.label}
+              ? (isCustomTask ? 'งานค้าง' : 'เคสค้าง')
+              : (isCustomTask ? 'งานใหม่' : 'เคสใหม่')
+            : isCustomTask
+              ? (data.status === 'closed' ? 'จบงานแล้ว' : data.status === 'cancelled' ? 'ยกเลิกงาน' : 'กำลังทำงาน')
+              : statusInfo.label}
         </span>
 
         {/* Time */}
@@ -2101,38 +2116,60 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
           {format(data.createdAt, 'd MMM HH:mm น.', { locale: th })}
         </span>
 
-        {/* Model */}
-        <div className="font-bold text-slate-900 dark:text-white truncate sm:min-w-[140px] sm:max-w-[180px]" title={data.iphoneModel}>
-          {data.iphoneModel}
-        </div>
+        {/* Task Title or Phone Model */}
+        {isCustomTask ? (
+          <div className="flex items-center gap-1 sm:min-w-[140px] sm:max-w-[220px] truncate">
+            <span className="px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 text-[10px] font-bold border border-purple-200 dark:border-purple-800 shrink-0 inline-flex items-center">
+              <Briefcase className="w-2.5 h-2.5 mr-0.5" />
+              งานพิเศษ
+            </span>
+            <span className="font-bold text-slate-900 dark:text-white truncate" title={data.taskTitle || data.iphoneModel}>
+              {data.taskTitle || data.iphoneModel.replace('[งานพิเศษ] ', '')}
+            </span>
+          </div>
+        ) : (
+          <div className="font-bold text-slate-900 dark:text-white truncate sm:min-w-[140px] sm:max-w-[180px]" title={data.iphoneModel}>
+            {data.iphoneModel}
+          </div>
+        )}
 
-        {/* Agent & Province */}
+        {/* Agent & Province or Task Category */}
         <div className="flex items-center text-slate-500 dark:text-slate-400 text-[11px] truncate sm:min-w-[150px]">
-          <span className="font-medium text-slate-700 dark:text-slate-300 truncate">{data.agentName}</span>
-          <span className="mx-1 text-slate-300 dark:text-slate-600">•</span>
-          <span className="truncate text-slate-400">{data.province}</span>
+          {isCustomTask ? (
+            <span className="text-purple-600 dark:text-purple-400 font-medium text-[11px]">งานมอบหมายโดยแอดมิน</span>
+          ) : (
+            <>
+              <span className="font-medium text-slate-700 dark:text-slate-300 truncate">{data.agentName}</span>
+              <span className="mx-1 text-slate-300 dark:text-slate-600">•</span>
+              <span className="truncate text-slate-400">{data.province}</span>
+            </>
+          )}
         </div>
 
-        {/* Contract badge */}
-        {data.contractNumber ? (
-          <button
-            type="button"
-            onClick={() => onOpenContract(data)}
-            className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 text-[10px] font-mono font-bold text-blue-700 dark:text-blue-300 flex items-center hover:bg-blue-100 dark:hover:bg-blue-900/60 cursor-pointer shrink-0"
-            title="แก้ไขเลขสัญญา"
-          >
-            <FileSignature className="w-2.5 h-2.5 mr-1 text-blue-500" />
-            #{data.contractNumber}
-          </button>
-        ) : data.status !== 'pending' && (
-          <button
-            type="button"
-            onClick={() => onOpenContract(data)}
-            className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center cursor-pointer shrink-0"
-          >
-            <FileSignature className="w-2.5 h-2.5 mr-0.5 text-blue-500" />
-            +สัญญา
-          </button>
+        {/* Contract badge (Only for regular cases) */}
+        {!isCustomTask && (
+          <>
+            {data.contractNumber ? (
+              <button
+                type="button"
+                onClick={() => onOpenContract(data)}
+                className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 text-[10px] font-mono font-bold text-blue-700 dark:text-blue-300 flex items-center hover:bg-blue-100 dark:hover:bg-blue-900/60 cursor-pointer shrink-0"
+                title="แก้ไขเลขสัญญา"
+              >
+                <FileSignature className="w-2.5 h-2.5 mr-1 text-blue-500" />
+                #{data.contractNumber}
+              </button>
+            ) : data.status !== 'pending' && (
+              <button
+                type="button"
+                onClick={() => onOpenContract(data)}
+                className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center cursor-pointer shrink-0"
+              >
+                <FileSignature className="w-2.5 h-2.5 mr-0.5 text-blue-500" />
+                +สัญญา
+              </button>
+            )}
+          </>
         )}
 
         {/* Remarks badge */}
@@ -2188,7 +2225,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
         {prevWorker && (
           <span
             className="px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-[10px] text-amber-800 dark:text-amber-300 flex items-center shrink-0 font-medium"
-            title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}${prevWorker.returnedAt ? ` เวลา ${format(prevWorker.returnedAt, 'HH:mm น.', { locale: th })}` : ''}`}
+            title={`พนักงานที่เคยรับงานก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}${prevWorker.returnedAt ? ` เวลา ${format(prevWorker.returnedAt, 'HH:mm น.', { locale: th })}` : ''}`}
           >
             <RotateCcw className="w-2.5 h-2.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0" />
             <span className="truncate max-w-[130px]">เคยรับ: <strong className="font-semibold">{prevWorker.name}</strong></span>
@@ -2209,7 +2246,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
             {prevWorker && (
               <span
                 className="text-[9px] text-amber-700 dark:text-amber-400 flex items-center gap-0.5 mt-0.5 truncate max-w-[110px]"
-                title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}`}
+                title={`พนักงานที่เคยรับงานก่อนนี้: ${prevWorker.name}`}
               >
                 <RotateCcw className="w-2 h-2 shrink-0" />
                 <span className="truncate">เคยรับ: {prevWorker.name}</span>
@@ -2220,14 +2257,16 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
           <div className="flex flex-col items-start sm:items-end min-w-[95px]">
             <span className={clsx(
               "text-[10px] font-semibold",
-              isStuck ? "text-amber-600 dark:text-amber-400" : "text-indigo-600 dark:text-indigo-400"
+              isStuck 
+                ? "text-amber-600 dark:text-amber-400" 
+                : (isCustomTask ? "text-purple-600 dark:text-purple-400" : "text-indigo-600 dark:text-indigo-400")
             )}>
-              {isStuck ? 'เคสค้าง' : 'เคสใหม่'}
+              {isStuck ? (isCustomTask ? 'งานค้าง' : 'เคสค้าง') : (isCustomTask ? 'งานใหม่' : 'เคสใหม่')}
             </span>
             {prevWorker && (
               <span
                 className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-900/60 px-1.5 py-0.5 rounded flex items-center gap-1 mt-0.5"
-                title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
+                title={`พนักงานที่เคยรับงานก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
               >
                 <RotateCcw className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span className="truncate max-w-[95px]">เคยรับ: {prevWorker.name}</span>
@@ -2245,26 +2284,28 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                 onClick={onAccept}
                 className={clsx(
                   "px-3 py-1 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition",
-                  isStuck ? "bg-amber-600 hover:bg-amber-700" : "bg-indigo-600 hover:bg-indigo-700"
+                  isStuck 
+                    ? "bg-amber-600 hover:bg-amber-700" 
+                    : (isCustomTask ? "bg-purple-600 hover:bg-purple-700" : "bg-indigo-600 hover:bg-indigo-700")
                 )}
               >
                 <Check className="w-3 h-3 mr-1" />
-                {isStuck ? 'รับเคสนี้ต่อ' : 'รับเคส'}
+                {isStuck ? (isCustomTask ? 'รับงานต่อ' : 'รับเคสนี้ต่อ') : (isCustomTask ? 'รับงาน' : 'รับเคส')}
               </button>
               <button
                 type="button"
                 onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
                 className="px-2 py-1 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
-                title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                title={isCustomTask ? "บันทึกเป็นงานค้าง (ต้องระบุหมายเหตุ)" : "บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"}
               >
                 <PauseCircle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                <span>เคสค้าง</span>
+                <span>{isCustomTask ? 'งานค้าง' : 'เคสค้าง'}</span>
               </button>
               <button
                 type="button"
                 onClick={onCancel}
                 className="px-2 py-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg text-xs cursor-pointer transition"
-                title="ยกเลิกเคส"
+                title={isCustomTask ? "ยกเลิกงาน" : "ยกเลิกเคส"}
               >
                 <Ban className="w-3.5 h-3.5" />
               </button>
@@ -2278,10 +2319,10 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                   type="button"
                   onClick={() => (onCloseCase ? onCloseCase() : onUpdateStatus('closed'))}
                   className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center cursor-pointer transition whitespace-nowrap"
-                  title="บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"
+                  title={isCustomTask ? "บันทึกจบงานเสร็จสิ้น" : "บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"}
                 >
                   <CheckCircle2 className="w-3 h-3 mr-1" />
-                  จบเคส
+                  {isCustomTask ? 'จบงาน' : 'จบเคส'}
                 </button>
               )}
               {canManage && (
@@ -2289,10 +2330,10 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                   type="button"
                   onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
                   className="px-2 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
-                  title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                  title={isCustomTask ? "บันทึกเป็นงานค้าง (ต้องระบุหมายเหตุ)" : "บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"}
                 >
                   <PauseCircle className="w-3 h-3" />
-                  <span>เคสค้าง</span>
+                  <span>{isCustomTask ? 'งานค้าง' : 'เคสค้าง'}</span>
                 </button>
               )}
               {canManage && (
@@ -2300,10 +2341,10 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                   type="button"
                   onClick={onOpenReassign}
                   className="px-2 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
-                  title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
+                  title={isCustomTask ? "โยกงานไปให้พนักงานคนอื่นดูแลต่อ" : "โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"}
                 >
                   <ArrowRightLeft className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
-                  <span>โยกเคส</span>
+                  <span>{isCustomTask ? 'โยกงาน' : 'โยกเคส'}</span>
                 </button>
               )}
               {canManage && (
@@ -2311,10 +2352,10 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                   type="button"
                   onClick={onReturnToPending}
                   className="px-2 py-1 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
-                  title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
+                  title={isCustomTask ? "คืนสถานะไปรอรับงาน หากรับมาแล้วแต่ไม่ได้ทำต่อ" : "คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"}
                 >
                   <RotateCcw className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                  <span>คืนเคส</span>
+                  <span>{isCustomTask ? 'คืนงาน' : 'คืนเคส'}</span>
                 </button>
               )}
               {isAdmin && !isAssignee && (
@@ -2322,7 +2363,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
                   type="button"
                   onClick={onTakeOver}
                   className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold cursor-pointer transition"
-                  title="👑 แอดมิน: ดึงเคสมาทำเอง"
+                  title={isCustomTask ? "👑 แอดมิน: ดึงงานมาทำเอง" : "👑 แอดมิน: ดึงเคสมาทำเอง"}
                 >
                   <Crown className="w-3 h-3" />
                 </button>
@@ -2333,14 +2374,14 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
           {data.status === 'closed' && (
             <div className="flex items-center gap-1">
               <span className="px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 rounded border border-emerald-200 dark:border-emerald-800">
-                ✓ เรียบร้อย
+                {isCustomTask ? '✓ จบงานแล้ว' : '✓ เรียบร้อย'}
               </span>
               {isAdmin && (
                 <button
                   type="button"
                   onClick={onReopen}
                   className="p-1 text-slate-400 hover:text-indigo-600 rounded cursor-pointer"
-                  title="👑 แอดมิน: กู้คืนเคส"
+                  title={isCustomTask ? "👑 แอดมิน: กู้คืนงาน" : "👑 แอดมิน: กู้คืนเคส"}
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                 </button>
@@ -2353,10 +2394,10 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
               type="button"
               onClick={onReopen}
               className="px-2 py-1 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 flex items-center cursor-pointer"
-              title="กู้คืนเคส"
+              title={isCustomTask ? "กู้คืนงาน" : "กู้คืนเคส"}
             >
               <RotateCcw className="w-3 h-3 mr-1 text-indigo-500" />
-              กู้คืน
+              {isCustomTask ? 'กู้คืนงาน' : 'กู้คืน'}
             </button>
           )}
 
@@ -2365,7 +2406,7 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
               type="button"
               onClick={onDelete}
               className="p-1 text-slate-300 hover:text-rose-600 dark:text-slate-600 dark:hover:text-rose-400 rounded transition cursor-pointer"
-              title="ลบเคสนี้"
+              title={isCustomTask ? "ลบงานนี้" : "ลบเคสนี้"}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -2396,6 +2437,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
+  const isCustomTask = Boolean(data.isCustomTask || data.caseType === 'custom_task');
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
   const isStuck = isStuckCase(data, registeredUsers);
@@ -2407,7 +2449,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
       data.status === 'pending'
         ? isStuck
           ? "border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10"
-          : "border-indigo-200 dark:border-indigo-800/60"
+          : (isCustomTask ? "border-purple-200 dark:border-purple-800/60" : "border-indigo-200 dark:border-indigo-800/60")
         : statusInfo.borderClass,
       data.remarks ? "ring-1 ring-amber-400/40" : "",
       data.contractNumber ? "border-blue-200 dark:border-blue-900/60" : "",
@@ -2422,14 +2464,16 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
             data.status === 'pending'
               ? isStuck
                 ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700"
-                : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800"
+                : (isCustomTask
+                    ? "bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800"
+                    : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800")
               : statusInfo.badgeClass
           )}>
             {data.status === 'pending' && isStuck && (
               <PauseCircle className="w-2.5 h-2.5 mr-0.5 text-amber-600 dark:text-amber-400" />
             )}
             {data.status === 'pending' && isNew && (
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse mr-1" />
+              <span className={clsx("w-1.5 h-1.5 rounded-full animate-pulse mr-1", isCustomTask ? "bg-purple-500" : "bg-indigo-500")} />
             )}
             {data.status === 'credit_check' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-spin mr-1" />}
             {data.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />}
@@ -2437,9 +2481,11 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
             {data.status === 'cancelled' && <Ban className="w-2.5 h-2.5 mr-0.5 text-rose-600 dark:text-rose-400" />}
             {data.status === 'pending'
               ? isStuck
-                ? 'เคสค้าง'
-                : 'เคสใหม่'
-              : statusInfo.label}
+                ? (isCustomTask ? 'งานค้าง' : 'เคสค้าง')
+                : (isCustomTask ? 'งานใหม่' : 'เคสใหม่')
+              : isCustomTask
+                ? (data.status === 'closed' ? 'จบงานแล้ว' : data.status === 'cancelled' ? 'ยกเลิกงาน' : 'กำลังทำงาน')
+                : statusInfo.label}
           </span>
 
           <div 
@@ -2452,7 +2498,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
                 type="button"
                 onClick={onDelete}
                 className="p-0.5 text-slate-300 dark:text-slate-600 hover:text-rose-600 dark:hover:text-rose-400 rounded transition cursor-pointer"
-                title="ลบเคสนี้"
+                title={isCustomTask ? "ลบงานนี้" : "ลบเคสนี้"}
               >
                 <Trash2 className="w-3 h-3" />
               </button>
@@ -2460,42 +2506,65 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
           </div>
         </div>
 
-        {/* iPhone Model & Agent */}
+        {/* Task Title or Phone Model & Category */}
         <div>
-          <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate leading-tight" title={data.iphoneModel}>
-            {data.iphoneModel}
-          </h4>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate flex items-center mt-0.5">
-            <span className="truncate font-medium text-slate-700 dark:text-slate-300">{data.agentName}</span>
-            <span className="mx-1 text-slate-300 dark:text-slate-600 shrink-0">•</span>
-            <span className="truncate shrink-0 text-slate-400">{data.province}</span>
-          </div>
+          {isCustomTask ? (
+            <div>
+              <div className="flex items-center gap-1 mb-0.5">
+                <span className="px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 text-[9px] font-bold border border-purple-200 dark:border-purple-800 shrink-0 inline-flex items-center">
+                  <Briefcase className="w-2 h-2 mr-0.5" />
+                  งานพิเศษ
+                </span>
+                <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate leading-tight" title={data.taskTitle || data.iphoneModel}>
+                  {data.taskTitle || data.iphoneModel.replace('[งานพิเศษ] ', '')}
+                </h4>
+              </div>
+              <div className="text-[11px] text-purple-600 dark:text-purple-400 font-medium truncate">
+                งานมอบหมายโดยแอดมิน
+              </div>
+            </div>
+          ) : (
+            <div>
+              <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate leading-tight" title={data.iphoneModel}>
+                {data.iphoneModel}
+              </h4>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate flex items-center mt-0.5">
+                <span className="truncate font-medium text-slate-700 dark:text-slate-300">{data.agentName}</span>
+                <span className="mx-1 text-slate-300 dark:text-slate-600 shrink-0">•</span>
+                <span className="truncate shrink-0 text-slate-400">{data.province}</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Contract & Remarks badges */}
         <div className="mt-1.5 space-y-1">
-          {data.contractNumber ? (
-            <button
-              type="button"
-              onClick={() => onOpenContract(data)}
-              className="w-full text-left px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 text-[10px] font-mono font-bold text-blue-700 dark:text-blue-300 flex items-center justify-between cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60"
-              title="แก้ไขเลขสัญญา"
-            >
-              <span className="flex items-center truncate">
-                <FileSignature className="w-2.5 h-2.5 mr-1 text-blue-500 shrink-0" />
-                <span className="truncate">#{data.contractNumber}</span>
-              </span>
-              <span className="text-[9px] text-blue-500 underline font-normal shrink-0 ml-1">แก้</span>
-            </button>
-          ) : data.status !== 'pending' && (
-            <button
-              type="button"
-              onClick={() => onOpenContract(data)}
-              className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center cursor-pointer py-0.5"
-            >
-              <FileSignature className="w-2.5 h-2.5 mr-0.5 text-blue-500" />
-              + ระบุเลขสัญญา
-            </button>
+          {!isCustomTask && (
+            <>
+              {data.contractNumber ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenContract(data)}
+                  className="w-full text-left px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 text-[10px] font-mono font-bold text-blue-700 dark:text-blue-300 flex items-center justify-between cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60"
+                  title="แก้ไขเลขสัญญา"
+                >
+                  <span className="flex items-center truncate">
+                    <FileSignature className="w-2.5 h-2.5 mr-1 text-blue-500 shrink-0" />
+                    <span className="truncate">#{data.contractNumber}</span>
+                  </span>
+                  <span className="text-[9px] text-blue-500 underline font-normal shrink-0 ml-1">แก้</span>
+                </button>
+              ) : data.status !== 'pending' && (
+                <button
+                  type="button"
+                  onClick={() => onOpenContract(data)}
+                  className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline flex items-center cursor-pointer py-0.5"
+                >
+                  <FileSignature className="w-2.5 h-2.5 mr-0.5 text-blue-500" />
+                  + ระบุเลขสัญญา
+                </button>
+              )}
+            </>
           )}
 
           {data.remarks ? (
@@ -2544,7 +2613,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
               className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline flex items-center cursor-pointer py-0.5"
             >
               <StickyNote className="w-2.5 h-2.5 mr-0.5 text-amber-500" />
-              + ระบุหมายเหตุงานค้าง
+              {isCustomTask ? '+ ระบุหมายเหตุงานค้าง' : '+ ระบุหมายเหตุเคสค้าง'}
             </button>
           )}
         </div>
@@ -2560,14 +2629,16 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
           <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px]">
             <span className={clsx(
               "font-semibold",
-              isStuck ? "text-amber-600 dark:text-amber-400" : "text-indigo-600 dark:text-indigo-400"
+              isStuck 
+                ? "text-amber-600 dark:text-amber-400" 
+                : (isCustomTask ? "text-purple-600 dark:text-purple-400" : "text-indigo-600 dark:text-indigo-400")
             )}>
-              {isStuck ? 'เคสค้าง' : 'เคสใหม่'}
+              {isStuck ? (isCustomTask ? 'งานค้าง' : 'เคสค้าง') : (isCustomTask ? 'งานใหม่' : 'เคสใหม่')}
             </span>
             {prevWorker && (
               <span
                 className="text-[9px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-900/60 px-1 py-0.5 rounded flex items-center gap-0.5 truncate max-w-[105px]"
-                title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
+                title={`พนักงานที่เคยรับงานก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
               >
                 <RotateCcw className="w-2 h-2 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span className="truncate">เคยรับ: {prevWorker.name}</span>
@@ -2580,7 +2651,7 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
         {data.assigneeName && prevWorker && (
           <div
             className="mt-1 px-1.5 py-0.5 rounded bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-900/50 text-[9px] text-amber-800 dark:text-amber-300 flex items-center gap-1 truncate"
-            title={`พนักงานที่เคยรับเคสก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
+            title={`พนักงานที่เคยรับงานก่อนนี้: ${prevWorker.name}${prevWorker.reason ? ` (เหตุผล: ${prevWorker.reason})` : ''}`}
           >
             <RotateCcw className="w-2 h-2 text-amber-600 dark:text-amber-400 shrink-0" />
             <span className="truncate">เคยรับก่อนนี้: <span className="font-semibold">{prevWorker.name}</span></span>
@@ -2598,24 +2669,28 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
                 onClick={onAccept}
                 className={clsx(
                   "py-1.5 px-2 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition",
-                  isStuck ? "bg-amber-600 hover:bg-amber-700" : "bg-indigo-600 hover:bg-indigo-700"
+                  isStuck 
+                    ? "bg-amber-600 hover:bg-amber-700" 
+                    : (isCustomTask ? "bg-purple-600 hover:bg-purple-700" : "bg-indigo-600 hover:bg-indigo-700")
                 )}
               >
                 <Check className="w-3 h-3 mr-1" />
-                {isStuck ? 'รับต่อ' : 'รับเคส'}
+                {isStuck ? (isCustomTask ? 'รับงานต่อ' : 'รับต่อ') : (isCustomTask ? 'รับงาน' : 'รับเคส')}
               </button>
               <button
                 type="button"
                 onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
                 className="py-1.5 px-1 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 rounded-lg text-xs font-semibold flex items-center justify-center cursor-pointer transition"
-                title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                title={isCustomTask ? "บันทึกเป็นงานค้าง (ต้องระบุหมายเหตุ)" : "บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"}
               >
                 <PauseCircle className="w-3 h-3 mr-0.5 text-amber-600 dark:text-amber-400" />
-                <span>เคสค้าง</span>
+                <span>{isCustomTask ? 'งานค้าง' : 'เคสค้าง'}</span>
               </button>
             </div>
             <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-slate-400">
-              <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">+สัญญา</button>
+              {!isCustomTask ? (
+                <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">+สัญญา</button>
+              ) : <span />}
               <button type="button" onClick={() => onOpenRemark(data)} className="hover:text-amber-600 cursor-pointer">+หมายเหตุ</button>
               <button type="button" onClick={onCancel} className="text-rose-400 hover:text-rose-600 cursor-pointer">ยกเลิก</button>
             </div>
@@ -2629,10 +2704,10 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
                 type="button"
                 onClick={() => (onCloseCase ? onCloseCase() : onUpdateStatus('closed'))}
                 className="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center justify-center cursor-pointer transition whitespace-nowrap"
-                title="บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"
+                title={isCustomTask ? "บันทึกจบงานเสร็จสิ้น" : "บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"}
               >
                 <CheckCircle2 className="w-3 h-3 mr-1" />
-                จบเคส
+                {isCustomTask ? 'จบงาน' : 'จบเคส'}
               </button>
             ) : (
               <div className="w-full py-1 px-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-lg text-[10px] text-center truncate">
@@ -2646,34 +2721,36 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
                   type="button"
                   onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
                   className="py-1 px-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-bold flex items-center justify-center cursor-pointer transition whitespace-nowrap shadow-2xs"
-                  title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                  title={isCustomTask ? "บันทึกเป็นงานค้าง (ต้องระบุหมายเหตุ)" : "บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"}
                 >
                   <PauseCircle className="w-2.5 h-2.5 mr-0.5 shrink-0" />
-                  <span>เคสค้าง</span>
+                  <span>{isCustomTask ? 'งานค้าง' : 'เคสค้าง'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={onOpenReassign}
                   className="py-1 px-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
-                  title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
+                  title={isCustomTask ? "โยกงานไปให้พนักงานคนอื่นดูแลต่อ" : "โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"}
                 >
                   <ArrowRightLeft className="w-2.5 h-2.5 mr-0.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span>โยกเคส</span>
+                  <span>{isCustomTask ? 'โยกงาน' : 'โยกเคส'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={onReturnToPending}
                   className="py-1 px-1 rounded-lg bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-[10px] font-semibold flex items-center justify-center cursor-pointer transition whitespace-nowrap"
-                  title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
+                  title={isCustomTask ? "คืนสถานะไปรอรับงาน หากรับมาแล้วแต่ไม่ได้ทำต่อ" : "คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"}
                 >
                   <RotateCcw className="w-2.5 h-2.5 mr-0.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                  <span>คืนเคส</span>
+                  <span>{isCustomTask ? 'คืนงาน' : 'คืนเคส'}</span>
                 </button>
               </div>
             )}
 
             <div className="flex items-center justify-between pt-0.5 px-1 text-[10px] text-slate-400">
-              <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">สัญญา</button>
+              {!isCustomTask ? (
+                <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">สัญญา</button>
+              ) : <span />}
               <button type="button" onClick={() => onOpenRemark(data)} className="hover:text-amber-600 cursor-pointer">หมายเหตุ</button>
               {canManage ? (
                 <button type="button" onClick={onCancel} className="text-rose-400 hover:text-rose-600 cursor-pointer">ยกเลิก</button>
@@ -2687,13 +2764,16 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
         {data.status === 'closed' && (
           <div>
             <div className="w-full py-1 px-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 rounded-lg text-[10px] font-semibold text-center truncate">
-              ✓ จบแล้ว ({data.assigneeName})
+              {isCustomTask ? `✓ จบงานแล้ว (${data.assigneeName})` : `✓ จบแล้ว (${data.assigneeName})`}
             </div>
             <div className="flex items-center justify-between mt-1 px-1 text-[10px] text-slate-400">
-              <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">สัญญา</button>
+              {!isCustomTask ? (
+                <button type="button" onClick={() => onOpenContract(data)} className="hover:text-blue-600 cursor-pointer">สัญญา</button>
+              ) : <span />}
               {isAdmin && (
                 <button type="button" onClick={onReopen} className="text-indigo-600 hover:underline cursor-pointer flex items-center">
-                  <RotateCcw className="w-2.5 h-2.5 mr-0.5" />กู้คืนเคส
+                  <RotateCcw className="w-2.5 h-2.5 mr-0.5" />
+                  {isCustomTask ? 'กู้คืนงาน' : 'กู้คืนเคส'}
                 </button>
               )}
             </div>
@@ -2703,14 +2783,15 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
         {data.status === 'cancelled' && (
           <div>
             <div className="w-full py-1 px-1.5 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 rounded-lg text-[10px] font-medium text-center truncate">
-              ยกเลิกเคส
+              {isCustomTask ? 'ยกเลิกงาน' : 'ยกเลิกเคส'}
             </div>
             <button
               type="button"
               onClick={onReopen}
               className="mt-1 w-full text-[10px] text-slate-500 hover:text-indigo-600 py-0.5 border border-slate-200 dark:border-slate-700 rounded flex items-center justify-center cursor-pointer"
             >
-              <RotateCcw className="w-2.5 h-2.5 mr-0.5" />กู้คืนเคส
+              <RotateCcw className="w-2.5 h-2.5 mr-0.5" />
+              {isCustomTask ? 'กู้คืนงาน' : 'กู้คืนเคส'}
             </button>
           </div>
         )}
@@ -2739,6 +2820,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
 }) => {
   const isAssignee = data.assigneeId === currentUserId;
   const canManage = isAssignee || isAdmin;
+  const isCustomTask = Boolean(data.isCustomTask || data.caseType === 'custom_task');
   const statusInfo = statusMap[data.status] || statusMap.pending;
   const prevWorker = getPreviousAssignee(data);
   const isStuck = isStuckCase(data, registeredUsers);
@@ -2750,7 +2832,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
       data.status === 'pending'
         ? isStuck
           ? "border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10"
-          : "border-indigo-200 dark:border-indigo-800/60"
+          : (isCustomTask ? "border-purple-200 dark:border-purple-800/60" : "border-indigo-200 dark:border-indigo-800/60")
         : statusInfo.borderClass,
       data.remarks ? "ring-1 ring-amber-400/30" : "",
       data.contractNumber ? "border-blue-200 dark:border-blue-900/60" : "",
@@ -2766,37 +2848,45 @@ const CaseCard: React.FC<CaseCardProps> = ({
               data.status === 'pending'
                 ? isStuck
                   ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700 font-bold"
-                  : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 font-bold"
+                  : (isCustomTask
+                      ? "bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 font-bold"
+                      : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 font-bold")
                 : statusInfo.badgeClass
             )}>
               {data.status === 'pending' && isStuck && <PauseCircle className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400" />}
-              {data.status === 'pending' && isNew && <Clock className="w-3.5 h-3.5 mr-1 text-indigo-600 dark:text-indigo-400 animate-pulse" />}
+              {data.status === 'pending' && isNew && (
+                <Clock className={clsx("w-3.5 h-3.5 mr-1 animate-pulse", isCustomTask ? "text-purple-600 dark:text-purple-400" : "text-indigo-600 dark:text-indigo-400")} />
+              )}
               {data.status === 'credit_check' && <Search className="w-3 h-3 mr-1 text-blue-600 dark:text-blue-400" />}
               {data.status === 'processing' && <RefreshCw className="w-3 h-3 mr-1 text-amber-600 dark:text-amber-400 animate-spin" />}
               {data.status === 'closed' && <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600 dark:text-emerald-400" />}
               {data.status === 'cancelled' && <Ban className="w-3 h-3 mr-1 text-rose-600 dark:text-rose-400" />}
               {data.status === 'pending'
                 ? isStuck
-                  ? 'เคสค้าง'
-                  : 'เคสใหม่'
-                : statusInfo.label}
+                  ? (isCustomTask ? 'งานค้าง' : 'เคสค้าง')
+                  : (isCustomTask ? 'งานใหม่' : 'เคสใหม่')
+                : isCustomTask
+                  ? (data.status === 'closed' ? 'จบงานแล้ว' : data.status === 'cancelled' ? 'ยกเลิกงาน' : 'กำลังทำงาน')
+                  : statusInfo.label}
             </span>
 
-            {/* Contract Quick Badge in Header */}
-            <button
-              type="button"
-              onClick={() => onOpenContract(data)}
-              className={clsx(
-                "inline-flex items-center px-2 py-1 rounded-lg text-xs font-medium transition cursor-pointer border",
-                data.contractNumber
-                  ? "bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-100"
-                  : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600 dark:hover:text-blue-400"
-              )}
-              title={data.contractNumber ? 'แก้ไขเลขที่สัญญา' : 'ระบุสัญญา (ใส่ตอนไหนก็ได้หลังรับงาน)'}
-            >
-              <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-500" />
-              <span>{data.contractNumber ? `สัญญา: ${data.contractNumber}` : '+ สัญญา'}</span>
-            </button>
+            {/* Contract Quick Badge in Header (Regular cases only) */}
+            {!isCustomTask && (
+              <button
+                type="button"
+                onClick={() => onOpenContract(data)}
+                className={clsx(
+                  "inline-flex items-center px-2 py-1 rounded-lg text-xs font-medium transition cursor-pointer border",
+                  data.contractNumber
+                    ? "bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-100"
+                    : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-blue-300 hover:text-blue-600 dark:hover:text-blue-400"
+                )}
+                title={data.contractNumber ? 'แก้ไขเลขที่สัญญา' : 'ระบุสัญญา (ใส่ตอนไหนก็ได้หลังรับงาน)'}
+              >
+                <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-500" />
+                <span>{data.contractNumber ? `สัญญา: ${data.contractNumber}` : '+ สัญญา'}</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center text-slate-400 dark:text-slate-500 text-xs gap-1.5">
@@ -2810,7 +2900,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
                   ? "bg-amber-100/90 dark:bg-amber-950/70 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 hover:bg-amber-200"
                   : "bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-amber-300 hover:text-amber-600 dark:hover:text-amber-400"
               )}
-              title={data.remarks ? 'แก้ไขหมายเหตุงานค้าง' : 'เพิ่มหมายเหตุ (ระบุว่างานค้างเพราะอะไร)'}
+              title={data.remarks ? (isCustomTask ? 'แก้ไขหมายเหตุงาน' : 'แก้ไขหมายเหตุงานค้าง') : (isCustomTask ? 'เพิ่มหมายเหตุงาน' : 'เพิ่มหมายเหตุ (ระบุว่างานค้างเพราะอะไร)')}
             >
               <StickyNote className="w-3.5 h-3.5 mr-1 text-amber-500" />
               <span>{data.remarks ? 'หมายเหตุ' : '+ หมายเหตุ'}</span>
@@ -2823,13 +2913,13 @@ const CaseCard: React.FC<CaseCardProps> = ({
               <Clock className="w-3 h-3 mr-1" />
               <span>{format(data.createdAt, 'd MMM HH:mm น.', { locale: th })}</span>
               
-              {/* DELETE BUTTON: ONLY VISIBLE AND ACCESSIBLE TO SOLE ADMIN (gametpl) */}
+              {/* DELETE BUTTON: ONLY VISIBLE AND ACCESSIBLE TO SOLE ADMIN */}
               {isAdmin && (
                 <button
                   type="button"
                   onClick={onDelete}
                   className="ml-1.5 p-1 text-slate-300 dark:text-slate-600 hover:text-red-600 dark:hover:text-red-400 rounded transition cursor-pointer"
-                  title="ลบเคสนี้"
+                  title={isCustomTask ? "ลบงานนี้" : "ลบเคสนี้"}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -2838,53 +2928,82 @@ const CaseCard: React.FC<CaseCardProps> = ({
           </div>
         </div>
 
-        {/* Case Info */}
+        {/* Case Info / Custom Task Info */}
         <div className="space-y-2 mb-3">
-          <div className="flex items-start justify-between">
-            <div className="flex items-start">
-              <Smartphone className="w-4 h-4 mr-2 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
-              <div>
-                <span className="text-[11px] text-slate-400 dark:text-slate-500 block font-medium">รุ่น iPhone</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-base font-bold text-slate-900 dark:text-white">{data.iphoneModel}</span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.dispatchEvent(new CustomEvent('open-refinance-guide', { detail: { model: data.iphoneModel } }));
-                    }}
-                    className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition cursor-pointer"
-                    title="เปิดดูเรทเงินและค่างวดของรุ่นนี้"
-                  >
-                    <Zap className="w-2.5 h-2.5 mr-0.5 text-amber-500 fill-amber-500" />
-                    เรทผ่อน
-                  </button>
+          {isCustomTask ? (
+            <div className="p-3 bg-purple-50/60 dark:bg-purple-950/30 rounded-2xl border border-purple-200 dark:border-purple-800/60 space-y-2">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-2 min-w-0">
+                  <div className="p-1.5 rounded-lg bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 shrink-0 mt-0.5">
+                    <Briefcase className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-purple-600 dark:text-purple-400 block">
+                      งานพิเศษ (มอบหมายโดยแอดมิน)
+                    </span>
+                    <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white break-words mt-0.5" title={data.taskTitle || data.iphoneModel}>
+                      {data.taskTitle || data.iphoneModel.replace('[งานพิเศษ] ', '')}
+                    </h4>
+                  </div>
                 </div>
+
+                {isAdmin && (
+                  <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-md bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 shrink-0 ml-2">
+                    <Crown className="w-3 h-3 mr-1 text-amber-500" />
+                    แอดมินคุมได้
+                  </span>
+                )}
               </div>
             </div>
+          ) : (
+            <>
+              <div className="flex items-start justify-between">
+                <div className="flex items-start">
+                  <Smartphone className="w-4 h-4 mr-2 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-[11px] text-slate-400 dark:text-slate-500 block font-medium">รุ่น iPhone</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-base font-bold text-slate-900 dark:text-white">{data.iphoneModel}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.dispatchEvent(new CustomEvent('open-refinance-guide', { detail: { model: data.iphoneModel } }));
+                        }}
+                        className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition cursor-pointer"
+                        title="เปิดดูเรทเงินและค่างวดของรุ่นนี้"
+                      >
+                        <Zap className="w-2.5 h-2.5 mr-0.5 text-amber-500 fill-amber-500" />
+                        เรทผ่อน
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
-            {isAdmin && (
-              <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-md bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60">
-                <Crown className="w-3 h-3 mr-1 text-amber-500" />
-                แอดมินคุมได้
-              </span>
-            )}
-          </div>
+                {isAdmin && (
+                  <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-md bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60">
+                    <Crown className="w-3 h-3 mr-1 text-amber-500" />
+                    แอดมินคุมได้
+                  </span>
+                )}
+              </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <div className="bg-slate-50 dark:bg-slate-800/80 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-medium">ตัวแทน (ผู้ส่ง)</span>
-              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block">{data.agentName}</span>
-            </div>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-medium">ตัวแทน (ผู้ส่ง)</span>
+                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block">{data.agentName}</span>
+                </div>
 
-            <div className="bg-slate-50 dark:bg-slate-800/80 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-medium">จังหวัด</span>
-              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block flex items-center">
-                <MapPin className="w-3 h-3 mr-1 text-slate-400" />
-                {data.province}
-              </span>
-            </div>
-          </div>
+                <div className="bg-slate-50 dark:bg-slate-800/80 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-medium">จังหวัด</span>
+                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block flex items-center">
+                    <MapPin className="w-3 h-3 mr-1 text-slate-400" />
+                    {data.province}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Previous Assignee if returned */}
           {prevWorker && (
@@ -2896,7 +3015,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
                   </div>
                   <div className="truncate">
                     <span className="text-[10px] text-amber-800 dark:text-amber-400 block font-medium">
-                      พนักงานที่เคยรับเคสก่อนนี้
+                      {isCustomTask ? 'พนักงานที่เคยรับงานก่อนนี้' : 'พนักงานที่เคยรับเคสก่อนนี้'}
                     </span>
                     <div className="flex items-center space-x-1.5 font-bold text-amber-950 dark:text-amber-200 text-xs truncate">
                       <AnimalAvatar
@@ -2924,50 +3043,54 @@ const CaseCard: React.FC<CaseCardProps> = ({
           )}
         </div>
 
-        {/* CONTRACT NUMBER BOX (Editable anytime after job acceptance) */}
-        {data.contractNumber ? (
-          <div className="mb-3 p-2.5 bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 rounded-xl">
-            <div className="flex items-center justify-between text-xs font-bold text-blue-800 dark:text-blue-300 mb-1">
-              <span className="flex items-center">
-                <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-600 dark:text-blue-400" />
-                เลขที่สัญญา:
-              </span>
-              <button
-                type="button"
-                onClick={() => onOpenContract(data)}
-                className="text-[11px] text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-white underline font-medium cursor-pointer"
-              >
-                แก้ไขสัญญา
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-bold text-blue-950 dark:text-blue-100 font-mono tracking-wider">
-                {data.contractNumber}
-              </p>
-              <span className="px-2 py-0.5 text-[10px] font-semibold rounded-md bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
-                บันทึกแล้ว
-              </span>
-            </div>
-            {data.contractUpdatedBy && (
-              <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 flex items-center justify-between border-t border-blue-200/50 dark:border-blue-900/40 pt-1">
-                <span>ระบุโดย: {data.contractUpdatedBy}</span>
-                {data.contractUpdatedAt && (
-                  <span>{format(data.contractUpdatedAt, 'HH:mm น.', { locale: th })}</span>
+        {/* CONTRACT NUMBER BOX (Editable anytime after job acceptance - Regular cases only) */}
+        {!isCustomTask && (
+          <>
+            {data.contractNumber ? (
+              <div className="mb-3 p-2.5 bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 rounded-xl">
+                <div className="flex items-center justify-between text-xs font-bold text-blue-800 dark:text-blue-300 mb-1">
+                  <span className="flex items-center">
+                    <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-600 dark:text-blue-400" />
+                    เลขที่สัญญา:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onOpenContract(data)}
+                    className="text-[11px] text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-white underline font-medium cursor-pointer"
+                  >
+                    แก้ไขสัญญา
+                  </button>
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-bold text-blue-950 dark:text-blue-100 font-mono tracking-wider">
+                    {data.contractNumber}
+                  </p>
+                  <span className="px-2 py-0.5 text-[10px] font-semibold rounded-md bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
+                    บันทึกแล้ว
+                  </span>
+                </div>
+                {data.contractUpdatedBy && (
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 flex items-center justify-between border-t border-blue-200/50 dark:border-blue-900/40 pt-1">
+                    <span>ระบุโดย: {data.contractUpdatedBy}</span>
+                    {data.contractUpdatedAt && (
+                      <span>{format(data.contractUpdatedAt, 'HH:mm น.', { locale: th })}</span>
+                    )}
+                  </div>
                 )}
               </div>
+            ) : data.status !== 'pending' && (
+              <div className="mb-3">
+                <button
+                  type="button"
+                  onClick={() => onOpenContract(data)}
+                  className="w-full py-1.5 px-3 rounded-xl border border-dashed border-blue-300 dark:border-blue-800/80 bg-blue-50/40 dark:bg-blue-950/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100/50 text-xs font-medium transition flex items-center justify-center cursor-pointer"
+                >
+                  <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-500" />
+                  + ระบุเลขที่สัญญา (ใส่ตอนไหนก็ได้หลังรับงาน)
+                </button>
+              </div>
             )}
-          </div>
-        ) : data.status !== 'pending' && (
-          <div className="mb-3">
-            <button
-              type="button"
-              onClick={() => onOpenContract(data)}
-              className="w-full py-1.5 px-3 rounded-xl border border-dashed border-blue-300 dark:border-blue-800/80 bg-blue-50/40 dark:bg-blue-950/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100/50 text-xs font-medium transition flex items-center justify-center cursor-pointer"
-            >
-              <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-500" />
-              + ระบุเลขที่สัญญา (ใส่ตอนไหนก็ได้หลังรับงาน)
-            </button>
-          </div>
+          </>
         )}
 
         {/* Remarks Box if present */}
@@ -2990,7 +3113,9 @@ const CaseCard: React.FC<CaseCardProps> = ({
                 ) : (
                   <StickyNote className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400" />
                 )}
-                {data.remarks.includes(AUTO_CANCEL_REMARK) ? 'ยกเลิกอัตโนมัติ / หมายเหตุ:' : 'สาเหตุงานค้าง / หมายเหตุ:'}
+                {data.remarks.includes(AUTO_CANCEL_REMARK) 
+                  ? 'ยกเลิกอัตโนมัติ / หมายเหตุ:' 
+                  : (isCustomTask ? 'หมายเหตุงาน / รายละเอียด:' : 'สาเหตุงานค้าง / หมายเหตุ:')}
               </span>
               <button
                 type="button"
@@ -3035,7 +3160,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
               className="w-full py-1.5 px-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 hover:bg-amber-100/70 text-xs font-medium transition flex items-center justify-center cursor-pointer shadow-2xs"
             >
               <StickyNote className="w-3.5 h-3.5 mr-1.5 text-amber-500" />
-              ระบุหมายเหตุ (งานค้างเพราะอะไร)
+              {isCustomTask ? '+ ระบุหมายเหตุงาน' : '+ ระบุหมายเหตุ (งานค้างเพราะอะไร)'}
             </button>
           </div>
         ) : null}
@@ -3053,33 +3178,39 @@ const CaseCard: React.FC<CaseCardProps> = ({
                   "py-2.5 px-3 rounded-xl active:scale-[0.98] text-white text-xs font-bold shadow-sm transition flex items-center justify-center cursor-pointer",
                   isStuck
                     ? "bg-amber-600 hover:bg-amber-700 shadow-amber-200 dark:shadow-none"
-                    : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 dark:shadow-none"
+                    : (isCustomTask 
+                        ? "bg-purple-600 hover:bg-purple-700 shadow-purple-200 dark:shadow-none" 
+                        : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 dark:shadow-none")
                 )}
               >
                 <Check className="w-4 h-4 mr-1.5" />
-                {isStuck ? 'รับเคสนี้ต่อ' : 'กดรับเคสนี้'}
+                {isStuck 
+                  ? (isCustomTask ? 'รับงานต่อ' : 'รับเคสนี้ต่อ') 
+                  : (isCustomTask ? 'กดรับงานนี้' : 'กดรับเคสนี้')}
               </button>
 
               <button
                 type="button"
                 onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
                 className="py-2.5 px-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-xs font-bold transition flex items-center justify-center cursor-pointer shadow-2xs"
-                title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                title={isCustomTask ? "บันทึกเป็นงานค้าง (ต้องระบุหมายเหตุ)" : "บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"}
               >
                 <PauseCircle className="w-4 h-4 mr-1.5 text-amber-600 dark:text-amber-400" />
-                <span>เคสค้าง</span>
+                <span>{isCustomTask ? 'งานค้าง' : 'เคสค้าง'}</span>
               </button>
             </div>
             
-            {/* Quick Contract on Pending */}
-            <button
-              type="button"
-              onClick={() => onOpenContract(data)}
-              className="w-full py-1.5 px-3 rounded-xl border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-xs font-medium transition flex items-center justify-center cursor-pointer"
-            >
-              <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-500" />
-              {data.contractNumber ? `สัญญา: ${data.contractNumber}` : '+ ระบุเลขที่สัญญา'}
-            </button>
+            {/* Quick Contract on Pending (Regular cases only) */}
+            {!isCustomTask && (
+              <button
+                type="button"
+                onClick={() => onOpenContract(data)}
+                className="w-full py-1.5 px-3 rounded-xl border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-xs font-medium transition flex items-center justify-center cursor-pointer"
+              >
+                <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-500" />
+                {data.contractNumber ? `สัญญา: ${data.contractNumber}` : '+ ระบุเลขที่สัญญา'}
+              </button>
+            )}
 
             {/* Remarks Button for Pending */}
             <button
@@ -3088,7 +3219,9 @@ const CaseCard: React.FC<CaseCardProps> = ({
               className="w-full py-1.5 px-3 rounded-xl border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs font-medium transition flex items-center justify-center cursor-pointer"
             >
               <StickyNote className="w-3.5 h-3.5 mr-1 text-amber-500" />
-              {data.remarks ? 'ดู/แก้ไขหมายเหตุงานค้าง' : 'ระบุหมายเหตุ (งานค้างเพราะอะไร)'}
+              {data.remarks 
+                ? (isCustomTask ? 'ดู/แก้ไขหมายเหตุงาน' : 'ดู/แก้ไขหมายเหตุงานค้าง') 
+                : (isCustomTask ? '+ ระบุหมายเหตุงาน' : '+ ระบุหมายเหตุ (งานค้างเพราะอะไร)')}
             </button>
 
             <button
@@ -3097,24 +3230,26 @@ const CaseCard: React.FC<CaseCardProps> = ({
               className="w-full py-1.5 px-3 rounded-xl border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-medium transition flex items-center justify-center cursor-pointer"
             >
               <Ban className="w-3.5 h-3.5 mr-1" />
-              ยกเลิกเคสนี้
+              {isCustomTask ? 'ยกเลิกงานนี้' : 'ยกเลิกเคสนี้'}
             </button>
           </div>
         ) : data.status === 'cancelled' ? (
           <div className="space-y-2">
             <div className="text-center py-1 text-xs text-rose-600 dark:text-rose-400 font-medium bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-100 dark:border-rose-900/40">
-              เคสนี้ถูกยกเลิกแล้ว
+              {isCustomTask ? 'งานนี้ถูกยกเลิกแล้ว' : 'เคสนี้ถูกยกเลิกแล้ว'}
             </div>
             
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => onOpenContract(data)}
-                className="py-1 px-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] border border-slate-200 dark:border-slate-800 transition flex items-center justify-center cursor-pointer"
-              >
-                <FileSignature className="w-3 h-3 mr-1 text-blue-500" />
-                {data.contractNumber ? 'ดูสัญญา' : '+ สัญญา'}
-              </button>
+            <div className={clsx("grid gap-1.5", !isCustomTask ? "grid-cols-2" : "grid-cols-1")}>
+              {!isCustomTask && (
+                <button
+                  type="button"
+                  onClick={() => onOpenContract(data)}
+                  className="py-1 px-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] border border-slate-200 dark:border-slate-800 transition flex items-center justify-center cursor-pointer"
+                >
+                  <FileSignature className="w-3 h-3 mr-1 text-blue-500" />
+                  {data.contractNumber ? 'ดูสัญญา' : '+ สัญญา'}
+                </button>
+              )}
 
               <button
                 type="button"
@@ -3132,7 +3267,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
               className="w-full py-1.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium transition flex items-center justify-center cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5 mr-1 text-indigo-500" />
-              กู้คืนเคส / นำกลับมารอรับ
+              {isCustomTask ? 'กู้คืนงาน / นำกลับมารอรับ' : 'กู้คืนเคส / นำกลับมารอรับ'}
             </button>
           </div>
         ) : data.status === 'closed' ? (
@@ -3143,7 +3278,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
                 {data.assigneeName && (
                   <AnimalAvatar identifier={data.assigneeId || data.assigneeName} name={data.assigneeName} size="xs" />
                 )}
-                <span className="truncate">จบเคสแล้ว โดย {data.assigneeName || 'พนักงาน'}</span>
+                <span className="truncate">{isCustomTask ? `จบงานแล้ว โดย ${data.assigneeName || 'พนักงาน'}` : `จบเคสแล้ว โดย ${data.assigneeName || 'พนักงาน'}`}</span>
               </span>
               {data.completedAt && (
                 <span 
@@ -3155,15 +3290,17 @@ const CaseCard: React.FC<CaseCardProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => onOpenContract(data)}
-                className="py-1 px-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] border border-slate-200 dark:border-slate-700 transition flex items-center justify-center cursor-pointer"
-              >
-                <FileSignature className="w-3 h-3 mr-1 text-blue-500" />
-                {data.contractNumber ? `สัญญา: ${data.contractNumber}` : '+ ระบุสัญญา'}
-              </button>
+            <div className={clsx("grid gap-1.5", !isCustomTask ? "grid-cols-2" : "grid-cols-1")}>
+              {!isCustomTask && (
+                <button
+                  type="button"
+                  onClick={() => onOpenContract(data)}
+                  className="py-1 px-2 rounded-lg text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] border border-slate-200 dark:border-slate-700 transition flex items-center justify-center cursor-pointer"
+                >
+                  <FileSignature className="w-3 h-3 mr-1 text-blue-500" />
+                  {data.contractNumber ? `สัญญา: ${data.contractNumber}` : '+ ระบุสัญญา'}
+                </button>
+              )}
 
               <button
                 type="button"
@@ -3183,7 +3320,7 @@ const CaseCard: React.FC<CaseCardProps> = ({
                 className="w-full py-1 px-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] border border-dashed border-slate-200 dark:border-slate-700 transition flex items-center justify-center cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3 mr-1 text-indigo-500" />
-                👑 แอดมิน: กู้คืนเคสกลับมาทำใหม่
+                {isCustomTask ? '👑 แอดมิน: กู้คืนงานกลับมาทำใหม่' : '👑 แอดมิน: กู้คืนเคสกลับมาทำใหม่'}
               </button>
             )}
           </div>
@@ -3207,10 +3344,10 @@ const CaseCard: React.FC<CaseCardProps> = ({
                 type="button"
                 onClick={onTakeOver}
                 className="w-full py-1.5 px-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition flex items-center justify-center cursor-pointer mb-1"
-                title="ดึงเคสนี้มาเป็นความรับผิดชอบของแอดมินทันที"
+                title={isCustomTask ? "ดึงงานนี้มาเป็นความรับผิดชอบของแอดมินทันที" : "ดึงเคสนี้มาเป็นความรับผิดชอบของแอดมินทันที"}
               >
                 <Crown className="w-3 h-3 mr-1 text-amber-500" />
-                ดึงมาทำเอง (สิทธิ์แอดมิน)
+                {isCustomTask ? 'ดึงงานมาทำเอง (สิทธิ์แอดมิน)' : 'ดึงเคสมาทำเอง (สิทธิ์แอดมิน)'}
               </button>
             )}
 
@@ -3224,10 +3361,10 @@ const CaseCard: React.FC<CaseCardProps> = ({
                         type="button"
                         onClick={() => (onCloseCase ? onCloseCase() : onUpdateStatus('closed'))}
                         className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-bold shadow-xs shadow-emerald-200 dark:shadow-none transition flex items-center justify-center cursor-pointer whitespace-nowrap"
-                        title="บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"
+                        title={isCustomTask ? "บันทึกจบงานเสร็จสิ้น" : "บันทึกจบเคสเสร็จสิ้น (บังคับใส่เลขที่สัญญา)"}
                       >
                         <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-                        เสร็จสิ้น -&gt; จบเคส
+                        {isCustomTask ? 'เสร็จสิ้น -> จบงาน' : 'เสร็จสิ้น -> จบเคส'}
                       </button>
 
                       <div className="grid grid-cols-3 gap-1.5">
@@ -3235,28 +3372,28 @@ const CaseCard: React.FC<CaseCardProps> = ({
                           type="button"
                           onClick={() => onOpenHoldModal && onOpenHoldModal(data)}
                           className="py-1.5 px-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white text-xs font-bold transition flex items-center justify-center cursor-pointer whitespace-nowrap shadow-2xs"
-                          title="บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"
+                          title={isCustomTask ? "บันทึกเป็นงานค้าง (ต้องระบุหมายเหตุ)" : "บันทึกเป็นเคสค้าง (ต้องระบุหมายเหตุ)"}
                         >
                           <PauseCircle className="w-3.5 h-3.5 mr-1 shrink-0" />
-                          <span>เคสค้าง</span>
+                          <span>{isCustomTask ? 'งานค้าง' : 'เคสค้าง'}</span>
                         </button>
                         <button
                           type="button"
                           onClick={onOpenReassign}
                           className="py-1.5 px-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-semibold transition flex items-center justify-center cursor-pointer whitespace-nowrap"
-                          title="โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"
+                          title={isCustomTask ? "โยกงานไปให้พนักงานคนอื่นดูแลต่อ" : "โยกเคสไปให้พนักงานคนอื่นดูแลต่อ"}
                         >
                           <ArrowRightLeft className="w-3.5 h-3.5 mr-1 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                          <span>โยกเคส</span>
+                          <span>{isCustomTask ? 'โยกงาน' : 'โยกเคส'}</span>
                         </button>
                         <button
                           type="button"
                           onClick={onReturnToPending}
                           className="py-1.5 px-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-xs font-semibold transition flex items-center justify-center cursor-pointer whitespace-nowrap"
-                          title="คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"
+                          title={isCustomTask ? "คืนสถานะไปรอรับงาน หากรับมาแล้วแต่ไม่ได้ทำต่อ" : "คืนสถานะไปรอรับเคส หากรับมาแล้วแต่ไม่ได้ทำต่อ"}
                         >
                           <RotateCcw className="w-3.5 h-3.5 mr-1 text-amber-600 dark:text-amber-400 shrink-0" />
-                          <span>คืนเคส</span>
+                          <span>{isCustomTask ? 'คืนงาน' : 'คืนเคส'}</span>
                         </button>
                       </div>
                     </>
@@ -3269,36 +3406,38 @@ const CaseCard: React.FC<CaseCardProps> = ({
               )}
 
               {/* Quick Contract & Remarks Row */}
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => onOpenContract(data)}
-                  className="py-1.5 px-2 rounded-xl border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-xs font-medium transition flex items-center justify-center cursor-pointer truncate"
-                  title="ระบุหรือแก้ไขเลขที่สัญญา"
-                >
-                  <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-500 shrink-0" />
-                  <span className="truncate">{data.contractNumber ? `สัญญา: ${data.contractNumber}` : '+ สัญญา'}</span>
-                </button>
+              <div className={clsx("grid gap-1.5", !isCustomTask ? "grid-cols-2" : "grid-cols-1")}>
+                {!isCustomTask && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenContract(data)}
+                    className="py-1.5 px-2 rounded-xl border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-xs font-medium transition flex items-center justify-center cursor-pointer truncate"
+                    title="ระบุหรือแก้ไขเลขที่สัญญา"
+                  >
+                    <FileSignature className="w-3.5 h-3.5 mr-1 text-blue-500 shrink-0" />
+                    <span className="truncate">{data.contractNumber ? `สัญญา: ${data.contractNumber}` : '+ สัญญา'}</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
                   onClick={() => onOpenRemark(data)}
                   className="py-1.5 px-2 rounded-xl border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs font-medium transition flex items-center justify-center cursor-pointer truncate"
-                  title="ระบุหรือแก้ไขหมายเหตุงานค้าง"
+                  title={isCustomTask ? "ระบุหรือแก้ไขหมายเหตุงาน" : "ระบุหรือแก้ไขหมายเหตุงานค้าง"}
                 >
                   <StickyNote className="w-3.5 h-3.5 mr-1 text-amber-500 shrink-0" />
                   <span className="truncate">{data.remarks ? 'หมายเหตุ' : '+ หมายเหตุ'}</span>
                 </button>
               </div>
 
-              {/* Cancel case action */}
+              {/* Cancel action */}
               <button
                 type="button"
                 onClick={onCancel}
                 className="w-full py-1.5 px-3 rounded-xl border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-medium transition flex items-center justify-center cursor-pointer"
               >
                 <Ban className="w-3.5 h-3.5 mr-1" />
-                ยกเลิกเคส
+                {isCustomTask ? 'ยกเลิกงาน' : 'ยกเลิกเคส'}
               </button>
             </div>
           </div>

@@ -14,7 +14,8 @@ import {
   ChevronDown, 
   ChevronUp, 
   Moon,
-  LogOut
+  LogOut,
+  Briefcase
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -31,6 +32,8 @@ interface EmployeeWorkloadSummary {
   username: string;
   avatarEmoji?: string;
   activeCount: number;
+  regularCaseCount: number;
+  customTaskCount: number;
   activeCases: Case[];
   isOnDuty: boolean;
   isBusy: boolean;
@@ -91,6 +94,8 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
     const activeCases = cases.filter(
       (c) => (c.assigneeId === emp.uid || c.assigneeName === emp.name) && (c.status === 'processing' || c.status === 'credit_check')
     );
+    const regularCaseCount = activeCases.filter(c => !c.isCustomTask && c.caseType !== 'custom_task').length;
+    const customTaskCount = activeCases.filter(c => c.isCustomTask || c.caseType === 'custom_task').length;
     const closedCount = cases.filter((c) => (c.assigneeId === emp.uid || c.assigneeName === emp.name) && c.status === 'closed').length;
     const isOnDuty = dutyWorkers.some((w) => w.uid === emp.uid || w.username === emp.username);
     const isOffWork = emp.workStatus === 'off_work';
@@ -102,6 +107,8 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
       username: emp.username,
       avatarEmoji: emp.avatarEmoji,
       activeCount: activeCases.length,
+      regularCaseCount,
+      customTaskCount,
       activeCases,
       isOnDuty,
       isBusy,
@@ -145,11 +152,11 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                สรุปงานพนักงาน (ใครกำลังรับกี่เคส)
+                สรุปงานพนักงาน (ใครกำลังรับกี่เคส/งาน)
               </h3>
               <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                 <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 whitespace-nowrap">
-                  ทำเคสอยู่ {totalBusy} คน
+                  กำลังทำ {totalBusy} คน
                 </span>
                 <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
                   ว่างงาน {totalIdle} คน
@@ -162,7 +169,7 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
               </div>
             </div>
             <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500">
-              กดที่ชื่อพนักงานเพื่อดูเฉพาะเคสของคนนั้นได้ทันที
+              กดที่ชื่อพนักงานเพื่อดูเฉพาะเคส/งานของคนนั้นได้ทันที
             </p>
           </div>
         </div>
@@ -304,10 +311,20 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                           </>
                         ) : emp.activeCount > 0 ? (
                           <>
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-500 text-white shadow-2xs whitespace-nowrap">
-                              <Clock className="w-2.5 h-2.5 mr-0.5 shrink-0" />
-                              {emp.activeCount} เคส
-                            </span>
+                            {/* แสดงเคสปกติถ้ามี */}
+                            {emp.regularCaseCount > 0 && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-500 text-white shadow-2xs whitespace-nowrap" title={`${emp.regularCaseCount} เคส`}>
+                                <Clock className="w-2.5 h-2.5 mr-0.5 shrink-0" />
+                                {emp.regularCaseCount} เคส
+                              </span>
+                            )}
+                            {/* แสดงงานพิเศษถ้ามี (ขึ้นข้างๆ กัน) */}
+                            {emp.customTaskCount > 0 && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold bg-purple-600 text-white shadow-2xs whitespace-nowrap" title={`${emp.customTaskCount} งานพิเศษ`}>
+                                <Briefcase className="w-2.5 h-2.5 mr-0.5 shrink-0" />
+                                {emp.customTaskCount} งาน
+                              </span>
+                            )}
                             {emp.isOnDuty && (
                               <span className="text-[9px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-100/70 dark:bg-indigo-950/70 px-1 py-0.5 rounded inline-flex items-center shrink-0 whitespace-nowrap border border-indigo-200/60 dark:border-indigo-800/60">
                                 <ShieldCheck className="w-2.5 h-2.5 mr-0.5" />
