@@ -36,9 +36,8 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
 
   if (!isOpen || !caseData) return null;
 
-  const isCustom = caseData?.isCustomTask;
   const trimmedContract = contractNumber.trim();
-  const isContractEmpty = !isCustom && trimmedContract.length === 0;
+  const isContractEmpty = trimmedContract.length === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,20 +54,17 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
 
       const updates: Record<string, unknown> = {
         status: 'closed',
+        contractNumber: trimmedContract,
+        contractUpdatedAt: now,
+        contractUpdatedBy: currentUser?.name || caseData.assigneeName || 'พนักงาน',
         completedAt: now,
         updatedAt: now,
       };
 
-      if (trimmedContract) {
-        updates.contractNumber = trimmedContract;
-        updates.contractUpdatedAt = now;
-        updates.contractUpdatedBy = currentUser?.name || caseData.assigneeName || 'พนักงาน';
-      }
-
       const trimmedRemark = completionRemark.trim();
       if (trimmedRemark) {
         const existingRemarks = caseData.remarks ? `${caseData.remarks} | ` : '';
-        updates.remarks = `${existingRemarks}[${isCustom ? 'จบงาน' : 'จบเคส'}: ${trimmedRemark}]`;
+        updates.remarks = `${existingRemarks}[จบเคส: ${trimmedRemark}]`;
         updates.remarksUpdatedAt = now;
         updates.remarksUpdatedBy = currentUser?.name || caseData.assigneeName || 'พนักงาน';
       }
@@ -81,12 +77,10 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
         actorId: currentUser?.uid || caseData.assigneeId || 'system',
         actorName: currentUser?.name || caseData.assigneeName || 'พนักงาน',
         actorAvatarEmoji: currentUser?.avatarEmoji,
-        description: isCustom
-          ? `จบงานพิเศษสำเร็จ: ${caseData.iphoneModel}`
-          : `จบเคสสำเร็จ: ${caseData.iphoneModel} (สัญญา #${trimmedContract})`,
+        description: `จบเคสสำเร็จ: ${caseData.iphoneModel} (สัญญา #${trimmedContract})`,
         caseId: caseData.id,
         iphoneModel: caseData.iphoneModel,
-        contractNumber: trimmedContract || undefined,
+        contractNumber: trimmedContract,
       });
 
       onClose();
@@ -109,15 +103,13 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                <span>{isCustom ? 'บันทึกจบงาน' : 'บันทึกจบเคส'}</span>
-                {!isCustom && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
-                    บังคับใส่สัญญา
-                  </span>
-                )}
+                <span>บันทึกจบเคส</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
+                  บังคับใส่สัญญา
+                </span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {isCustom ? 'ยืนยันการจบงานพิเศษนี้ (ไม่ต้องใส่สัญญาหรือหมายเหตุ)' : 'กรุณาระบุเลขที่สัญญาเพื่อยืนยันการจบเคสนี้'}
+                กรุณาระบุเลขที่สัญญาเพื่อยืนยันการจบเคสนี้
               </p>
             </div>
           </div>
@@ -140,17 +132,17 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
                 {caseData.iphoneModel}
               </span>
               <span className="px-2 py-0.5 text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-md">
-                {isCustom ? 'กำลังทำงาน' : 'กำลังทำเคส'}
+                กำลังทำเคส
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
               <div className="truncate">
-                <span className="text-[10px] text-slate-400 block">{isCustom ? 'ผู้สร้าง' : 'ตัวแทน (ผู้ส่ง)'}</span>
+                <span className="text-[10px] text-slate-400 block">ตัวแทน (ผู้ส่ง)</span>
                 <span className="font-medium truncate block">{caseData.agentName}</span>
               </div>
               <div className="truncate">
-                <span className="text-[10px] text-slate-400 block">{isCustom ? 'ประเภท' : 'จังหวัด'}</span>
+                <span className="text-[10px] text-slate-400 block">จังหวัด</span>
                 <span className="font-medium truncate flex items-center">
                   <MapPin className="w-3 h-3 mr-1 text-slate-400" />
                   {caseData.province}
@@ -160,7 +152,7 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
 
             {caseData.assigneeName && (
               <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60 text-xs">
-                <span className="text-[10px] text-slate-400">{isCustom ? 'ผู้รับผิดชอบงาน:' : 'ผู้รับผิดชอบเคส:'}</span>
+                <span className="text-[10px] text-slate-400">ผู้รับผิดชอบเคส:</span>
                 <AnimalAvatar
                   identifier={caseData.assigneeId || caseData.assigneeName}
                   name={caseData.assigneeName}
@@ -173,22 +165,21 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
             )}
           </div>
 
-          {/* Contract Number Field (MANDATORY only for normal cases) */}
-          {!isCustom && (
-            <div>
-              <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5 flex items-center justify-between">
-                <span className="flex items-center gap-1">
-                  <FileSignature className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span>เลขที่สัญญา (Contract Number)</span>
-                  <span className="text-rose-500 text-xs font-bold">* บังคับกรอก</span>
+          {/* Contract Number Field (MANDATORY) */}
+          <div>
+            <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <FileSignature className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>เลขที่สัญญา (Contract Number)</span>
+                <span className="text-rose-500 text-xs font-bold">* บังคับกรอก</span>
+              </span>
+              {trimmedContract && (
+                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                  <Sparkles className="w-3 h-3" />
+                  ระบุแล้ว
                 </span>
-                {trimmedContract && (
-                  <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-                    <Sparkles className="w-3 h-3" />
-                    ระบุแล้ว
-                  </span>
-                )}
-              </label>
+              )}
+            </label>
             <div className="relative">
               <input
                 type="text"
@@ -218,12 +209,11 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
               </p>
             )}
           </div>
-          )}
 
           {/* Optional Completion Remarks */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              {isCustom ? 'หมายเหตุเพิ่มเติมตอนจบงาน (ไม่บังคับ):' : 'หมายเหตุเพิ่มเติมตอนจบเคส (ไม่บังคับ):'}
+              หมายเหตุเพิ่มเติมตอนจบเคส (ไม่บังคับ):
             </label>
             <textarea
               value={completionRemark}
@@ -238,11 +228,7 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
           <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-xl border border-emerald-200/80 dark:border-emerald-900/40 flex items-start gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
             <div className="text-[11px] text-emerald-900 dark:text-emerald-300 leading-relaxed">
-              {isCustom ? (
-                <>เมื่อกดยืนยันจบงาน งานนี้จะย้ายไปยังแท็บ <span className="font-bold">"งานเสร็จสิ้น"</span> พร้อมบันทึกเวลาที่ปิดงานโดยอัตโนมัติ</>
-              ) : (
-                <>เมื่อกดยืนยันจบเคส เคสนี้จะย้ายไปยังแท็บ <span className="font-bold">"จบเคสแล้ว"</span> พร้อมบันทึกเลขที่สัญญาและเวลาที่ปิดงานโดยอัตโนมัติ</>
-              )}
+              เมื่อกดยืนยันจบเคส เคสนี้จะย้ายไปยังแท็บ <span className="font-bold">"จบเคสแล้ว"</span> พร้อมบันทึกเลขที่สัญญาและเวลาที่ปิดงานโดยอัตโนมัติ
             </div>
           </div>
 

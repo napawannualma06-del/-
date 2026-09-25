@@ -72,7 +72,11 @@ export type TimeframeMode = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 
 
 export function AdminDashboard() {
   const { user, registeredUsers } = useStore();
-  const isAdmin = isUserAdmin(user);
+
+  // Security guard: If user is not admin, redirect to home page immediately
+  if (!isUserAdmin(user)) {
+    return <Navigate to="/" replace />;
+  }
 
   const [cases, setCases] = useState<Case[]>([]);
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
@@ -640,49 +644,9 @@ export function AdminDashboard() {
 
       {/* Conditional Rendering based on Main Tab */}
       {mainTab === 'ot' ? (
-        isAdmin ? (
-          <AdminOTDashboard />
-        ) : (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 text-center space-y-4 max-w-xl mx-auto my-6 shadow-xs">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
-              <Clock className="w-7 h-7" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">บันทึกเวลาทำงานล่วงเวลา (OT) ของฉัน</h3>
-              <p className="text-xs text-slate-500 mt-1">เพื่อความเป็นส่วนตัว คุณสามารถดูประวัติการขอ OT และส่งคำขอใหม่ได้ที่หน้าต่าง OT ส่วนตัว</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-ot-modal'))}
-              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-md cursor-pointer inline-flex items-center gap-2"
-            >
-              <Clock className="w-4 h-4" />
-              เปิดหน้าต่างจัดการ OT ของฉัน
-            </button>
-          </div>
-        )
+        <AdminOTDashboard />
       ) : mainTab === 'advance' ? (
-        isAdmin ? (
-          <AdminAdvanceDashboard />
-        ) : (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 text-center space-y-4 max-w-xl mx-auto my-6 shadow-xs">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
-              <Banknote className="w-7 h-7" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">รายการขอเบิกเงินแอดวานซ์ (Advance) ของฉัน</h3>
-              <p className="text-xs text-slate-500 mt-1">เพื่อความเป็นส่วนตัว คุณสามารถดูประวัติการขอเบิกและสลิปการโอนเงินได้ที่หน้าต่างแอดวานซ์ส่วนตัว</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-advance-modal'))}
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-md cursor-pointer inline-flex items-center gap-2"
-            >
-              <Banknote className="w-4 h-4" />
-              เปิดหน้าต่างเบิกแอดวานซ์ของฉัน
-            </button>
-          </div>
-        )
+        <AdminAdvanceDashboard />
       ) : (
         <>
           {/* Credit Check Duty Station (2-person duty roster visible to everyone) */}
@@ -837,13 +801,8 @@ export function AdminDashboard() {
                 ยังไม่มีข้อมูลผลงานพนักงานในช่วงเวลานี้
               </div>
             ) : (
-              sortedLeaderboard.map(({ employee, activeCases, closedCount, cancelledCount, isBusy, isOnCreditCheckDuty }, idx) => {
-                const isMe = user && (employee.uid === user.uid || employee.username === user.username);
-                return (
-                <div key={employee.uid} className={clsx(
-                  "px-5 py-3.5 flex items-center justify-between transition",
-                  isMe ? "bg-indigo-50/80 dark:bg-indigo-950/50 border-l-4 border-indigo-600" : "hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
-                )}>
+              sortedLeaderboard.map(({ employee, activeCases, closedCount, cancelledCount, isBusy, isOnCreditCheckDuty }, idx) => (
+                <div key={employee.uid} className="px-5 py-3.5 flex items-center justify-between hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
                   <div className="flex items-center min-w-0">
                     <div className="mr-3 shrink-0 relative">
                       <AnimalAvatar identifier={employee.username || employee.uid} name={employee.name} size="md" />
@@ -859,11 +818,6 @@ export function AdminDashboard() {
                     <div className="truncate">
                       <p className="text-sm font-semibold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
                         {employee.name}
-                        {isMe && (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-indigo-600 text-white font-bold shadow-xs">
-                            คุณ
-                          </span>
-                        )}
                         {isUserAdmin(employee) && (
                           <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-medium">
                             แอดมิน
@@ -900,8 +854,7 @@ export function AdminDashboard() {
                     </span>
                   </div>
                 </div>
-              );
-              })
+              ))
             )}
           </div>
         </div>
