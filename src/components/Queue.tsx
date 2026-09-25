@@ -47,7 +47,8 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Zap
+  Zap,
+  Briefcase
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -281,6 +282,12 @@ export function Queue() {
   const [showAgentManagerModal, setShowAgentManagerModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>('default');
+
+  // Custom Task Modal State (For Admin to add task/job outside normal case intake)
+  const [showCustomTaskModal, setShowCustomTaskModal] = useState(false);
+  const [customTaskTitle, setCustomTaskTitle] = useState('');
+  const [customTaskRemarks, setCustomTaskRemarks] = useState('');
+  const [isSubmittingCustomTask, setIsSubmittingCustomTask] = useState(false);
 
   // Credit Check Duty State (Max 2 workers, only they + admin can create cases)
   const [isCreditChecker, setIsCreditChecker] = useState(false);
@@ -865,6 +872,18 @@ export function Queue() {
             รายชื่อตัวแทน
           </button>
 
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowCustomTaskModal(true)}
+              className="inline-flex items-center px-3.5 py-2.5 border border-purple-200 dark:border-purple-800 rounded-xl shadow-xs text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 transition cursor-pointer active:scale-95"
+              title="เพิ่มงานที่นอกเหนือการรับเคสปกติ (ระบุชื่องาน และหมายเหตุ)"
+            >
+              <Briefcase className="w-4 h-4 mr-1.5 text-purple-200" />
+              <span>เพิ่มงานพิเศษ</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -894,6 +913,122 @@ export function Queue() {
           </button>
         </div>
       </div>
+
+      {/* Custom Task Modal (Admin only, task title and remarks) */}
+      {showCustomTaskModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-400">
+                  <Briefcase className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">เพิ่มงานพิเศษ / งานนอกเหนือเคสปกติ</h3>
+                  <p className="text-xs text-slate-400">สำหรับแอดมินสร้างงานมอบหมายให้พนักงานในคิว (ระบุชื่องาน และหมายเหตุ)</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCustomTaskModal(false)}
+                className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!customTaskTitle.trim()) {
+                alert('กรุณาระบุชื่องานค่ะ');
+                return;
+              }
+              setIsSubmittingCustomTask(true);
+              try {
+                const newTask: Record<string, unknown> = {
+                  taskTitle: customTaskTitle.trim(),
+                  agentName: 'งานพิเศษ/งานนอก',
+                  iphoneModel: `[งานพิเศษ] ${customTaskTitle.trim()}`,
+                  province: '-',
+                  status: 'pending',
+                  remarks: customTaskRemarks.trim() || null,
+                  remarksUpdatedAt: customTaskRemarks.trim() ? Date.now() : null,
+                  remarksUpdatedBy: customTaskRemarks.trim() ? (user?.name || 'แอดมิน') : null,
+                  isCustomTask: true,
+                  caseType: 'custom_task',
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                };
+
+                const docRef = await addDoc(collection(db, 'cases'), newTask);
+                logActivity({
+                  type: 'create_case',
+                  actorId: user?.uid || 'admin',
+                  actorName: user?.name || 'แอดมิน',
+                  actorAvatarEmoji: user?.avatarEmoji,
+                  description: `เพิ่มงานพิเศษ: "${customTaskTitle.trim()}"`,
+                  caseId: docRef.id,
+                  iphoneModel: `[งานพิเศษ] ${customTaskTitle.trim()}`,
+                }).catch(console.warn);
+
+                setCustomTaskTitle('');
+                setCustomTaskRemarks('');
+                setShowCustomTaskModal(false);
+                alert('สร้างงานพิเศษเรียบร้อยแล้ว พนักงานสามารถกดรับงานในคิวได้ทันทีค่ะ');
+              } catch (err) {
+                console.error(err);
+                alert('เกิดข้อผิดพลาดในการสร้างงานพิเศษ');
+              } finally {
+                setIsSubmittingCustomTask(false);
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  ชื่องาน (Task Title) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="เช่น ตรวจเช็คสต็อกเครื่องหน้าร้าน, จัดส่งเอกสารด่วน"
+                  value={customTaskTitle}
+                  onChange={(e) => setCustomTaskTitle(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  หมายเหตุ / รายละเอียด (Remarks)
+                </label>
+                <textarea
+                  placeholder="ระบุรายละเอียดเพิ่มเติม หรือคำสั่งงาน (ถ้ามี)"
+                  value={customTaskRemarks}
+                  onChange={(e) => setCustomTaskRemarks(e.target.value)}
+                  rows={3}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowCustomTaskModal(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingCustomTask}
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingCustomTask ? 'กำลังสร้าง...' : 'บันทึก & เปิดงาน'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Real-time Activity Feed Banner & Modal */}
       <RecentActivityFeed />

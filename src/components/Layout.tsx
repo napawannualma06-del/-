@@ -379,21 +379,19 @@ export function Layout() {
                   <span className="hidden sm:inline">คิวงาน</span>
                 </Link>
  
-                {isUserAdmin(user) && (
-                  <Link
-                    to="/admin"
-                    className={clsx(
-                      'inline-flex items-center px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
-                      location.pathname === '/admin' 
-                        ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold' 
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
-                    )}
-                    title="แดชบอร์ด & สถิติ"
-                  >
-                    <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1 shrink-0" />
-                    <span className="hidden sm:inline">แดชบอร์ด</span>
-                  </Link>
-                )}
+                <Link
+                  to="/admin"
+                  className={clsx(
+                    'inline-flex items-center px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
+                    location.pathname === '/admin' 
+                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold' 
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                  )}
+                  title="แดชบอร์ด & สถิติ"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1 shrink-0" />
+                  <span className="hidden sm:inline">แดชบอร์ด</span>
+                </Link>
 
                 {/* เมนูดรอปดาวน์รวมเครื่องมือและบริการ (เมนูสะอาด สบายตา ไม่ล้นจอ) */}
                 <div className="relative" ref={toolsDropdownRef}>
