@@ -143,9 +143,13 @@ export function AdminDashboard() {
       const usersData: EmployeeProfile[] = [];
       snapshot.forEach((doc) => {
         const d = doc.data();
+        let name = d.name || 'พนักงาน';
+        if (name === 'คุณเกม' || d.username?.toLowerCase() === 'gametpl' || doc.id === 'admin_gametpl') {
+          name = 'Game';
+        }
         usersData.push({
           uid: doc.id,
-          name: d.name || 'พนักงาน',
+          name: name,
           username: d.username || doc.id,
           role: d.role || 'employee',
           createdAt: d.createdAt,
@@ -304,9 +308,10 @@ export function AdminDashboard() {
   // Also include registeredUsers from store if not in employeeMap
   registeredUsers.forEach(u => {
     if (u.uid && !employeeMap[u.uid]) {
+      const name = (u.name === 'คุณเกม' || u.username?.toLowerCase() === 'gametpl' || u.uid === 'admin_gametpl') ? 'Game' : u.name;
       employeeMap[u.uid] = {
         uid: u.uid,
-        name: u.name,
+        name: name,
         username: u.username || u.uid,
         role: u.role,
         workStatus: u.workStatus || 'working',
@@ -317,10 +322,11 @@ export function AdminDashboard() {
 
   // Ensure current logged in user (Napawan) is present in employeeMap
   if (user && user.uid && !employeeMap[user.uid]) {
+    const isGame = user.name === 'คุณเกม' || user.username?.toLowerCase() === 'gametpl' || user.uid === 'admin_gametpl';
     employeeMap[user.uid] = {
       uid: user.uid,
-      name: user.name || 'Napawan',
-      username: user.username || 'napawan',
+      name: isGame ? 'Game' : (user.name || 'Napawan'),
+      username: user.username || (isGame ? 'gametpl' : 'napawan'),
       role: user.role || 'admin',
       workStatus: user.workStatus || 'working',
       offWorkAt: user.offWorkAt,
@@ -330,9 +336,10 @@ export function AdminDashboard() {
   // Also include any assignee who worked on a case if not in users list
   cases.forEach(c => {
     if (c.assigneeId && !employeeMap[c.assigneeId]) {
+      const isGame = c.assigneeName === 'คุณเกม' || c.assigneeId === 'admin_gametpl' || c.assigneeName === 'Game';
       const syntheticEmp: EmployeeProfile = {
         uid: c.assigneeId,
-        name: c.assigneeName || c.assigneeId,
+        name: isGame ? 'Game' : (c.assigneeName || c.assigneeId),
         username: c.assigneeName ? c.assigneeName.toLowerCase().replace(/\s+/g, '') : c.assigneeId,
       };
       employeeMap[c.assigneeId] = syntheticEmp;
@@ -341,7 +348,11 @@ export function AdminDashboard() {
 
   // Unique list of operational employees and team members (including Napawan)
   const allEmployees: EmployeeProfile[] = Array.from(
-    new Map(Object.values(employeeMap).map(e => [e.uid, e])).values()
+    new Map(Object.values(employeeMap).map(e => {
+      const isGame = e.name === 'คุณเกม' || e.username?.toLowerCase() === 'gametpl' || e.uid === 'admin_gametpl';
+      const normalized: EmployeeProfile = isGame ? { ...e, name: 'Game' } : e;
+      return [normalized.uid, normalized];
+    })).values()
   ).filter(emp => {
     const isNapawan = 
       emp.username?.toLowerCase() === 'napawan' ||
@@ -351,10 +362,8 @@ export function AdminDashboard() {
 
     if (isNapawan) return true; // Explicitly ensure Napawan is included in performance and dashboard
 
-    // Only exclude technical super-admin gametpl if they don't have any cases
-    if (emp.username?.toLowerCase() === 'gametpl' || emp.uid === 'admin_gametpl') {
-      const hasCases = cases.some(c => c.assigneeId === emp.uid || c.assigneeName?.toLowerCase() === emp.name?.toLowerCase());
-      return hasCases;
+    if (emp.username?.toLowerCase() === 'gametpl' || emp.uid === 'admin_gametpl' || emp.name === 'Game' || emp.name === 'คุณเกม') {
+      return true;
     }
 
     return true;
@@ -372,29 +381,38 @@ export function AdminDashboard() {
   }
 
   const workloads: EmployeeWorkload[] = allEmployees.map((emp) => {
+    const isGame = emp.name === 'Game' || emp.name === 'คุณเกม' || emp.username?.toLowerCase() === 'gametpl' || emp.uid === 'admin_gametpl';
+    const matchesEmp = (assigneeId?: string, assigneeName?: string) => {
+      if (assigneeId === emp.uid) return true;
+      if (assigneeName && assigneeName.toLowerCase() === emp.name.toLowerCase()) return true;
+      if (isGame && (assigneeName === 'คุณเกม' || assigneeName === 'Game')) return true;
+      return false;
+    };
+
     // Current active cases assigned to this employee (credit_check or processing)
     const empActiveCases = cases.filter(c => 
       (c.status === 'credit_check' || c.status === 'processing') &&
-      (c.assigneeId === emp.uid || (c.assigneeName && c.assigneeName.toLowerCase() === emp.name.toLowerCase()))
+      matchesEmp(c.assigneeId, c.assigneeName)
     );
 
     // Filtered closed cases
     const empClosedCount = filteredCases.filter(c => 
       c.status === 'closed' &&
-      (c.assigneeId === emp.uid || (c.assigneeName && c.assigneeName.toLowerCase() === emp.name.toLowerCase()))
+      matchesEmp(c.assigneeId, c.assigneeName)
     ).length;
 
     // Filtered cancelled cases
     const empCancelledCount = filteredCases.filter(c => 
       c.status === 'cancelled' &&
-      (c.assigneeId === emp.uid || (c.assigneeName && c.assigneeName.toLowerCase() === emp.name.toLowerCase()))
+      matchesEmp(c.assigneeId, c.assigneeName)
     ).length;
 
     // Check if this employee is currently on credit check duty (Max 2 workers)
     const isOnCreditCheckDuty = dutyWorkers.some(w => 
       w.uid === emp.uid || 
       (w.username && w.username.toLowerCase() === emp.username.toLowerCase()) || 
-      (w.name && w.name.toLowerCase() === emp.name.toLowerCase())
+      (w.name && w.name.toLowerCase() === emp.name.toLowerCase()) ||
+      (isGame && (w.name === 'คุณเกม' || w.name === 'Game'))
     );
 
     const isOffWork = emp.workStatus === 'off_work';
@@ -807,7 +825,7 @@ export function AdminDashboard() {
             <div className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-900 dark:text-white">
               {allEmployees.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">คน</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">รวมทีมงานและแอดมิน</p>
+            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">รวมทีมงานทั้งหมด</p>
           </div>
         </div>
       </div>
@@ -864,11 +882,7 @@ export function AdminDashboard() {
                             คุณ
                           </span>
                         )}
-                        {isUserAdmin(employee) && (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-medium">
-                            แอดมิน
-                          </span>
-                        )}
+                        {/* ซ่อนคำว่า แอดมิน ตามคำขอ */}
                         {isBusy ? (
                           isOnCreditCheckDuty && activeCases.length === 0 ? (
                             <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-normal">

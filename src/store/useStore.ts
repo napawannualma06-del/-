@@ -9,7 +9,7 @@ export type { Role, WorkStatus, UserProfile };
 
 export const SUPER_ADMIN_USERNAME = 'gametpl';
 export const SUPER_ADMIN_PIN = 'gametpl';
-export const SUPER_ADMIN_NAME = 'คุณเกม';
+export const SUPER_ADMIN_NAME = 'Game';
 
 export const isUserAdmin = (user?: { role?: string; username?: string; email?: string; name?: string; uid?: string } | null): boolean => {
   if (!user) return false;
@@ -20,10 +20,13 @@ export const isUserAdmin = (user?: { role?: string; username?: string; email?: s
   const id = (user.uid || '').trim().toLowerCase();
   return (
     u === 'gametpl' ||
+    u === 'game' ||
     u === 'napawan' ||
     id === 'admin_gametpl' ||
     id === 'admin_napawan' ||
     n === 'gametpl' ||
+    n === 'game' ||
+    n === 'คุณเกม' ||
     n === 'napawan' ||
     n.includes('napawan') ||
     n.includes('นภวรรณ') ||
@@ -155,7 +158,14 @@ export const useStore = create<AppState>((set, get) => ({
       docs.forEach((d) => {
         const data = d.data() as UserProfile;
         const isAdmin = isUserAdmin({ ...data, uid: d.id });
-        const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
+        let cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
+        const isGameAdmin = data.username?.toLowerCase() === SUPER_ADMIN_USERNAME || d.id === 'admin_gametpl' || cleanName === 'คุณเกม';
+        if (isGameAdmin) {
+          cleanName = SUPER_ADMIN_NAME;
+          if (data.name === 'คุณเกม' || (data.username?.toLowerCase() === SUPER_ADMIN_USERNAME && data.name !== SUPER_ADMIN_NAME)) {
+            setDoc(doc(db, 'users', d.id), { name: SUPER_ADMIN_NAME }, { merge: true }).catch(() => {});
+          }
+        }
         const profile: UserProfile = {
           ...data,
           uid: d.id,
@@ -316,7 +326,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     if (cleanUsername === SUPER_ADMIN_USERNAME) {
-      return { success: false, message: 'ชื่อผู้ใช้ gametpl สงวนสิทธิ์สำหรับคุณเกม กรุณาเข้าสู่ระบบ' };
+      return { success: false, message: `ชื่อผู้ใช้ ${SUPER_ADMIN_USERNAME} สงวนสิทธิ์สำหรับ ${SUPER_ADMIN_NAME} กรุณาเข้าสู่ระบบ` };
     }
 
     try {
@@ -553,7 +563,10 @@ export const useStore = create<AppState>((set, get) => ({
           const parsed = JSON.parse(savedUserStr);
           if (parsed && parsed.uid && parsed.name) {
             const isAdmin = isUserAdmin(parsed);
-            const cleanName = (parsed.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
+            let cleanName = (parsed.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
+            if (cleanName === 'คุณเกม' || parsed.username?.toLowerCase() === SUPER_ADMIN_USERNAME || parsed.uid === 'admin_gametpl') {
+              cleanName = SUPER_ADMIN_NAME;
+            }
             const enforcedProfile: UserProfile = {
               ...parsed,
               role: isAdmin ? 'admin' : 'employee',

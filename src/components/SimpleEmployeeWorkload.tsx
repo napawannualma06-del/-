@@ -62,7 +62,11 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
       const list: UserProfile[] = [];
       snapshot.forEach((d) => {
         const data = d.data() as UserProfile;
-        list.push({ ...data, uid: d.id });
+        let displayName = data.name;
+        if (displayName === 'คุณเกม' || data.username?.toLowerCase() === 'gametpl' || d.id === 'admin_gametpl') {
+          displayName = 'Game';
+        }
+        list.push({ ...data, name: displayName, uid: d.id });
       });
       setEmployees(list);
     }, (error) => {
@@ -90,13 +94,14 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
 
   // Calculate workloads
   const workloads: EmployeeWorkloadSummary[] = employees.map((emp) => {
-    const isSuperAdmin = emp.username?.toLowerCase() === 'gametpl' || emp.uid === 'admin_gametpl';
+    const isSuperAdmin = emp.username?.toLowerCase() === 'gametpl' || emp.uid === 'admin_gametpl' || emp.name === 'Game' || emp.name === 'คุณเกม';
+    const isGame = isSuperAdmin;
     const activeCases = cases.filter(
-      (c) => (c.assigneeId === emp.uid || c.assigneeName === emp.name) && (c.status === 'processing' || c.status === 'credit_check')
+      (c) => (c.assigneeId === emp.uid || c.assigneeName === emp.name || (isGame && (c.assigneeName === 'คุณเกม' || c.assigneeName === 'Game'))) && (c.status === 'processing' || c.status === 'credit_check')
     );
     const regularCaseCount = activeCases.filter(c => !c.isCustomTask && c.caseType !== 'custom_task').length;
     const customTaskCount = activeCases.filter(c => c.isCustomTask || c.caseType === 'custom_task').length;
-    const closedCount = cases.filter((c) => (c.assigneeId === emp.uid || c.assigneeName === emp.name) && c.status === 'closed').length;
+    const closedCount = cases.filter((c) => (c.assigneeId === emp.uid || c.assigneeName === emp.name || (isGame && (c.assigneeName === 'คุณเกม' || c.assigneeName === 'Game'))) && c.status === 'closed').length;
     const isOnDuty = dutyWorkers.some((w) => w.uid === emp.uid || w.username === emp.username);
     const isOffWork = emp.workStatus === 'off_work';
     const isBusy = !isOffWork && (activeCases.length > 0 || isOnDuty);

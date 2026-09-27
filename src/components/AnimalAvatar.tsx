@@ -109,8 +109,16 @@ export function getAnimalProfile(
     };
   }
 
-  // 2. คุณเกม (gametpl) - แสดงเป็นสิงโตธรรมดา ไม่เปิดเผยสถานะแอดมิน
-  if (identifier?.toLowerCase() === 'gametpl' || identifier === 'admin_gametpl') {
+  // 2. Game (gametpl) - แสดงเป็นสิงโตธรรมดา ไม่เปิดเผยสถานะแอดมิน
+  const idLower = identifier?.toLowerCase();
+  const nameLower = name?.toLowerCase();
+  if (
+    idLower === 'gametpl' || 
+    idLower === 'admin_gametpl' || 
+    idLower === 'game' || 
+    nameLower === 'game' || 
+    name === 'คุณเกม'
+  ) {
     return {
       emoji: '🦁',
       name: 'สิงโตผู้กล้าหาญ',
