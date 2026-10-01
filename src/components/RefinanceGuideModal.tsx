@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, 
   Search, 
@@ -125,6 +125,13 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
     if (calcResult.plans.term15) list.push(15);
     return list;
   }, [calcResult.plans]);
+
+  // Auto-switch selected term if current term is not available for this model (e.g. 15 months only for >= 17,000)
+  useEffect(() => {
+    if (availableTerms.length > 0 && !availableTerms.includes(selectedTerm)) {
+      setSelectedTerm(availableTerms[availableTerms.length - 1]);
+    }
+  }, [availableTerms, selectedTerm]);
 
   // Ensure selectedTerm is valid
   const currentMonthlyAmount = useMemo(() => {
@@ -336,6 +343,21 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
           )}
         </div>
 
+        {/* Banner: New Rates Effective 1 Oct 69 */}
+        <div className="px-4 sm:px-6 py-2 bg-gradient-to-r from-amber-500/15 via-indigo-500/10 to-amber-500/15 border-b border-amber-300/40 dark:border-amber-700/40 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white uppercase tracking-wider shadow-xs">
+              อัพเดทใหม่
+            </span>
+            <span className="font-semibold text-[11px] sm:text-xs">
+              ⚡ อัตราใหม่ เริ่มใช้ 1 ต.ค. 69 • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป
+            </span>
+          </div>
+          <span className="hidden sm:inline text-[10px] text-amber-700 dark:text-amber-300 font-medium">
+            ยึดราคาและค่างวดตามตารางทางการ
+          </span>
+        </div>
+
         {/* Content Body */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1">
           {/* TAB 1: TABLE VIEW */}
@@ -487,7 +509,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                   { id: 'iPhone 16', label: 'iPhone 16 Series' },
                   { id: 'iPhone 15', label: 'iPhone 15 Series' },
                   { id: 'iPhone 14', label: 'iPhone 14 Series' },
-                  { id: 'iPhone 12-13', label: 'iPhone 12-13 Series' },
+                  { id: 'iPhone 13', label: 'iPhone 13 Series' },
                 ].map(s => (
                   <button
                     key={s.id}
