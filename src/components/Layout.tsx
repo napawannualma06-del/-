@@ -28,12 +28,14 @@ import {
   Zap,
   Banknote,
   ChevronDown,
-  Layers
+  Layers,
+  Bike
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
 import { OvertimeModal } from './OvertimeModal';
 import { AdvanceModal } from './AdvanceModal';
+import { MessengerDirectoryModal } from './MessengerDirectoryModal';
 import { isUserAdmin } from '../store/useStore';
 
 interface TechStatusToast {
@@ -64,6 +66,8 @@ export function Layout() {
   const toolsDropdownRef = useRef<HTMLDivElement | null>(null);
   const [showRefinanceModal, setShowRefinanceModal] = useState(false);
   const [refinanceModalModel, setRefinanceModalModel] = useState<string | undefined>(undefined);
+  const [showMessengerModal, setShowMessengerModal] = useState(false);
+  const [messengerInitialProvince, setMessengerInitialProvince] = useState<string>('all');
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [activeTechToast, setActiveTechToast] = useState<TechStatusToast | null>(null);
   const [techNotifications, setTechNotifications] = useState<TechNotificationItem[]>([]);
@@ -303,13 +307,24 @@ export function Layout() {
       setShowAdvanceModal(true);
     };
 
+    const handleOpenMessenger = (e: any) => {
+      if (e.detail?.province) {
+        setMessengerInitialProvince(e.detail.province);
+      } else {
+        setMessengerInitialProvince('all');
+      }
+      setShowMessengerModal(true);
+    };
+
     window.addEventListener('open-refinance-guide', handleOpenRefinance);
     window.addEventListener('open-ot-modal', handleOpenOT);
     window.addEventListener('open-advance-modal', handleOpenAdvance);
+    window.addEventListener('open-messenger-modal', handleOpenMessenger);
     return () => {
       window.removeEventListener('open-refinance-guide', handleOpenRefinance);
       window.removeEventListener('open-ot-modal', handleOpenOT);
       window.removeEventListener('open-advance-modal', handleOpenAdvance);
+      window.removeEventListener('open-messenger-modal', handleOpenMessenger);
     };
   }, []);
 
@@ -550,6 +565,37 @@ export function Layout() {
                           </span>
                         )}
                       </button>
+
+                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                      {/* 5. รายชื่อแมสเซนเจอร์ Thunder Cloud */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setMessengerInitialProvince('all');
+                          setShowMessengerModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-sky-50/70 dark:hover:bg-sky-950/40 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-400 group-hover:scale-105 transition shrink-0">
+                            <Bike className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-sky-700 dark:group-hover:text-sky-400">
+                              รายชื่อแมสเซนเจอร์ (Thunder Cloud)
+                            </span>
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              ติดต่อแมส 98+ คน ทุกพื้นที่ทั่วประเทศ
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 shrink-0">
+                          ดูรายชื่อ
+                        </span>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -721,6 +767,13 @@ export function Layout() {
         isOpen={showRefinanceModal}
         onClose={() => setShowRefinanceModal(false)}
         initialModel={refinanceModalModel}
+      />
+
+      {/* Messenger Directory Modal (Thunder Cloud 98 couriers) */}
+      <MessengerDirectoryModal
+        isOpen={showMessengerModal}
+        onClose={() => setShowMessengerModal(false)}
+        initialProvince={messengerInitialProvince}
       />
 
       {/* Overtime Request & Approval Modal */}

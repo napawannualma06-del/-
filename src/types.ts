@@ -1,5 +1,6 @@
 export type Role = 'employee' | 'admin';
 export type WorkStatus = 'working' | 'off_work';
+export type AccountStatus = 'pending' | 'approved' | 'rejected';
 
 export interface UserProfile {
   uid: string;
@@ -13,6 +14,9 @@ export interface UserProfile {
   offWorkAt?: number;
   avatarEmoji?: string;
   createdAt: number;
+  accountStatus?: AccountStatus;
+  approvedAt?: number;
+  approvedBy?: string;
 }
 
 export interface DutyWorker {

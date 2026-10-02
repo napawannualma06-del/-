@@ -11,7 +11,10 @@ import {
   ChevronRight,
   User,
   Sun,
-  Moon
+  Moon,
+  Clock,
+  ShieldAlert,
+  CheckCircle2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -30,6 +33,7 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [pendingApprovalNotice, setPendingApprovalNotice] = useState<string | null>(null);
 
   // Login Form
   const [loginUsername, setLoginUsername] = useState('');
@@ -62,11 +66,19 @@ export function Login() {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
+    setPendingApprovalNotice(null);
     setLoading(true);
     try {
       const res = await registerEmployee(regName, regUsername, regPin);
       if (!res.success) {
         setErrorMsg(res.message || 'ลงทะเบียนไม่สำเร็จ');
+      } else if (res.pendingApproval) {
+        setPendingApprovalNotice(
+          `ลงทะเบียนสำเร็จเรียบร้อยแล้ว! บัญชีของคุณ "${regName}" (${regUsername}) อยู่ระหว่างรอผู้ดูแลระบบ (แอดมิน) อนุมัติการเข้าใช้งาน กรุณาแจ้งแอดมินเพื่อกดอนุมัติก่อนเข้าสู่ระบบ`
+        );
+        setRegName('');
+        setRegUsername('');
+        setRegPin('');
       } else {
         setSuccessMsg('ลงทะเบียนสำเร็จ กำลังเข้าสู่ระบบ...');
       }
@@ -76,6 +88,14 @@ export function Login() {
   };
 
   const handleQuickSelect = async (u: UserProfile) => {
+    if (u.accountStatus === 'pending') {
+      setErrorMsg(`บัญชี "${u.name}" อยู่ระหว่างรอแอดมินอนุมัติ กรุณาแจ้งแอดมินเพื่อเปิดใช้งาน`);
+      return;
+    }
+    if (u.accountStatus === 'rejected') {
+      setErrorMsg(`บัญชี "${u.name}" ไม่ได้รับอนุมัติให้เข้าใช้งาน`);
+      return;
+    }
     if (u.username === 'gametpl') {
       setActiveTab('login');
       setLoginUsername('gametpl');
@@ -178,6 +198,28 @@ export function Login() {
           </div>
 
           {/* Messages */}
+          {pendingApprovalNotice && (
+            <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/60 rounded-xl text-amber-900 dark:text-amber-200 text-xs leading-relaxed space-y-2 shadow-xs">
+              <div className="flex items-center gap-2 font-bold text-sm text-amber-800 dark:text-amber-300">
+                <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>รอผู้ดูแลระบบ (แอดมิน) อนุมัติ</span>
+              </div>
+              <p>{pendingApprovalNotice}</p>
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('login');
+                    setPendingApprovalNotice(null);
+                  }}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold text-xs transition cursor-pointer"
+                >
+                  ไปที่หน้าเข้าสู่ระบบ
+                </button>
+              </div>
+            </div>
+          )}
+
           {errorMsg && (
             <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-xl text-red-700 dark:text-red-300 text-xs font-medium">
               {errorMsg}
@@ -281,13 +323,20 @@ export function Login() {
                 />
               </div>
 
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-400 flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                <span>
+                  <strong>การสมัครใหม่:</strong> เมื่อกดลงทะเบียน บัญชีจะถูกส่งให้ผู้ดูแลระบบ (แอดมิน) อนุมัติก่อน จึงจะสามารถเข้าสู่ระบบและเริ่มทำงานได้
+                </span>
+              </div>
+
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full mt-3 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-semibold text-sm rounded-xl shadow-md shadow-emerald-200 dark:shadow-none transition disabled:opacity-50 flex items-center justify-center cursor-pointer"
+                className="w-full mt-2 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-semibold text-sm rounded-xl shadow-md shadow-emerald-200 dark:shadow-none transition disabled:opacity-50 flex items-center justify-center cursor-pointer"
               >
                 <UserPlus className="w-4 h-4 mr-2" />
-                {loading ? 'กำลังบันทึก...' : 'ลงทะเบียนและเข้าสู่ระบบทันที'}
+                {loading ? 'กำลังส่งคำขอลงทะเบียน...' : 'ลงทะเบียนขอเข้าใช้งาน (รอแอดมินอนุมัติ)'}
               </button>
             </form>
           )}

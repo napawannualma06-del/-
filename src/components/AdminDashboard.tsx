@@ -35,7 +35,10 @@ import {
   LogOut,
   ArrowRightLeft,
   RotateCcw,
-  ClockAlert
+  ClockAlert,
+  ShieldAlert,
+  Trash2,
+  Bike
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -48,6 +51,7 @@ import { CloseCaseModal } from './CloseCaseModal';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { AdminOTDashboard } from './AdminOTDashboard';
 import { AdminAdvanceDashboard } from './AdminAdvanceDashboard';
+import { UserManagementModal } from './UserManagementModal';
 import { getPreviousAssignee } from '../lib/caseUtils';
 import { 
   getExpiredCases, 
@@ -66,6 +70,9 @@ interface EmployeeProfile {
   createdAt?: number;
   workStatus?: 'working' | 'off_work';
   offWorkAt?: number;
+  accountStatus?: 'pending' | 'approved' | 'rejected';
+  approvedAt?: number;
+  approvedBy?: string;
 }
 
 export type TimeframeMode = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'custom' | 'all';
@@ -73,6 +80,7 @@ export type TimeframeMode = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 
 export function AdminDashboard() {
   const { user, registeredUsers } = useStore();
   const isAdmin = isUserAdmin(user);
+  const [showUserModal, setShowUserModal] = useState(false);
 
   const [cases, setCases] = useState<Case[]>([]);
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
@@ -155,6 +163,9 @@ export function AdminDashboard() {
           createdAt: d.createdAt,
           workStatus: d.workStatus || 'working',
           offWorkAt: d.offWorkAt,
+          accountStatus: d.accountStatus || 'approved',
+          approvedAt: d.approvedAt,
+          approvedBy: d.approvedBy,
         });
       });
       setEmployees(usersData);
@@ -333,14 +344,15 @@ export function AdminDashboard() {
     };
   }
 
-  // Also include any assignee who worked on a case if not in users list
+  // Also include any assignee who worked on an ACTIVE case if not in users list
   cases.forEach(c => {
-    if (c.assigneeId && !employeeMap[c.assigneeId]) {
+    if (c.assigneeId && !employeeMap[c.assigneeId] && (c.status === 'credit_check' || c.status === 'processing')) {
       const isGame = c.assigneeName === 'คุณเกม' || c.assigneeId === 'admin_gametpl' || c.assigneeName === 'Game';
       const syntheticEmp: EmployeeProfile = {
         uid: c.assigneeId,
         name: isGame ? 'Game' : (c.assigneeName || c.assigneeId),
         username: c.assigneeName ? c.assigneeName.toLowerCase().replace(/\s+/g, '') : c.assigneeId,
+        accountStatus: 'approved',
       };
       employeeMap[c.assigneeId] = syntheticEmp;
     }
@@ -354,6 +366,15 @@ export function AdminDashboard() {
       return [normalized.uid, normalized];
     })).values()
   ).filter(emp => {
+    // Exclude unapproved or rejected accounts from the active workload and leaderboard
+    if (emp.accountStatus === 'pending' || emp.accountStatus === 'rejected') {
+      return false;
+    }
+    // Exclude deleted accounts (e.g. Jane)
+    if (emp.uid === 'emp_suthalinee' || emp.name === 'เจน' || emp.username === 'suthalinee') {
+      return false;
+    }
+
     const isNapawan = 
       emp.username?.toLowerCase() === 'napawan' ||
       emp.name?.toLowerCase().includes('napawan') ||
@@ -532,6 +553,42 @@ export function AdminDashboard() {
                 <span className="text-[10px] text-slate-400 font-normal">(ปกติ)</span>
               )}
             </button>
+
+            {/* User Management & Pending Approvals */}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowUserModal(true)}
+                className={clsx(
+                  "px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap",
+                  registeredUsers.some(u => u.accountStatus === 'pending')
+                    ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100"
+                    : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                )}
+                title="จัดการบัญชีพนักงานและอนุมัติผู้สมัครใหม่"
+              >
+                <Users className="w-3.5 h-3.5 text-indigo-500" />
+                <span>พนักงาน & อนุมัติ</span>
+                {registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-extrabold animate-pulse">
+                    รออนุมัติ {registeredUsers.filter(u => u.accountStatus === 'pending').length}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* รายชื่อแมสเซนเจอร์ (Thunder Cloud) */}
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('open-messenger-modal', { detail: { province: 'all' } }));
+              }}
+              className="px-3 py-1.5 rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 hover:bg-sky-100 hover:text-sky-800 dark:hover:bg-sky-900 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+              title="ดูรายชื่อและเบอร์โทรแมสเซนเจอร์ทั้งหมด (Thunder Cloud + แมสใหม่)"
+            >
+              <Bike className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+              <span>รายชื่อแมส</span>
+            </button>
           </div>
 
           {/* Timeframe Presets - Only for cases dashboard */}
@@ -655,6 +712,36 @@ export function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* Pending Approvals Alert Banner for Admins */}
+      {isAdmin && registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
+        <div className="p-4 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border border-amber-300 dark:border-amber-700/80 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs animate-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/60 border border-amber-300 dark:border-amber-700 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+              <ShieldAlert className="w-5 h-5 animate-bounce" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>มีผู้สมัครใหม่รอการอนุมัติ</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-white">
+                  {registeredUsers.filter(u => u.accountStatus === 'pending').length} บัญชี
+                </span>
+              </h4>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                ผู้สมัครจะไม่สามารถเข้าสู่ระบบหรือรับเคสได้จนกว่าแอดมินจะกดอนุมัติการเข้าใช้งาน
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowUserModal(true)}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>ตรวจและอนุมัติทันที ({registeredUsers.filter(u => u.accountStatus === 'pending').length})</span>
+          </button>
+        </div>
+      )}
 
       {/* Conditional Rendering based on Main Tab */}
       {mainTab === 'ot' ? (
@@ -844,9 +931,22 @@ export function AdminDashboard() {
                 เรียงตามจำนวนเคสที่ปิดได้สำเร็จในช่วงเวลาที่เลือก
               </p>
             </div>
-            <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg">
-              {sortedLeaderboard.length} คน
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg">
+                {sortedLeaderboard.length} คน
+              </span>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowUserModal(true)}
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition flex items-center gap-1 cursor-pointer"
+                  title="จัดการและลบบัญชีพนักงาน"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>จัดการบัญชี</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1034,6 +1134,14 @@ export function AdminDashboard() {
           isOpen={showTechModal}
           onClose={() => setShowTechModal(false)}
           defaultTab="list"
+        />
+      )}
+
+      {/* User Management & Approvals Modal */}
+      {showUserModal && (
+        <UserManagementModal
+          isOpen={showUserModal}
+          onClose={() => setShowUserModal(false)}
         />
       )}
     </div>

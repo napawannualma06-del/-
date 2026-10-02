@@ -48,7 +48,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Zap,
-  Briefcase
+  Briefcase,
+  Bike
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -873,6 +874,19 @@ export function Queue() {
           >
             <Building2 className="w-3.5 h-3.5 mr-1.5 text-indigo-500" />
             รายชื่อตัวแทน
+          </button>
+
+          {/* รายชื่อแมสเซนเจอร์ (Thunder Cloud) */}
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('open-messenger-modal', { detail: { province: 'all' } }));
+            }}
+            className="inline-flex items-center px-3 py-2 border border-sky-200 dark:border-sky-800 rounded-xl text-xs font-bold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900 shadow-xs transition cursor-pointer"
+            title="ดูรายชื่อและเบอร์โทรแมสเซนเจอร์ทั้งหมด (Thunder Cloud)"
+          >
+            <Bike className="w-3.5 h-3.5 mr-1.5 text-sky-600 dark:text-sky-400" />
+            <span>ติดต่อแมส</span>
           </button>
 
           {isAdmin && (
@@ -2141,7 +2155,18 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
             <>
               <span className="font-medium text-slate-700 dark:text-slate-300 truncate">{data.agentName}</span>
               <span className="mx-1 text-slate-300 dark:text-slate-600">•</span>
-              <span className="truncate text-slate-400">{data.province}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(new CustomEvent('open-messenger-modal', { detail: { province: data.province } }));
+                }}
+                className="truncate text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline cursor-pointer flex items-center gap-0.5"
+                title={`คลิกเพื่อดูรายชื่อแมสประจำจังหวัด ${data.province}`}
+              >
+                <span>{data.province}</span>
+                <Bike className="w-2.5 h-2.5 opacity-60 hover:opacity-100 text-sky-500 shrink-0" />
+              </button>
             </>
           )}
         </div>
@@ -2531,7 +2556,18 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
               <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate flex items-center mt-0.5">
                 <span className="truncate font-medium text-slate-700 dark:text-slate-300">{data.agentName}</span>
                 <span className="mx-1 text-slate-300 dark:text-slate-600 shrink-0">•</span>
-                <span className="truncate shrink-0 text-slate-400">{data.province}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.dispatchEvent(new CustomEvent('open-messenger-modal', { detail: { province: data.province } }));
+                  }}
+                  className="truncate shrink-0 text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 hover:underline cursor-pointer flex items-center gap-0.5"
+                  title={`ดูแมสประจำจังหวัด ${data.province}`}
+                >
+                  <span>{data.province}</span>
+                  <Bike className="w-2.5 h-2.5 opacity-60 text-sky-500 shrink-0" />
+                </button>
               </div>
             </div>
           )}
@@ -2994,9 +3030,21 @@ const CaseCard: React.FC<CaseCardProps> = ({
                   <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block">{data.agentName}</span>
                 </div>
 
-                <div className="bg-slate-50 dark:bg-slate-800/80 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
-                  <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-medium">จังหวัด</span>
-                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate block flex items-center">
+                <div 
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('open-messenger-modal', { detail: { province: data.province } }));
+                  }}
+                  className="bg-slate-50 dark:bg-slate-800/80 hover:bg-sky-50 dark:hover:bg-sky-950/60 p-2 rounded-xl border border-slate-100 dark:border-slate-800 transition cursor-pointer group"
+                  title={`คลิกเพื่อดูแมสประจำจังหวัด ${data.province}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 block font-medium">จังหวัด</span>
+                    <span className="text-[10px] text-sky-600 dark:text-sky-400 font-bold opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
+                      <Bike className="w-2.5 h-2.5" />
+                      ดูแมส
+                    </span>
+                  </div>
+                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 group-hover:text-sky-600 dark:group-hover:text-sky-300 truncate block flex items-center">
                     <MapPin className="w-3 h-3 mr-1 text-slate-400" />
                     {data.province}
                   </span>

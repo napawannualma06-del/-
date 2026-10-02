@@ -24,9 +24,22 @@
         },
         "createdAt": {
           "type": "number"
+        },
+        "accountStatus": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Approval status of user account"
+        },
+        "approvedAt": {
+          "type": "number",
+          "description": "Timestamp when account was approved"
+        },
+        "approvedBy": {
+          "type": "string",
+          "description": "Name of admin who approved the account"
         }
       },
-      "required": ["email", "name", "role", "createdAt"]
+      "required": ["name", "role", "createdAt"]
     },
     "Case": {
       "title": "Case",
@@ -413,6 +426,46 @@
         }
       },
       "required": ["employeeId", "employeeName", "amount", "requestDate", "reason", "status", "cyclePeriod", "createdAt", "updatedAt"]
+    },
+    "CustomMessenger": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Messenger full name"
+        },
+        "nickname": {
+          "type": "string",
+          "description": "Messenger nickname"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Phone number formatted"
+        },
+        "rawPhone": {
+          "type": "string",
+          "description": "Raw numeric phone digits"
+        },
+        "province": {
+          "type": "string",
+          "description": "Operating province"
+        },
+        "note": {
+          "type": "string",
+          "description": "Delivery zones or special notes"
+        },
+        "jobCount": {
+          "type": "number",
+          "description": "Number of completed deliveries"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "phone", "province"]
     }
   },
   "firestore": {
@@ -443,6 +496,10 @@
     "advance_requests/{requestId}": {
       "schema": "AdvanceRequest",
       "description": "Employee advance payment requests with slip support"
+    },
+    "custom_messengers/{messengerId}": {
+      "schema": "CustomMessenger",
+      "description": "Company custom messengers and courier contacts"
     }
   }
 }

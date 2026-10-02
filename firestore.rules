@@ -12,7 +12,10 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.name is string && data.name.size() <= 128 &&
              data.role in ['employee', 'admin'] &&
-             (!('avatarEmoji' in data) || (data.avatarEmoji is string && data.avatarEmoji.size() <= 64));
+             (!('avatarEmoji' in data) || (data.avatarEmoji is string && data.avatarEmoji.size() <= 64)) &&
+             (!('accountStatus' in data) || data.accountStatus in ['pending', 'approved', 'rejected']) &&
+             (!('approvedBy' in data) || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&
+             (!('approvedAt' in data) || data.approvedAt is number);
     }
 
     function isValidCase(data) {
@@ -136,10 +139,19 @@ service cloud.firestore {
              (!('adminComment' in data) || data.adminComment == null || (data.adminComment is string && data.adminComment.size() <= 1000));
     }
 
+    function isValidMessenger(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
+             data.phone is string && data.phone.size() <= 64 &&
+             data.province is string && data.province.size() <= 64 &&
+             (!('nickname' in data) || data.nickname == null || (data.nickname is string && data.nickname.size() <= 64)) &&
+             (!('note' in data) || data.note == null || (data.note is string && data.note.size() <= 500)) &&
+             (!('jobCount' in data) || data.jobCount == null || (data.jobCount is number || data.jobCount is int));
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create, update: if isValidUser(incoming());
-      allow delete: if false;
+      allow delete: if true;
     }
 
     match /cases/{caseId} {
@@ -187,6 +199,12 @@ service cloud.firestore {
     match /advance_requests/{requestId} {
       allow read: if true;
       allow create, update: if isValidAdvanceRequest(incoming());
+      allow delete: if true;
+    }
+
+    match /custom_messengers/{messengerId} {
+      allow read: if true;
+      allow create, update: if isValidMessenger(incoming());
       allow delete: if true;
     }
   }

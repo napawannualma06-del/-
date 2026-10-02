@@ -1,11 +1,11 @@
 import { create } from 'zustand';
 import { auth, db } from '../lib/firebase';
-import { doc, getDoc, setDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
-import { UserProfile, Role, WorkStatus } from '../types';
+import { UserProfile, Role, WorkStatus, AccountStatus } from '../types';
 import { clockOutEmployee, clockInEmployee, ShiftActionResult } from '../lib/shiftService';
 
-export type { Role, WorkStatus, UserProfile };
+export type { Role, WorkStatus, AccountStatus, UserProfile };
 
 export const SUPER_ADMIN_USERNAME = 'gametpl';
 export const SUPER_ADMIN_PIN = 'gametpl';
@@ -48,7 +48,10 @@ interface AppState {
   fetchRegisteredUsers: () => Promise<void>;
   updateAvatar: (emoji: string) => Promise<{ success: boolean; message?: string }>;
   loginWithUsername: (username: string, pin: string) => Promise<{ success: boolean; message?: string }>;
-  registerEmployee: (name: string, username: string, pin?: string) => Promise<{ success: boolean; message?: string }>;
+  registerEmployee: (name: string, username: string, pin?: string) => Promise<{ success: boolean; pendingApproval?: boolean; message?: string }>;
+  approveUser: (uid: string) => Promise<{ success: boolean; message?: string }>;
+  rejectUser: (uid: string) => Promise<{ success: boolean; message?: string }>;
+  deleteUserAccount: (uid: string) => Promise<{ success: boolean; message?: string }>;
   setUserDirectly: (profile: UserProfile) => void;
   clockOut: () => Promise<ShiftActionResult>;
   clockIn: () => Promise<{ success: boolean; message: string }>;
@@ -171,6 +174,7 @@ export const useStore = create<AppState>((set, get) => ({
           uid: d.id,
           name: cleanName || data.name || (isAdmin ? (data.username || 'Admin') : 'Employee'),
           role: isAdmin ? 'admin' : 'employee',
+          accountStatus: data.accountStatus || 'approved',
           ...(isAdmin && data.username?.toLowerCase() === SUPER_ADMIN_USERNAME ? { pin: SUPER_ADMIN_PIN } : {}),
         };
 
@@ -193,6 +197,7 @@ export const useStore = create<AppState>((set, get) => ({
           name: SUPER_ADMIN_NAME,
           pin: SUPER_ADMIN_PIN,
           role: 'admin',
+          accountStatus: 'approved',
           createdAt: 1710000000000,
         };
         list.unshift(adminProfile);
@@ -241,6 +246,7 @@ export const useStore = create<AppState>((set, get) => ({
         name: SUPER_ADMIN_NAME,
         pin: SUPER_ADMIN_PIN,
         role: 'admin',
+        accountStatus: 'approved',
         createdAt: 1710000000000,
       };
 
@@ -273,13 +279,20 @@ export const useStore = create<AppState>((set, get) => ({
           if (data.pin && data.pin !== cleanPin) {
             return { success: false, message: 'รหัสผ่านหรือ PIN ไม่ถูกต้อง' };
           }
+          if (data.accountStatus === 'pending') {
+            return { success: false, message: 'บัญชีของคุณอยู่ระหว่างรอผู้ดูแลระบบ (แอดมิน) อนุมัติ กรุณาแจ้งแอดมินเพื่อเปิดใช้งาน' };
+          }
+          if (data.accountStatus === 'rejected') {
+            return { success: false, message: 'บัญชีนี้ไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
+          }
           const isAdmin = isUserAdmin({ ...data, uid: directDoc.id, username: cleanUsername });
           const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
           const profile: UserProfile = { 
             ...data, 
             uid: directDoc.id, 
             name: cleanName || data.name,
-            role: isAdmin ? 'admin' : 'employee' 
+            role: isAdmin ? 'admin' : 'employee',
+            accountStatus: data.accountStatus || 'approved',
           };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
           set({ user: profile });
@@ -294,6 +307,12 @@ export const useStore = create<AppState>((set, get) => ({
       if (data.pin && data.pin !== cleanPin) {
         return { success: false, message: 'รหัสผ่านหรือ PIN ไม่ถูกต้อง' };
       }
+      if (data.accountStatus === 'pending') {
+        return { success: false, message: 'บัญชีของคุณอยู่ระหว่างรอผู้ดูแลระบบ (แอดมิน) อนุมัติ กรุณาแจ้งแอดมินเพื่อเปิดใช้งาน' };
+      }
+      if (data.accountStatus === 'rejected') {
+        return { success: false, message: 'บัญชีนี้ไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
+      }
 
       const isAdmin = isUserAdmin({ ...data, uid: userDoc.id, username: cleanUsername });
       const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
@@ -302,12 +321,11 @@ export const useStore = create<AppState>((set, get) => ({
         uid: userDoc.id,
         name: cleanName || data.name,
         role: isAdmin ? 'admin' : 'employee',
+        accountStatus: data.accountStatus || 'approved',
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
       set({ user: profile });
-      setupUserSync(profile.uid, get, set);
-      return { success: true };
       setupUserSync(profile.uid, get, set);
       return { success: true };
     } catch (error) {
@@ -346,19 +364,91 @@ export const useStore = create<AppState>((set, get) => ({
         username: cleanUsername,
         pin: cleanPin,
         role: isAdmin ? 'admin' : 'employee',
+        accountStatus: isAdmin ? 'approved' : 'pending',
+        workStatus: 'off_work',
         createdAt: Date.now(),
       };
 
       await setDoc(docRef, profile);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-      set({ user: profile });
-      setupUserSync(profile.uid, get, set);
+
+      if (isAdmin) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+        set({ user: profile });
+        setupUserSync(profile.uid, get, set);
+        await get().fetchRegisteredUsers();
+        return { success: true, pendingApproval: false };
+      }
+
+      // Normal employee registration: Requires admin approval
       await get().fetchRegisteredUsers();
 
-      return { success: true };
+      return { 
+        success: true, 
+        pendingApproval: true, 
+        message: 'ลงทะเบียนสำเร็จ! กรุณารอแอดมินตรวจสอบและอนุมัติการเข้าใช้งาน' 
+      };
     } catch (error) {
       console.error('Registration error', error);
       return { success: false, message: 'ไม่สามารถลงทะเบียนได้: ' + (error as Error).message };
+    }
+  },
+
+  approveUser: async (uid: string) => {
+    try {
+      const currentUser = get().user;
+      const adminName = currentUser?.name || 'แอดมิน';
+      const userRef = doc(db, 'users', uid);
+      await setDoc(
+        userRef, 
+        { 
+          accountStatus: 'approved', 
+          approvedAt: Date.now(), 
+          approvedBy: adminName 
+        }, 
+        { merge: true }
+      );
+      await get().fetchRegisteredUsers();
+      return { success: true };
+    } catch (error) {
+      console.error('Approve user error', error);
+      return { success: false, message: 'ไม่สามารถอนุมัติได้: ' + (error as Error).message };
+    }
+  },
+
+  rejectUser: async (uid: string) => {
+    try {
+      const userRef = doc(db, 'users', uid);
+      await setDoc(
+        userRef, 
+        { 
+          accountStatus: 'rejected',
+          rejectedAt: Date.now() 
+        }, 
+        { merge: true }
+      );
+      await get().fetchRegisteredUsers();
+      return { success: true };
+    } catch (error) {
+      console.error('Reject user error', error);
+      return { success: false, message: 'ไม่สามารถปฏิเสธได้: ' + (error as Error).message };
+    }
+  },
+
+  deleteUserAccount: async (uid: string) => {
+    try {
+      if (uid === 'admin_gametpl') {
+        return { success: false, message: 'ไม่สามารถลบบัญชี Super Admin ได้' };
+      }
+      const userRef = doc(db, 'users', uid);
+      await deleteDoc(userRef);
+
+      const nextUsers = get().registeredUsers.filter(u => u.uid !== uid);
+      set({ registeredUsers: nextUsers });
+      await get().fetchRegisteredUsers();
+      return { success: true };
+    } catch (error) {
+      console.error('Delete user account error', error);
+      return { success: false, message: 'ไม่สามารถลบบัญชีได้: ' + (error as Error).message };
     }
   },
 
@@ -369,6 +459,7 @@ export const useStore = create<AppState>((set, get) => ({
       name: isEmp ? 'สมชาย ใจบริการ' : 'ผู้ดูแลระบบ',
       username: isEmp ? 'somchai' : 'admin',
       role: role,
+      accountStatus: 'approved',
       createdAt: Date.now(),
     };
 
@@ -384,12 +475,16 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setUserDirectly: (profile: UserProfile) => {
+    if (profile.accountStatus === 'pending' || profile.accountStatus === 'rejected') {
+      return;
+    }
     const isAdmin = isUserAdmin(profile);
     const cleanName = (profile.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
     const enforcedProfile: UserProfile = {
       ...profile,
       name: cleanName || profile.name,
-      role: isAdmin ? 'admin' : 'employee'
+      role: isAdmin ? 'admin' : 'employee',
+      accountStatus: profile.accountStatus || 'approved'
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(enforcedProfile));
     set({ user: enforcedProfile });
@@ -576,16 +671,31 @@ export const useStore = create<AppState>((set, get) => ({
             setupUserSync(enforcedProfile.uid, get, set);
             get().fetchRegisteredUsers();
 
-            // Sync fresh workStatus from Firestore
+            // Sync fresh workStatus and account validation from Firestore
             try {
               const freshDoc = await getDoc(doc(db, 'users', enforcedProfile.uid));
+              if (!freshDoc.exists() && enforcedProfile.uid !== 'admin_gametpl') {
+                // User account has been deleted by admin
+                localStorage.removeItem(STORAGE_KEY);
+                set({ user: null, loading: false });
+                get().fetchRegisteredUsers();
+                return;
+              }
               if (freshDoc.exists()) {
                 const freshData = freshDoc.data() as Partial<UserProfile>;
+                if (freshData.accountStatus === 'pending' || freshData.accountStatus === 'rejected') {
+                  localStorage.removeItem(STORAGE_KEY);
+                  set({ user: null, loading: false });
+                  get().fetchRegisteredUsers();
+                  return;
+                }
+
                 if (freshData.workStatus !== undefined && freshData.workStatus !== enforcedProfile.workStatus) {
                   const updatedProfile: UserProfile = { 
                     ...enforcedProfile, 
                     workStatus: freshData.workStatus, 
-                    offWorkAt: freshData.offWorkAt 
+                    offWorkAt: freshData.offWorkAt,
+                    accountStatus: freshData.accountStatus || 'approved'
                   };
                   localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProfile));
                   set({ user: updatedProfile });
