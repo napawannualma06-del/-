@@ -30,7 +30,8 @@ import {
   ChevronDown,
   Layers,
   Bike,
-  QrCode
+  QrCode,
+  Building2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
@@ -646,6 +647,33 @@ export function Layout() {
                           สแกนโอน
                         </span>
                       </button>
+
+                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                      {/* 7. ระบบจัดการ Agent & บัญชีธนาคาร */}
+                      <Link
+                        to="/agents"
+                        onClick={() => setShowToolsDropdown(false)}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-indigo-50/70 dark:hover:bg-indigo-950/40 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 group-hover:scale-105 transition shrink-0">
+                            <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-700 dark:group-hover:text-indigo-400">
+                              รายชื่อ Agent & บัญชีธนาคาร
+                            </span>
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              บันทึกเลขบัญชี • เชื่อมโยงตอนเพิ่มงาน
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0">
+                          จัดการ
+                        </span>
+                      </Link>
                     </div>
                   )}
                 </div>

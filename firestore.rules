@@ -46,8 +46,18 @@ service cloud.firestore {
     function isValidAgent(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
              data.createdAt is number &&
-             (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128)) &&
-             (!('createdById' in data) || (data.createdById is string && data.createdById.size() <= 128));
+             (!('createdBy' in data) || data.createdBy == null || (data.createdBy is string && data.createdBy.size() <= 128)) &&
+             (!('createdById' in data) || data.createdById == null || (data.createdById is string && data.createdById.size() <= 128)) &&
+             (!('bankName' in data) || data.bankName == null || (data.bankName is string && data.bankName.size() <= 128)) &&
+             (!('bankAccountNumber' in data) || data.bankAccountNumber == null || (data.bankAccountNumber is string && data.bankAccountNumber.size() <= 64)) &&
+             (!('bankAccountName' in data) || data.bankAccountName == null || (data.bankAccountName is string && data.bankAccountName.size() <= 128)) &&
+             (!('promptpayType' in data) || data.promptpayType == null || (data.promptpayType is string && data.promptpayType.size() <= 32)) &&
+             (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 64)) &&
+             (!('province' in data) || data.province == null || (data.province is string && data.province.size() <= 128)) &&
+             (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 2000)) &&
+             (!('qrImageUrl' in data) || data.qrImageUrl == null || (data.qrImageUrl is string && data.qrImageUrl.size() <= 600000)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is number)) &&
+             (!('updatedBy' in data) || data.updatedBy == null || (data.updatedBy is string && data.updatedBy.size() <= 128));
     }
 
     function isValidDuty(data) {

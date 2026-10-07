@@ -103,7 +103,7 @@ export function EmployeeQRModal({
 
   // Search & Filter in Directory
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'has_qr' | 'mine'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'has_image' | 'mine'>('all');
 
   // Selected Employee for Scanning & Paying
   const [selectedEmpMethod, setSelectedEmpMethod] = useState<{
@@ -120,7 +120,8 @@ export function EmployeeQRModal({
   // Toast / Copy Feedback
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
-  // "My QR" / Add / Edit Form State
+  // "Add / Edit QR" Form State
+  const [targetMode, setTargetMode] = useState<'me' | 'colleague' | 'custom'>('me');
   const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
   const [formEmployeeId, setFormEmployeeId] = useState<string>('');
   const [formEmployeeName, setFormEmployeeName] = useState<string>('');
@@ -230,11 +231,8 @@ export function EmployeeQRModal({
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
-      if (initialEmployeeId) {
-        // Will be matched once methods or registered users are loaded
-      }
     }
-  }, [isOpen, initialTab, initialEmployeeId]);
+  }, [isOpen, initialTab]);
 
   // Auto populate my form if editing own QR
   const myExistingMethod = useMemo(() => {
@@ -242,8 +240,30 @@ export function EmployeeQRModal({
     return methods.find((m) => m.employeeId === user.uid);
   }, [methods, user]);
 
+  // Handle initial employee ID from props (e.g. from user management modal)
+  useEffect(() => {
+    if (isOpen && initialEmployeeId && !loadingMethods) {
+      const matchMethod = methods.find((m) => m.employeeId === initialEmployeeId);
+      if (matchMethod) {
+        setSelectedEmpMethod({
+          method: matchMethod,
+          userProfile: {
+            uid: matchMethod.employeeId,
+            name: matchMethod.employeeName,
+            username: matchMethod.employeeUsername,
+            avatarEmoji: matchMethod.avatarEmoji,
+          },
+        });
+      } else {
+        const reg = registeredUsers?.find((u) => u.uid === initialEmployeeId);
+        startEditOtherQr(initialEmployeeId, reg?.name || 'พนักงาน');
+      }
+    }
+  }, [isOpen, initialEmployeeId, loadingMethods, methods, registeredUsers]);
+
   const startEditOwnQr = () => {
     if (!user) return;
+    setTargetMode('me');
     setEditingTargetId(user.uid);
     setFormEmployeeId(user.uid);
     setFormEmployeeName(myExistingMethod?.employeeName || user.name || '');
@@ -256,8 +276,28 @@ export function EmployeeQRModal({
     setActiveTab('my_qr');
   };
 
+  const startAddNewQr = () => {
+    if (!myExistingMethod && user) {
+      startEditOwnQr();
+      return;
+    }
+    // Default to colleague or custom
+    setTargetMode('colleague');
+    setEditingTargetId(null);
+    setFormEmployeeId('');
+    setFormEmployeeName('');
+    setFormBankName('พร้อมเพย์ (PromptPay)');
+    setFormAccountNumber('');
+    setFormAccountName('');
+    setFormPromptpayType('phone');
+    setFormQrImageUrl('');
+    setFormNote('');
+    setActiveTab('my_qr');
+  };
+
   const startEditOtherQr = (empId: string, empName: string) => {
     const existing = methods.find((m) => m.employeeId === empId);
+    setTargetMode(empId.startsWith('emp_custom_') ? 'custom' : 'colleague');
     setEditingTargetId(empId);
     setFormEmployeeId(empId);
     setFormEmployeeName(existing?.employeeName || empName);
@@ -268,6 +308,20 @@ export function EmployeeQRModal({
     setFormQrImageUrl(existing?.qrImageUrl || '');
     setFormNote(existing?.note || '');
     setActiveTab('my_qr');
+  };
+
+  const handleSelectColleagueInForm = (empUid: string) => {
+    const reg = registeredUsers?.find((u) => u.uid === empUid);
+    const existing = methods.find((m) => m.employeeId === empUid);
+    setFormEmployeeId(empUid);
+    setFormEmployeeName(reg?.name || existing?.employeeName || 'พนักงาน');
+    setEditingTargetId(empUid);
+    setFormBankName(existing?.bankName || 'พร้อมเพย์ (PromptPay)');
+    setFormAccountNumber(existing?.accountNumber || '');
+    setFormAccountName(existing?.accountName || reg?.name || '');
+    setFormPromptpayType(existing?.promptpayType || 'phone');
+    setFormQrImageUrl(existing?.qrImageUrl || '');
+    setFormNote(existing?.note || '');
   };
 
   // Generate QR dynamically when selected employee or scan amount changes
@@ -301,64 +355,35 @@ export function EmployeeQRModal({
       });
   }, [selectedEmpMethod, scanAmountStr]);
 
-  // Merge registered users with configured payment methods
+  // COMBINED DIRECTORY: SHOW ONLY EMPLOYEES WHO HAVE BEEN ADDED TO THE SYSTEM
   const combinedDirectory = useMemo(() => {
     const list: Array<{
       uid: string;
       name: string;
       username?: string;
       avatarEmoji?: string;
-      method?: EmployeePaymentMethod;
+      method: EmployeePaymentMethod;
       isCurrentUser: boolean;
     }> = [];
 
-    const processedUids = new Set<string>();
-
-    // 1. Add current user first
-    if (user) {
-      const myMethod = methods.find((m) => m.employeeId === user.uid);
-      list.push({
-        uid: user.uid,
-        name: user.name || 'ฉัน',
-        username: user.username,
-        avatarEmoji: user.avatarEmoji,
-        method: myMethod,
-        isCurrentUser: true,
-      });
-      processedUids.add(user.uid);
-    }
-
-    // 2. Add registered users
-    if (registeredUsers && registeredUsers.length > 0) {
-      registeredUsers.forEach((u) => {
-        if (!processedUids.has(u.uid)) {
-          const m = methods.find((item) => item.employeeId === u.uid);
-          list.push({
-            uid: u.uid,
-            name: u.name,
-            username: u.username,
-            avatarEmoji: u.avatarEmoji,
-            method: m,
-            isCurrentUser: false,
-          });
-          processedUids.add(u.uid);
-        }
-      });
-    }
-
-    // 3. Add any standalone payment methods not matching a registered user UID
+    // ONLY include entries that exist in methods (i.e. those who have actually been added)
     methods.forEach((m) => {
-      if (!processedUids.has(m.employeeId)) {
-        list.push({
-          uid: m.employeeId,
-          name: m.employeeName,
-          username: m.employeeUsername,
-          avatarEmoji: m.avatarEmoji,
-          method: m,
-          isCurrentUser: user?.uid === m.employeeId,
-        });
-        processedUids.add(m.employeeId);
-      }
+      const regUser = registeredUsers?.find((u) => u.uid === m.employeeId);
+      list.push({
+        uid: m.employeeId,
+        name: m.employeeName || regUser?.name || 'พนักงาน',
+        username: m.employeeUsername || regUser?.username || '',
+        avatarEmoji: m.avatarEmoji || regUser?.avatarEmoji || (m.employeeId === user?.uid ? user.avatarEmoji : '👤'),
+        method: m,
+        isCurrentUser: user?.uid === m.employeeId,
+      });
+    });
+
+    // Sort: Current user first (if added), then alphabetically by name
+    list.sort((a, b) => {
+      if (a.isCurrentUser) return -1;
+      if (b.isCurrentUser) return 1;
+      return a.name.localeCompare(b.name, 'th');
     });
 
     return list;
@@ -368,8 +393,8 @@ export function EmployeeQRModal({
   const filteredDirectory = useMemo(() => {
     let result = combinedDirectory;
 
-    if (selectedFilter === 'has_qr') {
-      result = result.filter((item) => !!item.method?.accountNumber);
+    if (selectedFilter === 'has_image') {
+      result = result.filter((item) => !!item.method.qrImageUrl);
     } else if (selectedFilter === 'mine') {
       result = result.filter((item) => item.isCurrentUser);
     }
@@ -380,9 +405,10 @@ export function EmployeeQRModal({
         (item) =>
           item.name.toLowerCase().includes(q) ||
           (item.username && item.username.toLowerCase().includes(q)) ||
-          (item.method?.accountNumber && item.method.accountNumber.includes(q)) ||
-          (item.method?.bankName && item.method.bankName.toLowerCase().includes(q)) ||
-          (item.method?.accountName && item.method.accountName.toLowerCase().includes(q))
+          (item.method.accountNumber && item.method.accountNumber.includes(q)) ||
+          (item.method.bankName && item.method.bankName.toLowerCase().includes(q)) ||
+          (item.method.accountName && item.method.accountName.toLowerCase().includes(q)) ||
+          (item.method.note && item.method.note.toLowerCase().includes(q))
       );
     }
 
@@ -424,8 +450,29 @@ export function EmployeeQRModal({
       return;
     }
 
-    const targetEmpId = editingTargetId || user.uid;
-    const targetName = formEmployeeName.trim() || user.name || 'พนักงาน';
+    let targetEmpId = editingTargetId;
+    let targetName = formEmployeeName.trim();
+
+    if (targetMode === 'me') {
+      targetEmpId = user.uid;
+      targetName = formEmployeeName.trim() || user.name || 'พนักงาน';
+    } else if (targetMode === 'colleague') {
+      if (!formEmployeeId) {
+        alert('กรุณาเลือกเพื่อนร่วมงานในระบบ');
+        return;
+      }
+      targetEmpId = formEmployeeId;
+      targetName = formEmployeeName.trim() || registeredUsers?.find((u) => u.uid === formEmployeeId)?.name || 'พนักงาน';
+    } else {
+      // Custom external employee
+      if (!targetName) {
+        alert('กรุณาระบุชื่อพนักงาน');
+        return;
+      }
+      if (!targetEmpId) {
+        targetEmpId = `emp_custom_${Date.now()}`;
+      }
+    }
 
     if (!formAccountNumber.trim()) {
       alert('กรุณาระบุเลขที่บัญชี หรือ เบอร์พร้อมเพย์ค่ะ');
@@ -435,18 +482,15 @@ export function EmployeeQRModal({
     setIsSavingMethod(true);
     try {
       const docRef = doc(db, 'employee_payment_methods', targetEmpId);
+      const regUser = registeredUsers?.find((u) => u.uid === targetEmpId);
+      const isSelf = targetEmpId === user.uid;
+
       const payload: Partial<EmployeePaymentMethod> = {
         id: targetEmpId,
         employeeId: targetEmpId,
         employeeName: targetName,
-        employeeUsername:
-          targetEmpId === user.uid
-            ? user.username
-            : registeredUsers.find((u) => u.uid === targetEmpId)?.username || '',
-        avatarEmoji:
-          targetEmpId === user.uid
-            ? user.avatarEmoji
-            : registeredUsers.find((u) => u.uid === targetEmpId)?.avatarEmoji || '',
+        employeeUsername: isSelf ? user.username : regUser?.username || '',
+        avatarEmoji: isSelf ? (user.avatarEmoji || '👤') : regUser?.avatarEmoji || '👤',
         bankName: formBankName,
         accountNumber: formAccountNumber.trim(),
         accountName: formAccountName.trim() || targetName,
@@ -457,13 +501,14 @@ export function EmployeeQRModal({
         updatedBy: user.name || user.username || 'System',
       };
 
-      if (!myExistingMethod && targetEmpId === user.uid) {
+      const existingRecord = methods.find((m) => m.employeeId === targetEmpId);
+      if (!existingRecord) {
         payload.createdAt = Date.now();
       }
 
       await setDoc(docRef, payload, { merge: true });
 
-      alert('บันทึกข้อมูล QR Code และบัญชีรับเงินสำเร็จเรียบร้อยแล้วค่ะ!');
+      alert(`บันทึกข้อมูล QR Code ของคุณ ${targetName} เรียบร้อยแล้วค่ะ!`);
       setEditingTargetId(null);
       setActiveTab('directory');
     } catch (err: any) {
@@ -475,14 +520,19 @@ export function EmployeeQRModal({
   };
 
   // Delete Payment Method
-  const handleDeletePaymentMethod = async (empId: string) => {
-    if (!confirm('คุณต้องการลบข้อมูล QR Code และบัญชีนี้ใช่หรือไม่?')) return;
+  const handleDeletePaymentMethod = async (empId: string, empName?: string) => {
+    const displayName = empName || 'นี้';
+    if (!confirm(`คุณต้องการลบ QR Code และข้อมูลบัญชีของคุณ ${displayName} ออกจากสมุดใช่หรือไม่?`)) return;
     try {
       await deleteDoc(doc(db, 'employee_payment_methods', empId));
       if (selectedEmpMethod?.userProfile?.uid === empId) {
         setSelectedEmpMethod(null);
       }
-      alert('ลบข้อมูลเรียบร้อยแล้วค่ะ');
+      if (editingTargetId === empId) {
+        setEditingTargetId(null);
+        setActiveTab('directory');
+      }
+      alert('ลบข้อมูลออกจากสมุด QR Code เรียบร้อยแล้วค่ะ');
     } catch (err: any) {
       alert('ลบไม่สำเร็จ: ' + err.message);
     }
@@ -580,6 +630,22 @@ export function EmployeeQRModal({
     document.body.removeChild(a);
   };
 
+  // Candidate recipients for repay modal: includes all added people + all registered employees
+  const availableRepayRecipients = useMemo(() => {
+    const map = new Map<string, { uid: string; name: string; username?: string }>();
+    combinedDirectory.forEach((i) => {
+      if (i.uid !== user?.uid) {
+        map.set(i.uid, { uid: i.uid, name: i.name, username: i.username });
+      }
+    });
+    registeredUsers?.forEach((u) => {
+      if (u.uid !== user?.uid && !map.has(u.uid)) {
+        map.set(u.uid, { uid: u.uid, name: u.name, username: u.username });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  }, [combinedDirectory, registeredUsers, user]);
+
   if (!isOpen) return null;
 
   return (
@@ -595,13 +661,13 @@ export function EmployeeQRModal({
               </div>
               <div className="min-w-0">
                 <h2 className="text-base sm:text-lg font-bold truncate flex items-center gap-2">
-                  <span>ระบบ QR Code พนักงาน</span>
+                  <span>สมุด QR Code พนักงาน</span>
                   <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-white/20 backdrop-blur-xs text-white border border-white/25">
-                    โอนคืน & ฝากซื้อของ
+                    แสดงเฉพาะคนที่เพิ่มมา ({combinedDirectory.length})
                   </span>
                 </h2>
                 <p className="text-xs text-sky-100 truncate">
-                  สแกนจ่ายเงินเกิน • ฝากซื้อข้าว/ของกิน • บันทึกโอนเงินคืนเพื่อนร่วมงาน
+                  สแกนจ่ายเงินเกิน • ฝากซื้อของ/ของกิน • โอนเงินคืนเพื่อนร่วมงาน
                 </p>
               </div>
             </div>
@@ -631,13 +697,17 @@ export function EmployeeQRModal({
               )}
             >
               <QrCode className="w-4 h-4" />
-              <span>สมุด QR พนักงาน ({combinedDirectory.length})</span>
+              <span>สมุด QR ({combinedDirectory.length})</span>
             </button>
 
             <button
               type="button"
               onClick={() => {
-                startEditOwnQr();
+                if (myExistingMethod) {
+                  startEditOwnQr();
+                } else {
+                  startAddNewQr();
+                }
               }}
               className={clsx(
                 'px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition flex items-center gap-2 whitespace-nowrap cursor-pointer',
@@ -646,12 +716,17 @@ export function EmployeeQRModal({
                   : 'text-white/80 hover:text-white hover:bg-white/10'
               )}
             >
-              <Edit3 className="w-4 h-4" />
-              <span>
-                {myExistingMethod ? 'QR Code ของฉัน' : '+ เพิ่ม QR Code ของฉัน'}
-              </span>
-              {myExistingMethod && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              {myExistingMethod ? (
+                <>
+                  <Edit3 className="w-4 h-4" />
+                  <span>QR Code ของฉัน</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  <span>เพิ่ม QR Code</span>
+                </>
               )}
             </button>
 
@@ -673,7 +748,7 @@ export function EmployeeQRModal({
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-5">
-          {/* TAB 1: DIRECTORY & SCAN */}
+          {/* TAB 1: DIRECTORY & SCAN (SHOW ONLY PEOPLE WHO WERE ADDED) */}
           {activeTab === 'directory' && (
             <div className="space-y-4">
               {/* Callout if current user doesn't have a QR registered */}
@@ -703,7 +778,7 @@ export function EmployeeQRModal({
                 </div>
               )}
 
-              {/* Search & Filters */}
+              {/* Search, Filter chips & Quick Add Button */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
                 <div className="relative flex-1">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -711,7 +786,7 @@ export function EmployeeQRModal({
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="ค้นหาชื่อเพื่อน, ชื่อเล่น, พร้อมเพย์, เลขบัญชี, ธนาคาร..."
+                    placeholder="ค้นหาชื่อเพื่อน, พร้อมเพย์, เลขบัญชี, ธนาคาร..."
                     className="w-full pl-9 pr-8 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
                   />
                   {searchQuery && (
@@ -725,7 +800,7 @@ export function EmployeeQRModal({
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto">
+                <div className="flex items-center gap-2 shrink-0 overflow-x-auto no-scrollbar">
                   <button
                     type="button"
                     onClick={() => setSelectedFilter('all')}
@@ -740,17 +815,17 @@ export function EmployeeQRModal({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSelectedFilter('has_qr')}
+                    onClick={() => setSelectedFilter('has_image')}
                     className={clsx(
                       'px-3 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer',
-                      selectedFilter === 'has_qr'
+                      selectedFilter === 'has_image'
                         ? 'bg-sky-600 text-white shadow-2xs'
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
                     )}
                   >
-                    มี QR แล้ว ({combinedDirectory.filter((i) => !!i.method?.accountNumber).length})
+                    มีรูป QR ({combinedDirectory.filter((i) => !!i.method.qrImageUrl).length})
                   </button>
-                  {user && (
+                  {myExistingMethod && (
                     <button
                       type="button"
                       onClick={() => setSelectedFilter('mine')}
@@ -764,43 +839,67 @@ export function EmployeeQRModal({
                       ของฉัน
                     </button>
                   )}
+
+                  {/* Add QR Button in Toolbar */}
+                  <button
+                    type="button"
+                    onClick={startAddNewQr}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>เพิ่ม QR Code</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Cards Grid */}
+              {/* Cards Grid: SHOW ONLY EMPLOYEES WHO HAVE BEEN ADDED */}
               {loadingMethods ? (
                 <div className="py-12 flex flex-col items-center justify-center text-slate-400">
                   <RefreshCw className="w-6 h-6 animate-spin mb-2 text-sky-500" />
-                  <p className="text-xs">กำลังโหลดข้อมูล QR Code พนักงาน...</p>
+                  <p className="text-xs">กำลังโหลดสมุด QR Code พนักงาน...</p>
+                </div>
+              ) : combinedDirectory.length === 0 ? (
+                <div className="py-12 px-4 text-center bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 max-w-md mx-auto">
+                  <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-sky-100 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 flex items-center justify-center shadow-inner">
+                    <QrCode className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100 mb-1">
+                    ยังไม่มีใครเพิ่ม QR Code ในสมุดนี้
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                    หน้าสมุดนี้จะแสดงเฉพาะคนที่เพิ่ม QR Code เข้ามาเท่านั้น คลิกปุ่มด้านล่างเพื่อเพิ่ม QR Code คนแรกได้เลยค่ะ
+                  </p>
+                  <button
+                    type="button"
+                    onClick={startAddNewQr}
+                    className="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-sm transition inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>เพิ่ม QR Code คนแรก</span>
+                  </button>
                 </div>
               ) : filteredDirectory.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                  <QrCode className="w-10 h-10 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                  <Search className="w-10 h-10 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
                   <p className="text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300">
-                    ไม่พบข้อมูลเพื่อนร่วมงานที่ค้นหา
+                    ไม่พบรายชื่อคนที่เพิ่มมาที่ตรงกับ "{searchQuery}"
                   </p>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    ลองพิมพ์คำค้นหาใหม่ หรือคลิก "+ เพิ่ม QR Code ของฉัน"
+                    ลองพิมพ์คำค้นหาใหม่ หรือคลิก "+ เพิ่ม QR Code"
                   </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {filteredDirectory.map((item) => {
-                    const hasMethod = !!item.method?.accountNumber;
-                    const bank = getBankInfo(item.method?.bankName);
+                    const bank = getBankInfo(item.method.bankName);
                     const canEdit = item.isCurrentUser || isAdmin;
 
                     return (
                       <div
                         key={item.uid}
-                        className={clsx(
-                          'p-3.5 rounded-2xl border transition flex flex-col justify-between gap-3 relative group',
-                          hasMethod
-                            ? 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/80 hover:shadow-md hover:border-sky-300 dark:hover:border-sky-700'
-                            : 'bg-slate-50/60 dark:bg-slate-900/40 border-dashed border-slate-200 dark:border-slate-800 opacity-90'
-                        )}
+                        className="p-3.5 rounded-2xl border bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/80 hover:shadow-md hover:border-sky-300 dark:hover:border-sky-700 transition flex flex-col justify-between gap-3 relative group"
                       >
-                        {/* Top: Avatar & Name */}
+                        {/* Top: Avatar, Name & Edit/Delete actions */}
                         <div>
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2.5 min-w-0">
@@ -826,91 +925,9 @@ export function EmployeeQRModal({
                               </div>
                             </div>
 
-                            {/* Edit Button */}
+                            {/* Edit & Delete Buttons */}
                             {canEdit && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  item.isCurrentUser
-                                    ? startEditOwnQr()
-                                    : startEditOtherQr(item.uid, item.name)
-                                }
-                                className="p-1 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-700 transition cursor-pointer"
-                                title="แก้ไขข้อมูล QR / บัญชี"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Bank & Details */}
-                          {hasMethod && item.method ? (
-                            <div className="mt-3 space-y-1.5">
-                              {/* Bank Badge */}
-                              <div className="flex items-center justify-between gap-2">
-                                <span
-                                  className={clsx(
-                                    'px-2 py-0.5 rounded-lg text-[10px] font-semibold border flex items-center gap-1.5 truncate',
-                                    bank.bgLight,
-                                    bank.borderLight,
-                                    bank.textColor
-                                  )}
-                                >
-                                  <CreditCard className="w-3 h-3 shrink-0" />
-                                  <span className="truncate">{bank.name}</span>
-                                </span>
-
-                                {item.method.qrImageUrl && (
-                                  <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 shrink-0">
-                                    มีรูป QR
-                                  </span>
-                                )}
-                              </div>
-
-                              {/* Account Number & Copy */}
-                              <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
-                                <div className="min-w-0 pr-2">
-                                  <span className="text-[10px] text-slate-400 block">
-                                    {item.method.accountName || item.name}
-                                  </span>
-                                  <span className="text-xs font-mono font-bold text-slate-800 dark:text-slate-100 truncate block">
-                                    {formatPaymentTarget(item.method.accountNumber)}
-                                  </span>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleCopy(
-                                      item.method!.accountNumber,
-                                      `acc_${item.uid}`
-                                    )
-                                  }
-                                  className={clsx(
-                                    'p-1.5 rounded-lg text-xs transition cursor-pointer shrink-0',
-                                    copiedText === `acc_${item.uid}`
-                                      ? 'bg-emerald-600 text-white'
-                                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 border border-slate-200 dark:border-slate-700'
-                                  )}
-                                  title="คัดลอกเลขบัญชี / พร้อมเพย์"
-                                >
-                                  {copiedText === `acc_${item.uid}` ? (
-                                    <Check className="w-3.5 h-3.5" />
-                                  ) : (
-                                    <Copy className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
-                              </div>
-
-                              {item.method.note && (
-                                <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1 italic px-1">
-                                  "{item.method.note}"
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="mt-3 py-2 text-center bg-slate-100/60 dark:bg-slate-800/40 rounded-xl">
-                              <p className="text-[11px] text-slate-400">ยังไม่ได้ลงทะเบียน QR</p>
-                              {canEdit && (
+                              <div className="flex items-center gap-0.5">
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -918,70 +935,127 @@ export function EmployeeQRModal({
                                       ? startEditOwnQr()
                                       : startEditOtherQr(item.uid, item.name)
                                   }
-                                  className="text-[11px] font-bold text-sky-600 dark:text-sky-400 hover:underline mt-0.5 inline-block cursor-pointer"
+                                  className="p-1 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-700 transition cursor-pointer"
+                                  title="แก้ไขข้อมูล QR / บัญชี"
                                 >
-                                  + เพิ่ม QR Code ตอนนี้
+                                  <Edit3 className="w-3.5 h-3.5" />
                                 </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Bottom Actions */}
-                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-1.5">
-                          {hasMethod ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedEmpMethod({
-                                    method: item.method,
-                                    userProfile: item,
-                                  });
-                                  setScanAmountStr('');
-                                  setQrViewMode(
-                                    item.method?.qrImageUrl
-                                      ? 'uploaded_image'
-                                      : 'promptpay_auto'
-                                  );
-                                }}
-                                className="flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer"
-                              >
-                                <QrCode className="w-3.5 h-3.5" />
-                                <span>สแกนจ่าย / QR</span>
-                              </button>
-
-                              {!item.isCurrentUser && (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setRepayTargetEmployee({
-                                      uid: item.uid,
-                                      name: item.name,
-                                    });
-                                    setRepayAmountStr('');
-                                    setShowLogRepayModal(true);
-                                  }}
-                                  className="py-1.5 px-2 rounded-xl text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition flex items-center justify-center gap-1 cursor-pointer"
-                                  title="บันทึกว่าโอนเงินคืนแล้ว (แนบสลิป)"
+                                  onClick={() => handleDeletePaymentMethod(item.uid, item.name)}
+                                  className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-700 transition cursor-pointer"
+                                  title="ลบ QR Code นี้ออกจากสมุด"
                                 >
-                                  <ArrowRightLeft className="w-3.5 h-3.5" />
-                                  <span className="hidden sm:inline">โอนคืน</span>
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Bank & Details */}
+                          <div className="mt-3 space-y-1.5">
+                            {/* Bank Badge */}
+                            <div className="flex items-center justify-between gap-2">
+                              <span
+                                className={clsx(
+                                  'px-2 py-0.5 rounded-lg text-[10px] font-semibold border flex items-center gap-1.5 truncate',
+                                  bank.bgLight,
+                                  bank.borderLight,
+                                  bank.textColor
+                                )}
+                              >
+                                <CreditCard className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{bank.name}</span>
+                              </span>
+
+                              {item.method.qrImageUrl && (
+                                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 shrink-0">
+                                  มีรูป QR
+                                </span>
                               )}
-                            </>
-                          ) : (
+                            </div>
+
+                            {/* Account Number & Copy */}
+                            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/60 p-2 rounded-xl border border-slate-100 dark:border-slate-800">
+                              <div className="min-w-0 pr-2">
+                                <span className="text-[10px] text-slate-400 block truncate">
+                                  {item.method.accountName || item.name}
+                                </span>
+                                <span className="text-xs font-mono font-bold text-slate-800 dark:text-slate-100 truncate block">
+                                  {formatPaymentTarget(item.method.accountNumber)}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleCopy(
+                                    item.method.accountNumber,
+                                    `acc_${item.uid}`
+                                  )
+                                }
+                                className={clsx(
+                                  'p-1.5 rounded-lg text-xs transition cursor-pointer shrink-0',
+                                  copiedText === `acc_${item.uid}`
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 border border-slate-200 dark:border-slate-700'
+                                )}
+                                title="คัดลอกเลขบัญชี / พร้อมเพย์"
+                              >
+                                {copiedText === `acc_${item.uid}` ? (
+                                  <Check className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+
+                            {item.method.note && (
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1 italic px-1">
+                                "{item.method.note}"
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Bottom Actions: Scan & Pay or Repay */}
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedEmpMethod({
+                                method: item.method,
+                                userProfile: {
+                                  uid: item.uid,
+                                  name: item.name,
+                                  username: item.username,
+                                  avatarEmoji: item.avatarEmoji,
+                                },
+                              });
+                              setScanAmountStr('');
+                              setQrViewMode(item.method.qrImageUrl ? 'uploaded_image' : 'promptpay_auto');
+                            }}
+                            className="flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/80 transition flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                            <span>สแกนจ่าย / QR</span>
+                          </button>
+
+                          {!item.isCurrentUser && (
                             <button
                               type="button"
-                              onClick={() =>
-                                item.isCurrentUser
-                                  ? startEditOwnQr()
-                                  : startEditOtherQr(item.uid, item.name)
-                              }
-                              className="w-full py-1.5 px-2.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 transition flex items-center justify-center gap-1 cursor-pointer"
+                              onClick={() => {
+                                setRepayTargetEmployee({
+                                  uid: item.uid,
+                                  name: item.name,
+                                });
+                                setRepayAmountStr('');
+                                setShowLogRepayModal(true);
+                              }}
+                              className="py-1.5 px-2.5 rounded-xl text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition flex items-center justify-center gap-1 cursor-pointer"
+                              title="บันทึกว่าโอนเงินคืนแล้ว (แนบสลิป)"
                             >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>เพิ่มข้อมูลให้เพื่อน</span>
+                              <ArrowRightLeft className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">โอนคืน</span>
                             </button>
                           )}
                         </div>
@@ -1003,8 +1077,10 @@ export function EmployeeQRModal({
                 <div>
                   <h3 className="text-sm font-bold text-sky-900 dark:text-sky-200">
                     {editingTargetId && editingTargetId !== user?.uid
-                      ? `แก้ไขข้อมูล QR Code สำหรับคุณ ${formEmployeeName}`
-                      : 'ตั้งค่า QR Code รับเงินโอนคืนของคุณ'}
+                      ? `แก้ไขข้อมูล QR Code สำหรับคุณ ${formEmployeeName || 'เพื่อนร่วมงาน'}`
+                      : targetMode === 'me'
+                      ? 'ตั้งค่า QR Code รับเงินโอนคืนของคุณ'
+                      : 'เพิ่ม QR Code พนักงาน'}
                   </h3>
                   <p className="text-xs text-sky-700 dark:text-sky-400 mt-0.5">
                     ระบุพร้อมเพย์หรือเลขบัญชีธนาคาร และสามารถอัปโหลดรูป QR Code จากแอปธนาคารเพื่อให้เพื่อนๆ สแกนโอนเงินคืนได้สะดวก
@@ -1013,6 +1089,133 @@ export function EmployeeQRModal({
               </div>
 
               <form onSubmit={handleSavePaymentMethod} className="space-y-4">
+                {/* Target Mode Selector */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200">
+                    เพิ่ม / แก้ไข QR Code สำหรับใคร:
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetMode('me');
+                        setEditingTargetId(user?.uid || null);
+                        setFormEmployeeId(user?.uid || '');
+                        setFormEmployeeName(myExistingMethod?.employeeName || user?.name || '');
+                        setFormAccountName(myExistingMethod?.accountName || user?.name || '');
+                        setFormBankName(myExistingMethod?.bankName || 'พร้อมเพย์ (PromptPay)');
+                        setFormAccountNumber(myExistingMethod?.accountNumber || '');
+                        setFormPromptpayType(myExistingMethod?.promptpayType || 'phone');
+                        setFormQrImageUrl(myExistingMethod?.qrImageUrl || '');
+                        setFormNote(myExistingMethod?.note || '');
+                      }}
+                      className={clsx(
+                        'py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border',
+                        targetMode === 'me'
+                          ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                      )}
+                    >
+                      <User className="w-3.5 h-3.5" />
+                      <span className="truncate">ตัวฉันเอง</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetMode('colleague');
+                        if (targetMode !== 'colleague') {
+                          setFormEmployeeId('');
+                          setFormEmployeeName('');
+                          setFormAccountName('');
+                          setFormAccountNumber('');
+                          setFormQrImageUrl('');
+                          setEditingTargetId(null);
+                        }
+                      }}
+                      className={clsx(
+                        'py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border',
+                        targetMode === 'colleague'
+                          ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                      )}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span className="truncate">เพื่อนในระบบ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetMode('custom');
+                        if (targetMode !== 'custom') {
+                          setFormEmployeeId('');
+                          setFormEmployeeName('');
+                          setFormAccountName('');
+                          setFormAccountNumber('');
+                          setFormQrImageUrl('');
+                          setEditingTargetId(null);
+                        }
+                      }}
+                      className={clsx(
+                        'py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border',
+                        targetMode === 'custom'
+                          ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                      )}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span className="truncate">พนักงานใหม่</span>
+                    </button>
+                  </div>
+
+                  {/* Colleague Selector Dropdown */}
+                  {targetMode === 'colleague' && (
+                    <div className="pt-2">
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                        เลือกเพื่อนร่วมงานจากรายชื่อในระบบ:
+                      </label>
+                      <select
+                        value={formEmployeeId}
+                        onChange={(e) => handleSelectColleagueInForm(e.target.value)}
+                        className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-medium"
+                      >
+                        <option value="">-- เลือกเพื่อนร่วมงาน --</option>
+                        {registeredUsers
+                          ?.filter((u) => u.uid !== user?.uid)
+                          .map((u) => {
+                            const hasMethod = methods.some((m) => m.employeeId === u.uid);
+                            return (
+                              <option key={u.uid} value={u.uid}>
+                                {u.name} {u.username ? `(@${u.username})` : ''} {hasMethod ? '✓ (มี QR แล้ว)' : ''}
+                              </option>
+                            );
+                          })}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Custom Employee Name Input */}
+                  {targetMode === 'custom' && (
+                    <div className="pt-2">
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                        ชื่อพนักงาน / เพื่อนร่วมงาน: <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formEmployeeName}
+                        onChange={(e) => {
+                          setFormEmployeeName(e.target.value);
+                          if (!formAccountName) setFormAccountName(e.target.value);
+                        }}
+                        placeholder="เช่น สมชาย ใจดี, พี่น้อย แม่บ้าน"
+                        className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-sky-500"
+                      />
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Account Name */}
                   <div>
@@ -1116,7 +1319,7 @@ export function EmployeeQRModal({
 
                     <div className="flex-1 text-center sm:text-left space-y-2">
                       <p className="text-xs text-slate-600 dark:text-slate-300">
-                        แคปภาพ QR Code จากแอปธนาคารของคุณ (K PLUS, SCB EASY ฯลฯ) แล้วอัปโหลดไว้ เพื่อให้เพื่อนๆ สแกนจ่ายได้ตรงจากภาพจริง
+                        แคปภาพ QR Code จากแอปธนาคาร (K PLUS, SCB EASY ฯลฯ) แล้วอัปโหลดไว้ เพื่อให้เพื่อนๆ สแกนจ่ายได้ตรงจากภาพจริง
                       </p>
                       <div className="flex items-center gap-2 justify-center sm:justify-start">
                         <input
@@ -1175,14 +1378,14 @@ export function EmployeeQRModal({
 
                 {/* Action Buttons */}
                 <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-                  {myExistingMethod && editingTargetId === user?.uid ? (
+                  {editingTargetId && (editingTargetId === user?.uid || isAdmin) ? (
                     <button
                       type="button"
-                      onClick={() => handleDeletePaymentMethod(user.uid)}
+                      onClick={() => handleDeletePaymentMethod(editingTargetId, formEmployeeName)}
                       className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition flex items-center gap-1.5 cursor-pointer"
                     >
                       <Trash2 className="w-4 h-4" />
-                      <span>ลบ QR Code ของฉัน</span>
+                      <span>{editingTargetId === user?.uid ? 'ลบ QR Code ของฉัน' : `ลบ QR Code นี้`}</span>
                     </button>
                   ) : <div />}
 
@@ -1261,12 +1464,12 @@ export function EmployeeQRModal({
                 </div>
               ) : repayments.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                  <ArrowRightLeft className="w-10 h-10 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                  <Receipt className="w-10 h-10 mx-auto mb-2 text-slate-300 dark:text-slate-600" />
                   <p className="text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300">
-                    ยังไม่มีประวัติการโอนเงินคืนในระบบ
+                    ยังไม่มีรายการบันทึกการโอนเงินคืน
                   </p>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    เมื่อโอนคืนค่าข้าว หรือของที่ฝากซื้อ สามารถกดบันทึกรายการพร้อมแนบสลิปได้เลย
+                    เมื่อโอนเงินคืนเพื่อนร่วมงานแล้ว สามารถกด "โอนแล้ว? บันทึกรายการ" เพื่อแนบสลิปไว้เป็นหลักฐานได้ค่ะ
                   </p>
                 </div>
               ) : (
@@ -1274,74 +1477,64 @@ export function EmployeeQRModal({
                   {repayments.map((repay) => {
                     const catInfo = CATEGORY_MAP[repay.category] || CATEGORY_MAP.other;
                     const CatIcon = catInfo.icon;
-                    const isMyPayment = repay.fromEmployeeId === user?.uid;
-                    const isMyReceipt = repay.toEmployeeId === user?.uid;
-                    const canDelete = isMyPayment || isAdmin;
+                    const isSender = repay.fromEmployeeId === user?.uid;
+                    const isRecipient = repay.toEmployeeId === user?.uid;
+                    const canDelete = isSender || isAdmin;
 
                     return (
                       <div
                         key={repay.id}
-                        className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs hover:shadow-xs transition"
+                        className={clsx(
+                          'p-3.5 rounded-2xl border transition bg-white dark:bg-slate-800/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-2xs',
+                          isSender
+                            ? 'border-emerald-200/80 dark:border-emerald-900/40'
+                            : isRecipient
+                            ? 'border-sky-200/80 dark:border-sky-900/40'
+                            : 'border-slate-200 dark:border-slate-700/80'
+                        )}
                       >
-                        <div className="flex items-start sm:items-center gap-3 min-w-0">
+                        <div className="flex items-center gap-3 min-w-0">
                           <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-lg shrink-0">
                             {repay.fromAvatarEmoji || '👤'}
                           </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">
+
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
                                 {repay.fromEmployeeName}
                               </span>
-                              <span className="text-xs text-slate-400 font-semibold">โอนคืนให้</span>
-                              <span className="text-xs sm:text-sm font-bold text-sky-600 dark:text-sky-400">
+                              <span className="text-slate-400 text-xs">โอนคืนให้</span>
+                              <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
                                 {repay.toEmployeeName}
                               </span>
-
-                              {isMyPayment && (
-                                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                                  ฉันโอน
-                                </span>
-                              )}
-                              {isMyReceipt && (
-                                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                                  ฉันได้รับ
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2 mt-1 flex-wrap text-slate-500">
                               <span
                                 className={clsx(
-                                  'px-2 py-0.5 rounded-lg text-[10px] font-semibold border flex items-center gap-1',
+                                  'px-2 py-0.5 rounded-md text-[10px] font-semibold border flex items-center gap-1',
                                   catInfo.color
                                 )}
                               >
                                 <CatIcon className="w-3 h-3" />
                                 <span>{catInfo.label}</span>
                               </span>
-
-                              {repay.description && (
-                                <span className="text-xs text-slate-600 dark:text-slate-300 truncate max-w-xs">
-                                  {repay.description}
-                                </span>
-                              )}
-
-                              <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                <span>{format(new Date(repay.createdAt), 'dd MMM yyyy HH:mm', { locale: th })}</span>
-                              </span>
                             </div>
+
+                            {repay.description && (
+                              <p className="text-xs text-slate-600 dark:text-slate-300 truncate">
+                                {repay.description}
+                              </p>
+                            )}
+
+                            <span className="text-[10px] text-slate-400 block">
+                              {format(new Date(repay.createdAt), 'd MMM yyyy HH:mm น.', { locale: th })}
+                            </span>
                           </div>
                         </div>
 
-                        {/* Amount & Actions */}
-                        <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800 shrink-0">
+                        {/* Amount & Slip Action */}
+                        <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-700">
                           <div className="text-right">
                             <span className="text-sm sm:text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-                              +{repay.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })} ฿
-                            </span>
-                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block font-semibold">
-                              โอนเรียบร้อย
+                              ฿{repay.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
                             </span>
                           </div>
 
@@ -1454,49 +1647,49 @@ export function EmployeeQRModal({
                           : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                       )}
                     >
-                      รูป QR ต้นฉบับของเพื่อน
+                      รูป QR จริงจากธนาคาร
                     </button>
                   </div>
                 )}
 
                 {/* QR Display Card */}
-                <div className="flex flex-col items-center justify-center p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center">
                   {qrViewMode === 'uploaded_image' && selectedEmpMethod.method?.qrImageUrl ? (
-                    <div className="relative flex flex-col items-center">
+                    <div className="relative p-2 bg-white rounded-2xl shadow-sm border border-slate-200">
                       <img
                         src={selectedEmpMethod.method.qrImageUrl}
-                        alt="Employee QR Code"
-                        className="w-64 h-64 sm:w-72 sm:h-72 object-contain rounded-2xl bg-white p-2 shadow-md border border-slate-200 dark:border-slate-700"
+                        alt="Bank QR Code"
+                        className="w-56 h-56 object-contain rounded-xl"
                       />
-                      <span className="text-[11px] text-slate-500 mt-2 font-medium">
-                        รูปภาพ QR Code ที่พนักงานอัปโหลดไว้
-                      </span>
+                      <div className="text-center mt-2">
+                        <span className="text-[11px] font-semibold text-slate-500">
+                          ภาพ QR ต้นฉบับจากแอปธนาคาร
+                        </span>
+                      </div>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center">
-                      <div className="p-3 bg-white rounded-2xl shadow-md border border-slate-200 flex items-center justify-center">
-                        {isGeneratingQr ? (
-                          <div className="w-56 h-56 flex items-center justify-center">
-                            <RefreshCw className="w-8 h-8 animate-spin text-sky-500" />
-                          </div>
-                        ) : qrCodeDataUrl ? (
-                          <img
-                            src={qrCodeDataUrl}
-                            alt="PromptPay QR"
-                            className="w-56 h-56 sm:w-64 sm:h-64 object-contain"
-                          />
-                        ) : (
-                          <div className="w-56 h-56 flex items-center justify-center text-xs text-slate-400">
-                            ไม่สามารถสร้าง QR Code ได้
-                          </div>
-                        )}
-                      </div>
+                    <div className="relative p-3 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
+                      {isGeneratingQr ? (
+                        <div className="w-56 h-56 flex flex-col items-center justify-center text-slate-400">
+                          <RefreshCw className="w-8 h-8 animate-spin text-sky-600 mb-2" />
+                          <span className="text-xs">กำลังสร้าง QR Code...</span>
+                        </div>
+                      ) : qrCodeDataUrl ? (
+                        <img
+                          src={qrCodeDataUrl}
+                          alt="PromptPay QR Code"
+                          className="w-56 h-56 object-contain rounded-lg"
+                        />
+                      ) : (
+                        <div className="w-56 h-56 flex items-center justify-center text-slate-400 text-xs">
+                          ไม่สามารถสร้าง QR Code ได้
+                        </div>
+                      )}
 
-                      {/* PromptPay Banner */}
-                      <div className="mt-3 text-center">
-                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 inline-flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-sky-600" />
-                          <span>ไทยพร้อมเพย์ (Thai PromptPay)</span>
+                      {/* PromptPay Label underneath */}
+                      <div className="text-center mt-2">
+                        <span className="text-[11px] font-bold text-sky-800 bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-100">
+                          Thai PromptPay QR
                         </span>
                         {parseFloat(scanAmountStr) > 0 && (
                           <p className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400 mt-1.5 font-mono">
@@ -1668,7 +1861,7 @@ export function EmployeeQRModal({
                     required
                     value={repayTargetEmployee?.uid || ''}
                     onChange={(e) => {
-                      const emp = combinedDirectory.find((item) => item.uid === e.target.value);
+                      const emp = availableRepayRecipients.find((item) => item.uid === e.target.value);
                       if (emp) {
                         setRepayTargetEmployee({ uid: emp.uid, name: emp.name });
                       }
@@ -1676,13 +1869,11 @@ export function EmployeeQRModal({
                     className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
                   >
                     <option value="">-- เลือกเพื่อนร่วมงาน --</option>
-                    {combinedDirectory
-                      .filter((item) => item.uid !== user?.uid)
-                      .map((item) => (
-                        <option key={item.uid} value={item.uid}>
-                          {item.name} {item.username ? `(@${item.username})` : ''}
-                        </option>
-                      ))}
+                    {availableRepayRecipients.map((item) => (
+                      <option key={item.uid} value={item.uid}>
+                        {item.name} {item.username ? `(@${item.username})` : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1719,13 +1910,13 @@ export function EmployeeQRModal({
                           type="button"
                           onClick={() => setRepayCategory(cat)}
                           className={clsx(
-                            'p-2 rounded-xl text-xs font-semibold border flex items-center gap-2 transition text-left cursor-pointer',
+                            'p-2.5 rounded-xl text-xs font-bold border transition flex items-center gap-2 cursor-pointer',
                             isSelected
-                              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-800 dark:text-emerald-300 ring-1 ring-emerald-500'
+                              ? 'bg-emerald-50 border-emerald-500 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-500 shadow-2xs'
                               : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
                           )}
                         >
-                          <Icon className="w-4 h-4 shrink-0 text-emerald-600" />
+                          <Icon className="w-4 h-4 shrink-0" />
                           <span className="truncate">{info.label}</span>
                         </button>
                       );
@@ -1736,80 +1927,84 @@ export function EmployeeQRModal({
                 {/* Description */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
-                    รายละเอียด / รายการของที่ฝากซื้อ
+                    รายละเอียด / หมายเหตุ (ตัวเลือกเสริม)
                   </label>
                   <input
                     type="text"
                     value={repayDesc}
                     onChange={(e) => setRepayDesc(e.target.value)}
-                    placeholder="เช่น ค่าข้าวมันไก่เที่ยงนี้, ค่าของ 7-11, เงินทอนเคส..."
+                    placeholder="เช่น ข้าวผัดกะเพราไข่ดาว, ชานมไข่มุก, เงินทอน 40 บาท"
                     className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
 
-                {/* Attach Slip */}
+                {/* Upload Transfer Slip */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
-                    แนบสลิปการโอนเงิน (ตัวเลือกเสริม)
+                    สลิปการโอนเงิน (ตัวเลือกเสริม / แนะนำให้อัปโหลด)
                   </label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="file"
-                      ref={repaySlipInputRef}
-                      accept="image/*"
-                      onChange={handleRepaySlipUpload}
-                      className="hidden"
-                    />
-                    <button
-                      type="button"
-                      disabled={isUploadingSlip}
-                      onClick={() => repaySlipInputRef.current?.click()}
-                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 transition flex items-center gap-1.5 cursor-pointer"
-                    >
-                      {isUploadingSlip ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>กำลังประมวลผลสลิป...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>{repaySlipUrl ? 'เปลี่ยนรูปสลิป' : 'อัปโหลดสลิปโอนเงิน'}</span>
-                        </>
-                      )}
-                    </button>
-
-                    {repaySlipUrl && (
-                      <div className="flex items-center gap-2">
+                  <div className="p-3 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40">
+                    {repaySlipUrl ? (
+                      <div className="flex items-center gap-3">
                         <img
                           src={repaySlipUrl}
                           alt="Slip Preview"
-                          className="w-10 h-10 object-cover rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer"
-                          onClick={() =>
-                            setPreviewSlipImage({
-                              url: repaySlipUrl,
-                              title: 'ภาพสลิปการโอนเงินที่แนบ',
-                            })
-                          }
+                          className="w-16 h-20 object-cover rounded-xl border border-slate-200 bg-white"
+                        />
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 block">
+                            ✓ แนบสลิปเรียบร้อยแล้ว
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setRepaySlipUrl('')}
+                            className="text-xs text-rose-600 hover:underline cursor-pointer"
+                          >
+                            ลบสลิปออก
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-slate-500">
+                          แนบรูปสลิปจากแอปธนาคารไว้เป็นหลักฐาน
+                        </span>
+                        <input
+                          type="file"
+                          ref={repaySlipInputRef}
+                          accept="image/*"
+                          onChange={handleRepaySlipUpload}
+                          className="hidden"
                         />
                         <button
                           type="button"
-                          onClick={() => setRepaySlipUrl('')}
-                          className="text-xs text-rose-600 hover:underline cursor-pointer"
+                          disabled={isUploadingSlip}
+                          onClick={() => repaySlipInputRef.current?.click()}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
                         >
-                          ลบสลิป
+                          {isUploadingSlip ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>กำลังโหลด...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>เลือกรูปสลิป</span>
+                            </>
+                          )}
                         </button>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Submit & Cancel */}
+                {/* Submit button */}
                 <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setShowLogRepayModal(false)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 transition cursor-pointer"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                   >
                     ยกเลิก
                   </button>
@@ -1836,32 +2031,39 @@ export function EmployeeQRModal({
           </div>
         )}
 
-        {/* LIGHTBOX: PREVIEW SLIP IMAGE */}
+        {/* MODAL 3: LIGHTBOX SLIP PREVIEW */}
         {previewSlipImage && (
-          <div className="fixed inset-0 z-80 flex items-center justify-center p-3 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
-            <div className="relative max-w-lg w-full bg-slate-900 rounded-3xl p-4 flex flex-col items-center">
-              <div className="w-full flex items-center justify-between text-white pb-3 border-b border-slate-800">
-                <span className="text-xs font-bold truncate pr-2">
+          <div
+            className="fixed inset-0 z-80 flex items-center justify-center p-3 bg-slate-950/90 backdrop-blur-md animate-in fade-in"
+            onClick={() => setPreviewSlipImage(null)}
+          >
+            <div
+              className="relative max-w-lg max-h-[90vh] bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
                   {previewSlipImage.title}
                 </span>
                 <button
                   type="button"
                   onClick={() => setPreviewSlipImage(null)}
-                  className="p-1 rounded-lg hover:bg-white/10 text-white cursor-pointer"
+                  className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="py-4 max-h-[75vh] overflow-auto flex items-center justify-center">
+              <div className="p-2 overflow-auto flex items-center justify-center bg-slate-100 dark:bg-slate-950">
                 <img
                   src={previewSlipImage.url}
-                  alt="Slip Full"
-                  className="max-h-[70vh] object-contain rounded-xl shadow-lg"
+                  alt="Transfer Slip"
+                  className="max-h-[75vh] w-auto object-contain rounded-xl shadow-md"
                 />
               </div>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );

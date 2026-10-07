@@ -37,6 +37,16 @@ export interface Agent {
   createdAt: number;
   createdBy?: string;
   createdById?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
+  promptpayType?: string;
+  phone?: string;
+  province?: string;
+  notes?: string;
+  qrImageUrl?: string;
+  updatedAt?: number;
+  updatedBy?: string;
 }
 
 export interface Case {

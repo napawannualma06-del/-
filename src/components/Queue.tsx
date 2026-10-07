@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { 
   collection, 
   query, 
@@ -284,6 +285,22 @@ export function Queue() {
   const [showAgentManagerModal, setShowAgentManagerModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission>('default');
+
+  const location = useLocation();
+
+  // If navigated from /agents with autoOpenAddForm & selectedAgent
+  useEffect(() => {
+    if (location.state && (location.state as any).autoOpenAddForm) {
+      setShowAddForm(true);
+      if ((location.state as any).selectedAgent) {
+        setFormData((prev) => ({
+          ...prev,
+          agentName: (location.state as any).selectedAgent,
+        }));
+      }
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   // Custom Task Modal State (For Admin to add task/job outside normal case intake)
   const [showCustomTaskModal, setShowCustomTaskModal] = useState(false);
@@ -867,15 +884,14 @@ export function Queue() {
           )}
 
           {/* Top Bar Action: View & Manage Agents directly */}
-          <button
-            type="button"
-            onClick={() => setShowAgentManagerModal(true)}
-            className="inline-flex items-center px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-xs transition cursor-pointer"
-            title="ดูรายชื่อตัวแทน เพิ่ม หรือจัดการตัวแทนในระบบ"
+          <Link
+            to="/agents"
+            className="inline-flex items-center px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 shadow-xs transition cursor-pointer"
+            title="ดูรายชื่อตัวแทน เพิ่ม แก้ไขเลขบัญชี หรือจัดการตัวแทนในระบบ"
           >
             <Building2 className="w-3.5 h-3.5 mr-1.5 text-indigo-500" />
-            รายชื่อตัวแทน
-          </button>
+            รายชื่อ Agent & บัญชี
+          </Link>
 
           {/* รายชื่อแมสเซนเจอร์ (Thunder Cloud) */}
           <button

@@ -1,19 +1,22 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { 
   collection, 
   query, 
   onSnapshot, 
   addDoc, 
+  updateDoc,
   deleteDoc, 
   doc, 
-  orderBy,
-  setDoc,
-  getDocs,
-  where
+  orderBy, 
+  setDoc, 
+  getDocs, 
+  where 
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Agent, Case, UserProfile } from '../types';
+import { THAI_BANKS, getBankInfo } from '../lib/promptpay';
 import { 
   Send, 
   Plus, 
@@ -21,9 +24,17 @@ import {
   Trash2, 
   Check, 
   Building2, 
-  Search,
-  AlertCircle,
-  AlertTriangle
+  Search, 
+  AlertCircle, 
+  AlertTriangle,
+  Edit3,
+  Copy,
+  CreditCard,
+  ChevronDown,
+  ExternalLink,
+  Phone,
+  MapPin,
+  Sparkles
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -44,6 +55,7 @@ export interface AgentManagerModalProps {
   currentUser?: UserProfile | null;
   cases?: Case[];
   initialManageView?: boolean;
+  initialEditingAgent?: Agent | null;
 }
 
 const DEFAULT_SEEDED_AGENTS = [
@@ -53,7 +65,7 @@ const DEFAULT_SEEDED_AGENTS = [
 ];
 
 /**
- * MODAL COMPONENT: Add / View / Delete Agents
+ * MODAL COMPONENT: Add / View / Edit / Delete Agents
  * Uses createPortal to mount on document.body, eliminating any parent <form> nesting or styling collisions.
  */
 export function AgentManagerModal({
@@ -64,10 +76,21 @@ export function AgentManagerModal({
   currentUser,
   cases = [],
   initialManageView = false,
+  initialEditingAgent = null,
 }: AgentManagerModalProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [deletedNames, setDeletedNames] = useState<string[]>([]);
-  const [newAgentName, setNewAgentName] = useState('');
+  
+  // Add / Edit form state
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(initialEditingAgent);
+  const [formName, setFormName] = useState('');
+  const [formBankName, setFormBankName] = useState('ธนาคารกสิกรไทย (KBANK)');
+  const [formAccountNumber, setFormAccountNumber] = useState('');
+  const [formAccountName, setFormAccountName] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [formProvince, setFormProvince] = useState('');
+  const [formNotes, setFormNotes] = useState('');
+
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [manageView, setManageView] = useState(initialManageView);
@@ -77,16 +100,39 @@ export function AgentManagerModal({
   const [deleteTarget, setDeleteTarget] = useState<{ name: string; id?: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Sync initial view when opened
+  // Copy Account Number
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Reset or fill form on open or switch
   useEffect(() => {
     if (isOpen) {
-      setManageView(initialManageView);
-      setNewAgentName('');
+      if (initialEditingAgent) {
+        setEditingAgent(initialEditingAgent);
+        setFormName(initialEditingAgent.name || '');
+        setFormBankName(initialEditingAgent.bankName || 'ธนาคารกสิกรไทย (KBANK)');
+        setFormAccountNumber(initialEditingAgent.bankAccountNumber || '');
+        setFormAccountName(initialEditingAgent.bankAccountName || '');
+        setFormPhone(initialEditingAgent.phone || '');
+        setFormProvince(initialEditingAgent.province || '');
+        setFormNotes(initialEditingAgent.notes || '');
+        setManageView(false);
+      } else {
+        setEditingAgent(null);
+        setFormName('');
+        setFormBankName('ธนาคารกสิกรไทย (KBANK)');
+        setFormAccountNumber('');
+        setFormAccountName('');
+        setFormPhone('');
+        setFormProvince('');
+        setFormNotes('');
+        setManageView(initialManageView);
+      }
       setErrorMessage('');
       setSearchTerm('');
       setDeleteTarget(null);
     }
-  }, [isOpen, initialManageView]);
+  }, [isOpen, initialManageView, initialEditingAgent]);
 
   // Subscribe to deleted agents blacklist
   useEffect(() => {
@@ -123,6 +169,16 @@ export function AgentManagerModal({
             createdAt: data.createdAt || 0,
             createdBy: data.createdBy,
             createdById: data.createdById,
+            bankName: data.bankName,
+            bankAccountNumber: data.bankAccountNumber,
+            bankAccountName: data.bankAccountName,
+            promptpayType: data.promptpayType,
+            phone: data.phone,
+            province: data.province,
+            notes: data.notes,
+            qrImageUrl: data.qrImageUrl,
+            updatedAt: data.updatedAt,
+            updatedBy: data.updatedBy,
           });
         });
         setAgents(loadedAgents);
@@ -157,6 +213,7 @@ export function AgentManagerModal({
           createdAt: Date.now(),
           createdBy: 'ระบบเริ่มต้น',
           createdById: 'system',
+          bankName: 'ธนาคารกสิกรไทย (KBANK)',
         });
       }
     } catch (err) {
@@ -166,14 +223,14 @@ export function AgentManagerModal({
 
   // Combine loaded agents and historical cases, filtered by deletedNames
   const allAvailableAgents = useMemo(() => {
-    const agentMap = new Map<string, { id?: string; name: string }>();
+    const agentMap = new Map<string, Agent>();
     const deletedSet = new Set(deletedNames.map((n) => n.trim().toLowerCase()));
 
     // First add from Firestore collection
     agents.forEach((a) => {
       const trimmed = a.name.trim();
       if (trimmed && !deletedSet.has(trimmed.toLowerCase())) {
-        agentMap.set(trimmed.toLowerCase(), { id: a.id, name: trimmed });
+        agentMap.set(trimmed.toLowerCase(), a);
       }
     });
 
@@ -181,7 +238,13 @@ export function AgentManagerModal({
     cases.forEach((c) => {
       const name = c.agentName?.trim();
       if (name && !deletedSet.has(name.toLowerCase()) && !agentMap.has(name.toLowerCase())) {
-        agentMap.set(name.toLowerCase(), { name });
+        agentMap.set(name.toLowerCase(), {
+          id: `legacy-${name}`,
+          name,
+          createdAt: c.createdAt || Date.now(),
+          createdBy: 'ประวัติเคส',
+          province: c.province,
+        });
       }
     });
 
@@ -191,23 +254,37 @@ export function AgentManagerModal({
     );
   }, [agents, cases, deletedNames]);
 
-  // Handle adding new agent safely
-  const handleSaveNewAgent = async () => {
-    const trimmed = newAgentName.trim();
+  // Handle Switch to Editing an agent
+  const handleStartEdit = (agent: Agent) => {
+    setEditingAgent(agent);
+    setFormName(agent.name || '');
+    setFormBankName(agent.bankName || 'ธนาคารกสิกรไทย (KBANK)');
+    setFormAccountNumber(agent.bankAccountNumber || '');
+    setFormAccountName(agent.bankAccountName || '');
+    setFormPhone(agent.phone || '');
+    setFormProvince(agent.province || '');
+    setFormNotes(agent.notes || '');
+    setErrorMessage('');
+    setManageView(false);
+  };
+
+  // Handle save (Add or Update)
+  const handleSaveAgent = async () => {
+    const trimmed = formName.trim();
     if (!trimmed) {
       setErrorMessage('กรุณาระบุชื่อตัวแทน');
       return;
     }
 
     // Check duplicate in available agents
-    const exists = allAvailableAgents.some(
-      (a) => a.name.toLowerCase() === trimmed.toLowerCase()
+    const isDuplicate = allAvailableAgents.some(
+      (a) =>
+        a.name.toLowerCase() === trimmed.toLowerCase() &&
+        (!editingAgent || a.name.toLowerCase() !== editingAgent.name.toLowerCase())
     );
-    if (exists) {
-      if (onSelectAgent) {
-        onSelectAgent(trimmed);
-      }
-      onClose();
+
+    if (isDuplicate) {
+      setErrorMessage(`มีตัวแทนชื่อ "${trimmed}" ในระบบอยู่แล้ว`);
       return;
     }
 
@@ -222,21 +299,37 @@ export function AgentManagerModal({
         await setDoc(doc(db, 'system_duties', 'deleted_agents'), { names: nextDeleted }, { merge: true });
       }
 
-      await addDoc(collection(db, 'agents'), {
+      const agentData = {
         name: trimmed,
-        createdAt: Date.now(),
-        createdBy: currentUser?.name || 'ผู้เช็คเครดิต',
-        createdById: currentUser?.uid || '',
-      });
+        bankName: formBankName.trim() || 'ธนาคารกสิกรไทย (KBANK)',
+        bankAccountNumber: formAccountNumber.trim(),
+        bankAccountName: formAccountName.trim(),
+        phone: formPhone.trim(),
+        province: formProvince.trim(),
+        notes: formNotes.trim(),
+        updatedAt: Date.now(),
+        updatedBy: currentUser?.name || currentUser?.username || 'พนักงาน',
+      };
 
-      // Automatically select this newly created agent
+      if (editingAgent && !editingAgent.id.startsWith('legacy-')) {
+        await updateDoc(doc(db, 'agents', editingAgent.id), agentData);
+      } else {
+        await addDoc(collection(db, 'agents'), {
+          ...agentData,
+          createdAt: editingAgent ? editingAgent.createdAt : Date.now(),
+          createdBy: currentUser?.name || currentUser?.username || 'พนักงาน',
+          createdById: currentUser?.uid || '',
+        });
+      }
+
+      // Automatically select this newly created or edited agent
       if (onSelectAgent) {
         onSelectAgent(trimmed);
       }
       onClose();
     } catch (error: any) {
-      console.error('Error adding agent to Firestore:', error);
-      setErrorMessage(error?.message ? `ไม่สามารถบันทึกได้: ${error.message}` : 'เกิดข้อผิดพลาดในการบันทึก กรุณาลองใหม่อีกครั้ง');
+      console.error('Error saving agent to Firestore:', error);
+      setErrorMessage(error?.message ? `ไม่สามารถบันทึกได้: ${error.message}` : 'เกิดข้อผิดพลาดในการบันทึก');
     } finally {
       setIsSaving(false);
     }
@@ -249,8 +342,7 @@ export function AgentManagerModal({
     const targetName = deleteTarget.name.trim();
 
     try {
-      // 1. Delete matching documents from 'agents' collection
-      if (deleteTarget.id) {
+      if (deleteTarget.id && !deleteTarget.id.startsWith('legacy-')) {
         await deleteDoc(doc(db, 'agents', deleteTarget.id));
       } else {
         const qDocs = await getDocs(
@@ -261,7 +353,7 @@ export function AgentManagerModal({
         }
       }
 
-      // 2. Add to deleted blacklist so historical cases don't revive it
+      // Add to deleted blacklist so historical cases don't revive it
       const nextDeleted = Array.from(
         new Set([...deletedNames, targetName])
       );
@@ -271,7 +363,7 @@ export function AgentManagerModal({
         { merge: true }
       );
 
-      // 3. Clear current selection if it was this agent
+      // Clear current selection if it was this agent
       if (currentSelectedAgent === targetName && onSelectAgent) {
         onSelectAgent('');
       }
@@ -279,16 +371,31 @@ export function AgentManagerModal({
       setDeleteTarget(null);
     } catch (error) {
       console.error('Error deleting agent:', error);
-      alert('เกิดข้อผิดพลาดในการลบตัวแทน กรุณาลองใหม่อีกครั้ง');
+      alert('เกิดข้อผิดพลาดในการลบตัวแทน');
     } finally {
       setIsDeleting(false);
     }
   };
 
+  // Copy helper
+  const handleCopyAccount = (key: string, text: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text.replace(/\s+/g, ''));
+    setCopiedKey(key);
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(() => setCopiedKey(null), 2000);
+  };
+
   const filteredAgentsList = useMemo(() => {
     if (!searchTerm.trim()) return allAvailableAgents;
     const term = searchTerm.toLowerCase();
-    return allAvailableAgents.filter((a) => a.name.toLowerCase().includes(term));
+    return allAvailableAgents.filter(
+      (a) =>
+        a.name.toLowerCase().includes(term) ||
+        (a.bankName || '').toLowerCase().includes(term) ||
+        (a.bankAccountNumber || '').toLowerCase().includes(term) ||
+        (a.bankAccountName || '').toLowerCase().includes(term)
+    );
   }, [allAvailableAgents, searchTerm]);
 
   if (!isOpen) return null;
@@ -296,7 +403,7 @@ export function AgentManagerModal({
   const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
       <div 
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -312,12 +419,16 @@ export function AgentManagerModal({
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                {manageView ? 'จัดการและลบตัวแทนออกจากระบบ' : 'เพิ่มชื่อตัวแทนใหม่'}
+                {manageView
+                  ? 'จัดการ แก้ไข และลบตัวแทนในระบบ'
+                  : editingAgent
+                  ? `แก้ไขข้อมูล Agent: ${editingAgent.name}`
+                  : 'เพิ่ม Agent และเลขบัญชีธนาคาร'}
               </h3>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 {manageView
                   ? `มีตัวแทนทั้งหมด ${allAvailableAgents.length} รายชื่อในระบบ`
-                  : 'ข้อมูลจะเข้ามาอยู่ในระบบและดรอปดาวน์ทันที'}
+                  : 'ข้อมูลบัญชีธนาคารจะแสดงให้พนักงานเวลาเลือกทำงาน'}
               </p>
             </div>
           </div>
@@ -331,12 +442,14 @@ export function AgentManagerModal({
         </div>
 
         {/* Modal Body */}
-        <div className="p-5 space-y-4">
-          {/* Tab selector between Add New and View/Manage List */}
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
+          {/* Tab selector between Add New / Edit and View/Manage List */}
           <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 text-xs">
             <button
               type="button"
-              onClick={() => setManageView(false)}
+              onClick={() => {
+                setManageView(false);
+              }}
               className={clsx(
                 "flex-1 py-1.5 rounded-lg font-semibold transition cursor-pointer flex items-center justify-center",
                 !manageView
@@ -344,8 +457,17 @@ export function AgentManagerModal({
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               )}
             >
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              เพิ่มตัวแทนใหม่
+              {editingAgent ? (
+                <>
+                  <Edit3 className="w-3.5 h-3.5 mr-1 text-indigo-500" />
+                  แก้ไขข้อมูล
+                </>
+              ) : (
+                <>
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  เพิ่มตัวแทนใหม่
+                </>
+              )}
             </button>
             <button
               type="button"
@@ -358,55 +480,149 @@ export function AgentManagerModal({
               )}
             >
               <Trash2 className="w-3.5 h-3.5 mr-1 text-rose-500" />
-              ลบ/จัดการ ({allAvailableAgents.length})
+              แก้ไข / ลบ / ดูรายชื่อ ({allAvailableAgents.length})
             </button>
           </div>
 
           {!manageView ? (
-            /* ADD NEW AGENT SECTION - NO NESTED <form> TAG */
-            <div className="space-y-4">
+            /* ADD / EDIT AGENT SECTION */
+            <div className="space-y-3.5">
+              {editingAgent && (
+                <div className="p-2.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 flex items-center justify-between text-xs">
+                  <span className="text-indigo-700 dark:text-indigo-300 font-medium">
+                    กำลังแก้ไข Agent: <b>{editingAgent.name}</b>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAgent(null);
+                      setFormName('');
+                      setFormAccountNumber('');
+                      setFormAccountName('');
+                      setFormPhone('');
+                      setFormProvince('');
+                      setFormNotes('');
+                    }}
+                    className="text-[11px] text-indigo-600 hover:underline cursor-pointer font-bold"
+                  >
+                    + เปลี่ยนเป็นเพิ่มคนใหม่
+                  </button>
+                </div>
+              )}
+
+              {/* Agent Name */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   ชื่อตัวแทน / สาขา *
                 </label>
                 <div className="relative">
                   <input
                     type="text"
                     autoFocus
-                    value={newAgentName}
+                    value={formName}
                     onChange={(e) => {
-                      setNewAgentName(e.target.value);
+                      setFormName(e.target.value);
                       if (errorMessage) setErrorMessage('');
                     }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleSaveNewAgent();
-                      }
-                    }}
                     placeholder="เช่น Agent สมบัติ สาขาบางนา"
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition"
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition"
                   />
-                  <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                  <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
                 </div>
               </div>
 
-              {/* Quick Examples */}
+              {/* Bank Name Selector */}
               <div>
-                <span className="text-[11px] text-slate-400 block mb-1.5">ตัวอย่างการพิมพ์:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {['Agent Pream (สาขา 2)', 'Agent นนทบุรี', 'Agent ธนวัฒน์'].map((example) => (
-                    <button
-                      key={example}
-                      type="button"
-                      onClick={() => setNewAgentName(example)}
-                      className="px-2 py-1 text-[11px] rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer transition"
-                    >
-                      + {example}
-                    </button>
-                  ))}
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  ธนาคาร *
+                </label>
+                <div className="relative">
+                  <select
+                    value={formBankName}
+                    onChange={(e) => setFormBankName(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none cursor-pointer"
+                  >
+                    {THAI_BANKS.map((b) => (
+                      <option key={b.id} value={b.name}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                  <CreditCard className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
                 </div>
+              </div>
+
+              {/* Account Number & Account Name */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    เลขที่บัญชีธนาคาร
+                  </label>
+                  <input
+                    type="text"
+                    value={formAccountNumber}
+                    onChange={(e) => setFormAccountNumber(e.target.value)}
+                    placeholder="เช่น 123-4-56789-0"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    ชื่อเจ้าของบัญชี
+                  </label>
+                  <input
+                    type="text"
+                    value={formAccountName}
+                    onChange={(e) => setFormAccountName(e.target.value)}
+                    placeholder="เช่น นาย สมบัติ ใจดี"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Phone & Province */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    เบอร์โทรศัพท์
+                  </label>
+                  <input
+                    type="text"
+                    value={formPhone}
+                    onChange={(e) => setFormPhone(e.target.value)}
+                    placeholder="เช่น 081-234-5678"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    จังหวัด / สาขา
+                  </label>
+                  <input
+                    type="text"
+                    value={formProvince}
+                    onChange={(e) => setFormProvince(e.target.value)}
+                    placeholder="เช่น กรุงเทพฯ, เชียงใหม่"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  หมายเหตุเพิ่มเติม (ถ้ามี)
+                </label>
+                <input
+                  type="text"
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  placeholder="เช่น โอนเงินก่อน 17:00 น."
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
               </div>
 
               {errorMessage && (
@@ -416,18 +632,18 @@ export function AgentManagerModal({
                 </div>
               )}
 
-              <div className="pt-2 flex items-center justify-end space-x-2">
+              <div className="pt-2 flex items-center justify-end space-x-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="button"
-                  disabled={isSaving || !newAgentName.trim()}
-                  onClick={handleSaveNewAgent}
+                  disabled={isSaving || !formName.trim()}
+                  onClick={handleSaveAgent}
                   className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-95 disabled:opacity-50 disabled:pointer-events-none rounded-xl transition shadow-xs flex items-center cursor-pointer"
                 >
                   {isSaving ? (
@@ -435,7 +651,7 @@ export function AgentManagerModal({
                   ) : (
                     <>
                       <Check className="w-3.5 h-3.5 mr-1.5" />
-                      บันทึกและเลือกทันที
+                      {editingAgent ? 'บันทึกการแก้ไข' : 'บันทึกและเลือกทันที'}
                     </>
                   )}
                 </button>
@@ -447,7 +663,7 @@ export function AgentManagerModal({
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="ค้นหาชื่อตัวแทนที่ต้องการลบ..."
+                  placeholder="ค้นหาชื่อตัวแทน, ธนาคาร, หรือเลขบัญชี..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-8 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -455,56 +671,113 @@ export function AgentManagerModal({
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
               </div>
 
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                💡 กดปุ่ม <span className="text-rose-600 dark:text-rose-400 font-semibold">"ลบ"</span> ด้านหลังชื่อตัวแทน เพื่อนำออกจากระบบและดรอปดาวน์
-              </p>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                <span>
+                  💡 กดปุ่ม <span className="text-indigo-600 font-semibold">"แก้ไข"</span> เพื่อเพิ่มเลขบัญชี หรือ <span className="text-rose-600 font-semibold">"ลบ"</span> ออกจากระบบ
+                </span>
+                <Link
+                  to="/agents"
+                  onClick={onClose}
+                  className="text-indigo-600 hover:underline font-bold inline-flex items-center"
+                >
+                  เปิดหน้าเต็ม
+                  <ExternalLink className="w-3 h-3 ml-0.5" />
+                </Link>
+              </div>
 
-              <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800">
                 {filteredAgentsList.length === 0 ? (
                   <div className="py-8 text-center text-xs text-slate-400">
                     ไม่พบรายชื่อตัวแทน
                   </div>
                 ) : (
-                  filteredAgentsList.map((agent) => (
-                    <div
-                      key={agent.name}
-                      className="px-3 py-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition text-xs"
-                    >
-                      <div className="flex items-center space-x-2 truncate">
-                        <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
-                          {agent.name}
-                        </span>
-                        {currentSelectedAgent === agent.name && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-semibold shrink-0">
-                            กำลังเลือก
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center space-x-1.5 shrink-0 ml-2">
-                        {onSelectAgent && (
+                  filteredAgentsList.map((agent) => {
+                    const bankInfo = getBankInfo(agent.bankName);
+                    const copyKey = `modal-agent-${agent.id}`;
+                    const isCopied = copiedKey === copyKey;
+
+                    return (
+                      <div
+                        key={agent.id}
+                        className="px-3 py-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition text-xs gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center space-x-1.5 truncate">
+                            <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                              {agent.name}
+                            </span>
+                            {currentSelectedAgent === agent.name && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-semibold shrink-0">
+                                กำลังเลือก
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Bank details preview */}
+                          {agent.bankAccountNumber ? (
+                            <div className="flex items-center space-x-1.5 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: bankInfo.color }}
+                              />
+                              <span className="truncate">{bankInfo.shortName}</span>
+                              <span className="font-mono font-medium text-slate-700 dark:text-slate-300">
+                                {agent.bankAccountNumber}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyAccount(copyKey, agent.bankAccountNumber || '')}
+                                className="text-slate-400 hover:text-indigo-600 transition cursor-pointer p-0.5"
+                                title="คัดลอกเลขบัญชี"
+                              >
+                                {isCopied ? (
+                                  <Check className="w-3 h-3 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 block mt-0.5">
+                              ⚠️ ยังไม่ระบุเลขบัญชี
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center space-x-1 shrink-0">
+                          {onSelectAgent && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectAgent(agent.name);
+                                onClose();
+                              }}
+                              className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 rounded-lg text-[11px] font-semibold cursor-pointer transition"
+                            >
+                              เลือก
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => {
-                              onSelectAgent(agent.name);
-                              onClose();
-                            }}
-                            className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 rounded-lg text-[11px] font-semibold cursor-pointer transition"
+                            onClick={() => handleStartEdit(agent)}
+                            className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                            title="แก้ไขข้อมูล Agent"
                           >
-                            เลือก
+                            <Edit3 className="w-3.5 h-3.5" />
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget({ name: agent.name, id: agent.id })}
-                          className="px-2.5 py-1 bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-900/60 rounded-lg text-[11px] font-semibold flex items-center cursor-pointer transition"
-                          title={`ลบ "${agent.name}" ออกจากระบบ`}
-                        >
-                          <Trash2 className="w-3 h-3 mr-1 text-rose-500" />
-                          ลบ
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget({ name: agent.name, id: agent.id })}
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 rounded-lg transition cursor-pointer"
+                            title={`ลบ "${agent.name}" ออกจากระบบ`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -525,7 +798,7 @@ export function AgentManagerModal({
                   ยืนยันการลบตัวแทน
                 </h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  ลบออกจากตัวเลือกดรอปดาวน์
+                  ลบออกจากระบบและดรอปดาวน์
                 </p>
               </div>
             </div>
@@ -580,7 +853,7 @@ export function AgentManagerModal({
 }
 
 /**
- * PRIMARY COMPONENT: AgentSelect Dropdown
+ * PRIMARY COMPONENT: AgentSelect Dropdown + Linked Bank Details Card
  */
 export function AgentSelect({
   value,
@@ -595,8 +868,15 @@ export function AgentSelect({
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [manageView, setManageView] = useState(false);
+  const [editingAgentTarget, setEditingAgentTarget] = useState<Agent | null>(null);
+
+  // Quick delete
   const [quickDeleteTarget, setQuickDeleteTarget] = useState<string | null>(null);
   const [isDeletingQuick, setIsDeletingQuick] = useState(false);
+
+  // Copy state
+  const [copiedBankKey, setCopiedBankKey] = useState<string | null>(null);
+  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // 1. Subscribe to deleted agents blacklist
   useEffect(() => {
@@ -633,6 +913,12 @@ export function AgentSelect({
             createdAt: data.createdAt || 0,
             createdBy: data.createdBy,
             createdById: data.createdById,
+            bankName: data.bankName,
+            bankAccountNumber: data.bankAccountNumber,
+            bankAccountName: data.bankAccountName,
+            phone: data.phone,
+            province: data.province,
+            notes: data.notes,
           });
         });
         setAgents(loadedAgents);
@@ -649,14 +935,14 @@ export function AgentSelect({
 
   // Combine loaded agents and historical cases, filtered by deletedNames
   const allAvailableAgents = useMemo(() => {
-    const agentMap = new Map<string, { id?: string; name: string }>();
+    const agentMap = new Map<string, Agent>();
     const deletedSet = new Set(deletedNames.map((n) => n.trim().toLowerCase()));
 
     // First add from collection
     agents.forEach((a) => {
       const trimmed = a.name.trim();
       if (trimmed && !deletedSet.has(trimmed.toLowerCase())) {
-        agentMap.set(trimmed.toLowerCase(), { id: a.id, name: trimmed });
+        agentMap.set(trimmed.toLowerCase(), a);
       }
     });
 
@@ -664,7 +950,13 @@ export function AgentSelect({
     cases.forEach((c) => {
       const name = c.agentName?.trim();
       if (name && !deletedSet.has(name.toLowerCase()) && !agentMap.has(name.toLowerCase())) {
-        agentMap.set(name.toLowerCase(), { name });
+        agentMap.set(name.toLowerCase(), {
+          id: `legacy-${name}`,
+          name,
+          createdAt: c.createdAt || Date.now(),
+          createdBy: 'ประวัติเคส',
+          province: c.province,
+        });
       }
     });
 
@@ -673,6 +965,13 @@ export function AgentSelect({
       a.name.localeCompare(b.name, 'th')
     );
   }, [agents, cases, deletedNames]);
+
+  // Find currently selected Agent object
+  const currentAgent = useMemo(() => {
+    if (!value) return null;
+    const lower = value.trim().toLowerCase();
+    return allAvailableAgents.find((a) => a.name.toLowerCase() === lower) || null;
+  }, [value, allAvailableAgents]);
 
   // Quick delete current selected agent
   const handleConfirmQuickDelete = async () => {
@@ -703,43 +1002,66 @@ export function AgentSelect({
     }
   };
 
+  // Copy bank account number
+  const handleCopy = (acc: string) => {
+    if (!acc) return;
+    navigator.clipboard.writeText(acc.replace(/\s+/g, ''));
+    setCopiedBankKey('current');
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(() => setCopiedBankKey(null), 2000);
+  };
+
   return (
-    <div>
-      {/* Label Row with Add & Delete/Manage Actions */}
-      <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+    <div className="space-y-2">
+      {/* Label Row with Add & Delete/Manage Actions & Link to full page */}
+      <div className="flex items-center justify-between mb-1 flex-wrap gap-1">
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
           ชื่อตัวแทน (ผู้ส่งเคส) *
         </label>
         
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 text-[11px]">
+          {/* Link to full Agent Page */}
+          <Link
+            to="/agents"
+            className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer hover:underline inline-flex items-center"
+            title="เปิดหน้าจัดการ Agent และบัญชีธนาคารทั้งหมด"
+          >
+            <Building2 className="w-3.5 h-3.5 mr-0.5 text-indigo-500" />
+            หน้า Agent
+          </Link>
+
+          <span className="text-slate-300 dark:text-slate-600">•</span>
+
           {/* Manage / Delete button */}
           <button
             type="button"
             onClick={() => {
+              setEditingAgentTarget(null);
               setManageView(true);
               setIsModalOpen(true);
             }}
-            className="inline-flex items-center text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 transition cursor-pointer hover:underline"
+            className="inline-flex items-center font-semibold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 transition cursor-pointer hover:underline"
             title="ลบหรือจัดการตัวแทนออกจากดรอปดาวน์"
           >
             <Trash2 className="w-3.5 h-3.5 mr-1" />
-            ลบ/จัดการตัวแทน ({allAvailableAgents.length})
+            จัดการ ({allAvailableAgents.length})
           </button>
 
-          <span className="text-slate-300 dark:text-slate-600 text-xs">•</span>
+          <span className="text-slate-300 dark:text-slate-600">•</span>
 
           {/* Add Agent button */}
           <button
             type="button"
             onClick={() => {
+              setEditingAgentTarget(null);
               setManageView(false);
               setIsModalOpen(true);
             }}
-            className="inline-flex items-center text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition cursor-pointer hover:underline"
-            title="เพิ่มตัวแทนใหม่ลงในดรอปดาวน์"
+            className="inline-flex items-center font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition cursor-pointer hover:underline"
+            title="เพิ่มตัวแทนใหม่พร้อมข้อมูลธนาคาร"
           >
             <Plus className="w-3.5 h-3.5 mr-0.5" />
-            เพิ่มตัวแทนใหม่
+            + เพิ่ม Agent
           </button>
         </div>
       </div>
@@ -754,9 +1076,11 @@ export function AgentSelect({
             onChange={(e) => {
               const selected = e.target.value;
               if (selected === '__ADD_NEW__') {
+                setEditingAgentTarget(null);
                 setManageView(false);
                 setIsModalOpen(true);
               } else if (selected === '__MANAGE_DELETE__') {
+                setEditingAgentTarget(null);
                 setManageView(true);
                 setIsModalOpen(true);
               } else {
@@ -764,7 +1088,7 @@ export function AgentSelect({
               }
             }}
             className={clsx(
-              "w-full pl-9 pr-8 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition appearance-none cursor-pointer",
+              "w-full pl-9 pr-8 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition appearance-none cursor-pointer",
               !value
                 ? "border-slate-200 dark:border-slate-700 text-slate-400"
                 : "border-indigo-300 dark:border-indigo-700 text-slate-900 dark:text-white font-medium"
@@ -777,19 +1101,25 @@ export function AgentSelect({
             </option>
 
             <option value="__ADD_NEW__" className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/60 dark:bg-indigo-950/60">
-              ➕ + เพิ่มชื่อตัวแทนใหม่...
+              ➕ + เพิ่มชื่อตัวแทนใหม่ (พร้อมเลขบัญชี)...
             </option>
 
             <option value="__MANAGE_DELETE__" className="font-semibold text-rose-600 dark:text-rose-400 bg-rose-50/60 dark:bg-rose-950/60">
-              🗑️ จัดการและลบตัวแทนออกจากดรอปดาวน์...
+              ⚙️ จัดการ แก้ไข และลบตัวแทน...
             </option>
 
-            <optgroup label="รายชื่อตัวแทนในระบบ">
-              {allAvailableAgents.map((agent) => (
-                <option key={agent.name} value={agent.name}>
-                  {agent.name}
-                </option>
-              ))}
+            <optgroup label="รายชื่อตัวแทนในระบบ (แสดงธนาคาร & เลขบัญชี)">
+              {allAvailableAgents.map((agent) => {
+                const bInfo = getBankInfo(agent.bankName);
+                const bankLabel = agent.bankAccountNumber
+                  ? ` [${bInfo.shortName} • ${agent.bankAccountNumber}]`
+                  : '';
+                return (
+                  <option key={agent.name} value={agent.name}>
+                    {agent.name}{bankLabel}
+                  </option>
+                );
+              })}
             </optgroup>
           </select>
 
@@ -808,24 +1138,150 @@ export function AgentSelect({
           <button
             type="button"
             onClick={() => setQuickDeleteTarget(value)}
-            className="px-3 py-2.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/80 rounded-xl text-xs font-semibold flex items-center shrink-0 transition cursor-pointer active:scale-95 shadow-2xs group"
+            className="px-2.5 py-2.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/80 rounded-xl text-xs font-semibold flex items-center shrink-0 transition cursor-pointer active:scale-95 shadow-2xs group"
             title={`ลบตัวแทน "${value}" ออกจากดรอปดาวน์`}
           >
             <Trash2 className="w-4 h-4 text-rose-500 group-hover:scale-110 transition-transform" />
-            <span className="ml-1.5 hidden sm:inline">ลบออกจากดรอปดาวน์</span>
           </button>
         )}
       </div>
 
+      {/* ========================================================= */}
+      {/* LINKED BANK DETAILS CARD (Auto displays for selected Agent) */}
+      {/* ========================================================= */}
+      {currentAgent && (
+        <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 text-xs transition animate-fadeIn">
+          {currentAgent.bankAccountNumber ? (
+            /* HAS BANK ACCOUNT DETAILS */
+            <div className="space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center space-x-2 min-w-0">
+                  {(() => {
+                    const info = getBankInfo(currentAgent.bankName);
+                    return (
+                      <>
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0 shadow-2xs"
+                          style={{ backgroundColor: info.color }}
+                        />
+                        <span className={clsx('font-bold truncate', info.textColor)}>
+                          {currentAgent.bankName || info.name}
+                        </span>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                <div className="flex items-center space-x-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAgentTarget(currentAgent);
+                      setManageView(false);
+                      setIsModalOpen(true);
+                    }}
+                    className="p-1 rounded-md text-slate-500 hover:text-indigo-600 hover:bg-indigo-100/70 dark:hover:bg-indigo-900/50 transition cursor-pointer inline-flex items-center text-[11px] font-semibold"
+                    title="แก้ไขเลขบัญชีของ Agent นี้"
+                  >
+                    <Edit3 className="w-3 h-3 mr-0.5" />
+                    แก้ไข
+                  </button>
+                </div>
+              </div>
+
+              {/* Account Number & Copy */}
+              <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                <div className="min-w-0">
+                  <span className="text-[10px] text-slate-400 block">เลขที่บัญชี:</span>
+                  <span className="font-mono font-black text-sm text-slate-900 dark:text-white tracking-wider block">
+                    {currentAgent.bankAccountNumber}
+                  </span>
+                  {currentAgent.bankAccountName && (
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 block truncate mt-0.5">
+                      ชื่อบัญชี: {currentAgent.bankAccountName}
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleCopy(currentAgent.bankAccountNumber || '')}
+                  className={clsx(
+                    'px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center transition cursor-pointer shrink-0 shadow-2xs active:scale-95',
+                    copiedBankKey === 'current'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800'
+                  )}
+                  title="คัดลอกเลขที่บัญชีเพื่อโอนเงิน"
+                >
+                  {copiedBankKey === 'current' ? (
+                    <>
+                      <Check className="w-3 h-3 mr-1" />
+                      คัดลอกแล้ว
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3 mr-1" />
+                      คัดลอกเลขบัญชี
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Extra details (Phone or Notes) */}
+              {(currentAgent.phone || currentAgent.notes) && (
+                <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 pt-0.5 px-1">
+                  {currentAgent.phone && (
+                    <span className="inline-flex items-center">
+                      <Phone className="w-3 h-3 mr-1 text-slate-400" />
+                      {currentAgent.phone}
+                    </span>
+                  )}
+                  {currentAgent.notes && (
+                    <span className="italic truncate ml-2">
+                      หมายเหตุ: {currentAgent.notes}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* MISSING BANK DETAILS PROMPT */
+            <div className="flex items-center justify-between gap-2 py-0.5">
+              <div className="flex items-center space-x-1.5 text-amber-700 dark:text-amber-400 text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>Agent นี้ยังไม่ได้ระบุเลขบัญชีธนาคาร</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingAgentTarget(currentAgent);
+                  setManageView(false);
+                  setIsModalOpen(true);
+                }}
+                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold rounded-lg text-[11px] transition cursor-pointer inline-flex items-center shadow-2xs"
+              >
+                <Plus className="w-3 h-3 mr-1" />
+                + เพิ่มเลขบัญชี
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* MODAL: ADD / MANAGE & DELETE AGENTS (Portal) */}
       <AgentManagerModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingAgentTarget(null);
+        }}
         onSelectAgent={(name) => onChange(name)}
         currentSelectedAgent={value}
         currentUser={currentUser}
         cases={cases}
         initialManageView={manageView}
+        initialEditingAgent={editingAgentTarget}
       />
 
       {/* QUICK DELETE CONFIRMATION MODAL (Portal) */}
