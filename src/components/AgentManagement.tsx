@@ -55,7 +55,6 @@ export function AgentManagement() {
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'has_bank' | 'no_bank'>('all');
   const [selectedBankFilter, setSelectedBankFilter] = useState<string>('all');
 
   // Modal State for Add / Edit
@@ -187,7 +186,12 @@ export function AgentManagement() {
       }
     });
 
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'th'));
+    // Keep only agents that have a bank account added (as requested by user)
+    const withBankAgents = Array.from(map.values()).filter(
+      (a) => a.bankAccountNumber && a.bankAccountNumber.trim()
+    );
+
+    return withBankAgents.sort((a, b) => a.name.localeCompare(b.name, 'th'));
   }, [agents, cases, deletedNames]);
 
   // Count cases per agent name
@@ -202,23 +206,16 @@ export function AgentManagement() {
     return counts;
   }, [cases]);
 
-  // Statistics
+  // Statistics (only counting agents with bank account)
   const stats = useMemo(() => {
     const total = allAgents.length;
-    const withBank = allAgents.filter((a) => a.bankAccountNumber && a.bankAccountNumber.trim()).length;
-    const withoutBank = total - withBank;
-    return { total, withBank, withoutBank };
+    return { total };
   }, [allAgents]);
 
-  // Filtered Agents
+  // Filtered Agents (all have bank accounts already)
   const filteredAgents = useMemo(() => {
     return allAgents.filter((agent) => {
       const search = searchTerm.trim().toLowerCase();
-      const hasBank = Boolean(agent.bankAccountNumber && agent.bankAccountNumber.trim());
-
-      // Filter by type
-      if (filterType === 'has_bank' && !hasBank) return false;
-      if (filterType === 'no_bank' && hasBank) return false;
 
       // Filter by bank
       if (selectedBankFilter !== 'all') {
@@ -250,7 +247,7 @@ export function AgentManagement() {
 
       return true;
     });
-  }, [allAgents, searchTerm, filterType, selectedBankFilter]);
+  }, [allAgents, searchTerm, selectedBankFilter]);
 
   // Handle open Add Modal
   const handleOpenAdd = () => {
@@ -461,34 +458,16 @@ export function AgentManagement() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        {/* Total Agents */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+        {/* Total Agents with Bank */}
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center justify-between">
           <div>
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">
-              ตัวแทนทั้งหมดในระบบ
+              Agent ที่เพิ่มธนาคารแล้วในระบบ
             </span>
             <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
               {stats.total}{' '}
               <span className="text-xs font-medium text-slate-400">รายชื่อ</span>
-            </div>
-          </div>
-          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-            <Building2 className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Has Bank Account */}
-        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center justify-between">
-          <div>
-            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 block">
-              ระบุเลขบัญชีธนาคารแล้ว
-            </span>
-            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
-              {stats.withBank}{' '}
-              <span className="text-xs font-medium text-slate-400">
-                ({stats.total > 0 ? Math.round((stats.withBank / stats.total) * 100) : 0}%)
-              </span>
             </div>
           </div>
           <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
@@ -496,19 +475,18 @@ export function AgentManagement() {
           </div>
         </div>
 
-        {/* Missing Bank Account */}
+        {/* Info card */}
         <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center justify-between">
           <div>
-            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 block">
-              ยังไม่ระบุเลขบัญชี
+            <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 block">
+              พร้อมใช้งานเปิดเคส & โอนเงิน
             </span>
-            <div className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">
-              {stats.withoutBank}{' '}
-              <span className="text-xs font-medium text-slate-400">รายชื่อ</span>
-            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              แสดงเฉพาะตัวแทนที่มีข้อมูลบัญชีธนาคารแล้ว เพื่อความถูกต้องในการทำธุรกรรม
+            </p>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-            <AlertCircle className="w-6 h-6" />
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-6 h-6" />
           </div>
         </div>
       </div>
@@ -554,49 +532,15 @@ export function AgentManagement() {
           </div>
         </div>
 
-        {/* Status Filter Buttons */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-          <button
-            type="button"
-            onClick={() => setFilterType('all')}
-            className={clsx(
-              'px-3 py-1.5 rounded-xl font-semibold transition shrink-0 cursor-pointer',
-              filterType === 'all'
-                ? 'bg-indigo-600 text-white shadow-2xs font-bold'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            )}
-          >
-            ทั้งหมด ({stats.total})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterType('has_bank')}
-            className={clsx(
-              'px-3 py-1.5 rounded-xl font-semibold transition shrink-0 cursor-pointer flex items-center gap-1',
-              filterType === 'has_bank'
-                ? 'bg-emerald-600 text-white shadow-2xs font-bold'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            )}
-          >
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            มีเลขบัญชีแล้ว ({stats.withBank})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterType('no_bank')}
-            className={clsx(
-              'px-3 py-1.5 rounded-xl font-semibold transition shrink-0 cursor-pointer flex items-center gap-1',
-              filterType === 'no_bank'
-                ? 'bg-amber-600 text-white shadow-2xs font-bold'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            )}
-          >
-            <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-            ยังไม่มีเลขบัญชี ({stats.withoutBank})
-          </button>
+        {/* Counter & Search Summary */}
+        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-1">
+          <div className="flex items-center gap-1.5 font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+            <span>แสดง Agent ที่ระบุเลขบัญชีธนาคารแล้วทั้งหมด {stats.total} รายชื่อ</span>
+          </div>
 
           {searchTerm && (
-            <span className="text-[11px] text-slate-400 ml-auto shrink-0 hidden md:inline">
+            <span className="text-[11px] text-slate-400 shrink-0">
               พบ {filteredAgents.length} รายการ
             </span>
           )}
@@ -627,7 +571,6 @@ export function AgentManagement() {
               type="button"
               onClick={() => {
                 setSearchTerm('');
-                setFilterType('all');
                 setSelectedBankFilter('all');
               }}
               className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer transition"
