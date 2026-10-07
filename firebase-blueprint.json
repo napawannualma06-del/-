@@ -466,6 +466,41 @@
         }
       },
       "required": ["name", "phone", "province"]
+    },
+    "EmployeePaymentMethod": {
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "employeeUsername": { "type": "string" },
+        "avatarEmoji": { "type": "string" },
+        "bankName": { "type": "string" },
+        "accountNumber": { "type": "string" },
+        "accountName": { "type": "string" },
+        "promptpayType": { "type": "string" },
+        "qrImageUrl": { "type": "string" },
+        "note": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["employeeId", "employeeName", "accountNumber"]
+    },
+    "PeerRepayment": {
+      "type": "object",
+      "properties": {
+        "fromEmployeeId": { "type": "string" },
+        "fromEmployeeName": { "type": "string" },
+        "toEmployeeId": { "type": "string" },
+        "toEmployeeName": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "slipUrl": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["fromEmployeeId", "toEmployeeId", "amount", "createdAt"]
     }
   },
   "firestore": {
@@ -500,7 +535,16 @@
     "custom_messengers/{messengerId}": {
       "schema": "CustomMessenger",
       "description": "Company custom messengers and courier contacts"
+    },
+    "employee_payment_methods/{methodId}": {
+      "schema": "EmployeePaymentMethod",
+      "description": "Employee QR code payment profiles and PromptPay numbers"
+    },
+    "peer_repayments/{repaymentId}": {
+      "schema": "PeerRepayment",
+      "description": "Employee peer repayment and reimbursement logs"
     }
   }
 }
+
 

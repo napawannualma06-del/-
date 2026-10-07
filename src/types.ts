@@ -166,4 +166,43 @@ export interface AdvanceRequest {
   updatedAt: number;
 }
 
+export type PromptPayTargetType = 'phone' | 'id_card' | 'bank_account' | 'other';
+
+export interface EmployeePaymentMethod {
+  id: string;                 // unique id (often employee's user uid or doc id)
+  employeeId: string;         // User UID
+  employeeName: string;       // ชื่อพนักงาน
+  employeeUsername?: string;  // @username
+  avatarEmoji?: string;       // อิโมจิประจำตัว
+  bankName: string;           // ธนาคาร หรือ 'พร้อมเพย์'
+  accountNumber: string;      // เลขบัญชี หรือ เบอร์พร้อมเพย์
+  accountName: string;        // ชื่อ-นามสกุล บัญชีผู้รับ
+  promptpayType?: PromptPayTargetType; // ประเภท เช่น เบอร์โทร, บัตรประชาชน, บัญชีธนาคาร
+  qrImageUrl?: string;        // รูป QR Code ที่พนักงานอัปโหลดเอง (Base64)
+  note?: string;              // หมายเหตุ เช่น "ฝากซื้อของโอนคืนเบอร์นี้นะครับ", "พร้อมเพย์เบอร์นี้เลย"
+  createdAt: number;
+  updatedAt: number;
+  updatedBy?: string;
+}
+
+export type RepaymentCategory = 'buy_for_me' | 'excess_refund' | 'shared_expense' | 'other';
+
+export interface PeerRepayment {
+  id: string;
+  fromEmployeeId: string;     // ผู้โอนคืน
+  fromEmployeeName: string;
+  fromEmployeeUsername?: string;
+  fromAvatarEmoji?: string;
+  toEmployeeId: string;       // ผู้รับเงิน
+  toEmployeeName: string;
+  toEmployeeUsername?: string;
+  toAvatarEmoji?: string;
+  amount: number;             // ยอดเงิน (บาท)
+  category: RepaymentCategory; // 'buy_for_me' (ฝากซื้อของ) | 'excess_refund' (จ่ายเงินเกิน) | 'shared_expense' (หารกัน) | 'other'
+  description?: string;       // รายละเอียด เช่น "ค่าข้าวมันไก่", "เงินทอนค่าของ"
+  slipUrl?: string;           // แนบรูปสลิปการโอนคืน (Base64)
+  status: 'completed' | 'pending';
+  createdAt: number;
+}
+
 

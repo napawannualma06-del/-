@@ -29,13 +29,15 @@ import {
   Banknote,
   ChevronDown,
   Layers,
-  Bike
+  Bike,
+  QrCode
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
 import { OvertimeModal } from './OvertimeModal';
 import { AdvanceModal } from './AdvanceModal';
 import { MessengerDirectoryModal } from './MessengerDirectoryModal';
+import { EmployeeQRModal } from './EmployeeQRModal';
 import { isUserAdmin } from '../store/useStore';
 
 interface TechStatusToast {
@@ -68,6 +70,9 @@ export function Layout() {
   const [refinanceModalModel, setRefinanceModalModel] = useState<string | undefined>(undefined);
   const [showMessengerModal, setShowMessengerModal] = useState(false);
   const [messengerInitialProvince, setMessengerInitialProvince] = useState<string>('all');
+  const [showEmployeeQRModal, setShowEmployeeQRModal] = useState(false);
+  const [employeeQRDefaultTab, setEmployeeQRDefaultTab] = useState<'directory' | 'my_qr' | 'history'>('directory');
+  const [selectedEmployeeQRId, setSelectedEmployeeQRId] = useState<string | undefined>(undefined);
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [activeTechToast, setActiveTechToast] = useState<TechStatusToast | null>(null);
   const [techNotifications, setTechNotifications] = useState<TechNotificationItem[]>([]);
@@ -316,15 +321,29 @@ export function Layout() {
       setShowMessengerModal(true);
     };
 
+    const handleOpenEmployeeQR = (e: any) => {
+      if (e.detail?.tab) {
+        setEmployeeQRDefaultTab(e.detail.tab);
+      } else {
+        setEmployeeQRDefaultTab('directory');
+      }
+      if (e.detail?.employeeId) {
+        setSelectedEmployeeQRId(e.detail.employeeId);
+      }
+      setShowEmployeeQRModal(true);
+    };
+
     window.addEventListener('open-refinance-guide', handleOpenRefinance);
     window.addEventListener('open-ot-modal', handleOpenOT);
     window.addEventListener('open-advance-modal', handleOpenAdvance);
     window.addEventListener('open-messenger-modal', handleOpenMessenger);
+    window.addEventListener('open-employee-qr-modal', handleOpenEmployeeQR);
     return () => {
       window.removeEventListener('open-refinance-guide', handleOpenRefinance);
       window.removeEventListener('open-ot-modal', handleOpenOT);
       window.removeEventListener('open-advance-modal', handleOpenAdvance);
       window.removeEventListener('open-messenger-modal', handleOpenMessenger);
+      window.removeEventListener('open-employee-qr-modal', handleOpenEmployeeQR);
     };
   }, []);
 
@@ -596,6 +615,37 @@ export function Layout() {
                           ดูรายชื่อ
                         </span>
                       </button>
+
+                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                      {/* 6. ระบบ QR Code พนักงาน (โอนเงินคืน / ฝากซื้อของ) */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setEmployeeQRDefaultTab('directory');
+                          setShowEmployeeQRModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-sky-50/70 dark:hover:bg-sky-950/40 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-linear-to-br from-sky-500 to-indigo-600 text-white shadow-2xs group-hover:scale-105 transition shrink-0">
+                            <QrCode className="w-4 h-4 text-white" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-sky-700 dark:group-hover:text-sky-400">
+                              QR Code พนักงาน (โอนเงินคืน)
+                            </span>
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              จ่ายเงินเกิน • ฝากซื้อของ • เพิ่ม QR ตัวเอง
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0">
+                          สแกนโอน
+                        </span>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -793,6 +843,17 @@ export function Layout() {
           defaultTab={advanceDefaultTab}
         />
       )}
+
+      {/* Employee QR Code & Peer Repayment Modal */}
+      <EmployeeQRModal
+        isOpen={showEmployeeQRModal}
+        onClose={() => {
+          setShowEmployeeQRModal(false);
+          setSelectedEmployeeQRId(undefined);
+        }}
+        initialEmployeeId={selectedEmployeeQRId}
+        initialTab={employeeQRDefaultTab}
+      />
 
       {/* Floating Status Notification for Employee */}
       {activeTechToast && (

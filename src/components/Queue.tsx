@@ -49,7 +49,8 @@ import {
   ChevronsRight,
   Zap,
   Briefcase,
-  Bike
+  Bike,
+  QrCode
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -887,6 +888,19 @@ export function Queue() {
           >
             <Bike className="w-3.5 h-3.5 mr-1.5 text-sky-600 dark:text-sky-400" />
             <span>ติดต่อแมส</span>
+          </button>
+
+          {/* QR Code พนักงาน (โอนเงินคืน / ฝากซื้อของ) */}
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('open-employee-qr-modal', { detail: { tab: 'directory' } }));
+            }}
+            className="inline-flex items-center px-3 py-2 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 shadow-xs transition cursor-pointer"
+            title="ดู QR Code พนักงานสำหรับสแกนโอนเงินคืน / ฝากซื้อของ"
+          >
+            <QrCode className="w-3.5 h-3.5 mr-1.5 text-indigo-600 dark:text-indigo-400" />
+            <span>QR พนักงาน</span>
           </button>
 
           {isAdmin && (

@@ -38,7 +38,8 @@ import {
   ClockAlert,
   ShieldAlert,
   Trash2,
-  Bike
+  Bike,
+  QrCode
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -588,6 +589,19 @@ export function AdminDashboard() {
             >
               <Bike className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
               <span>รายชื่อแมส</span>
+            </button>
+
+            {/* QR Code พนักงาน (โอนเงินคืน / ฝากซื้อของ) */}
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('open-employee-qr-modal', { detail: { tab: 'directory' } }));
+              }}
+              className="px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
+              title="ดู QR Code พนักงานสำหรับสแกนโอนเงินคืน / ฝากซื้อของ"
+            >
+              <QrCode className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>QR พนักงาน</span>
             </button>
           </div>
 

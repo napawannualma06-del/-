@@ -12,7 +12,8 @@ import {
   CheckCircle2, 
   ShieldAlert,
   Calendar,
-  KeyRound
+  KeyRound,
+  QrCode
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -334,7 +335,23 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
                         </div>
                       </div>
 
-                      <div className="shrink-0 flex items-center gap-2">
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.dispatchEvent(
+                              new CustomEvent('open-employee-qr-modal', {
+                                detail: { tab: 'directory', employeeId: emp.uid },
+                              })
+                            );
+                          }}
+                          className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+                          title={`ดู QR Code รับเงินของ ${emp.name}`}
+                        >
+                          <QrCode className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                          <span className="hidden sm:inline">QR รับเงิน</span>
+                        </button>
+
                         {isSuperAdmin ? (
                           <span className="text-[11px] text-slate-400 italic">ผู้ดูแลหลัก</span>
                         ) : isCurrent ? (

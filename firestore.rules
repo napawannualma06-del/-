@@ -148,6 +148,29 @@ service cloud.firestore {
              (!('jobCount' in data) || data.jobCount == null || (data.jobCount is number || data.jobCount is int));
     }
 
+    function isValidPaymentMethod(data) {
+      return data.employeeId is string && data.employeeId.size() > 0 && data.employeeId.size() <= 128 &&
+             data.employeeName is string && data.employeeName.size() > 0 && data.employeeName.size() <= 128 &&
+             data.accountNumber is string && data.accountNumber.size() > 0 && data.accountNumber.size() <= 64 &&
+             (!('bankName' in data) || data.bankName == null || (data.bankName is string && data.bankName.size() <= 64)) &&
+             (!('accountName' in data) || data.accountName == null || (data.accountName is string && data.accountName.size() <= 128)) &&
+             (!('promptpayType' in data) || data.promptpayType == null || (data.promptpayType is string && data.promptpayType.size() <= 32)) &&
+             (!('qrImageUrl' in data) || data.qrImageUrl == null || (data.qrImageUrl is string && data.qrImageUrl.size() <= 600000)) &&
+             (!('note' in data) || data.note == null || (data.note is string && data.note.size() <= 500)) &&
+             (!('employeeUsername' in data) || data.employeeUsername == null || (data.employeeUsername is string && data.employeeUsername.size() <= 64)) &&
+             (!('avatarEmoji' in data) || data.avatarEmoji == null || (data.avatarEmoji is string && data.avatarEmoji.size() <= 32));
+    }
+
+    function isValidPeerRepayment(data) {
+      return data.fromEmployeeId is string && data.fromEmployeeId.size() > 0 && data.fromEmployeeId.size() <= 128 &&
+             data.toEmployeeId is string && data.toEmployeeId.size() > 0 && data.toEmployeeId.size() <= 128 &&
+             data.amount is number && data.amount > 0 &&
+             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 500)) &&
+             (!('category' in data) || data.category == null || (data.category is string && data.category.size() <= 64)) &&
+             (!('slipUrl' in data) || data.slipUrl == null || (data.slipUrl is string && data.slipUrl.size() <= 600000)) &&
+             (!('status' in data) || data.status == null || (data.status is string && data.status.size() <= 32));
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create, update: if isValidUser(incoming());
@@ -207,6 +230,19 @@ service cloud.firestore {
       allow create, update: if isValidMessenger(incoming());
       allow delete: if true;
     }
+
+    match /employee_payment_methods/{methodId} {
+      allow read: if true;
+      allow create, update: if isValidPaymentMethod(incoming());
+      allow delete: if true;
+    }
+
+    match /peer_repayments/{repaymentId} {
+      allow read: if true;
+      allow create, update: if isValidPeerRepayment(incoming());
+      allow delete: if true;
+    }
   }
 }
+
 
