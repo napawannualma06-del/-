@@ -5,7 +5,7 @@ export interface RefinancePlan {
 
 export interface RefinanceModelRate {
   id: string;
-  series: 'iPhone 13' | 'iPhone 14' | 'iPhone 15' | 'iPhone 16' | 'iPhone 17';
+  series: 'iPhone 13' | 'iPhone 14' | 'iPhone 15' | 'iPhone 16' | 'iPhone 17' | 'iPhone 18';
   model: string;
   loanAmount: number; // ยอดที่ได้ปกติ (บาท)
   isNew?: boolean;
@@ -243,6 +243,32 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     plans: { term3: 16000, term6: 9500, term9: 6933, term12: 6100, term15: 5600 },
     notes: 'ความจุพิเศษ 2TB รับยอดสูงสุด',
   },
+
+  // iPhone 18
+  {
+    id: 'ip-18',
+    series: 'iPhone 18',
+    model: 'iPhone 18',
+    isNew: true,
+    loanAmount: 24000,
+    plans: { term3: 12800, term6: 7600, term9: 5547, term12: 4880, term15: 4480 },
+  },
+  {
+    id: 'ip-18-pro',
+    series: 'iPhone 18',
+    model: 'iPhone 18 Pro',
+    isNew: true,
+    loanAmount: 28000,
+    plans: { term3: 14933, term6: 8867, term9: 6471, term12: 5693, term15: 5227 },
+  },
+  {
+    id: 'ip-18-pm',
+    series: 'iPhone 18',
+    model: 'iPhone 18 Pro Max',
+    isNew: true,
+    loanAmount: 30000,
+    plans: { term3: 16000, term6: 9500, term9: 6933, term12: 6100, term15: 5600 },
+  },
 ];
 
 // Unique sorted loan amounts in the table:
@@ -352,7 +378,9 @@ export function findRefinanceRate(modelName: string): RefinanceModelRate | undef
     return REFINANCE_RATES.find(r => r.id === 'ip-17-pm-2tb');
   }
 
-  return REFINANCE_RATES.find(r => normalized.includes(r.model.toLowerCase()) || r.model.toLowerCase().includes(normalized));
+  // Sort from longest model name to shortest to avoid partial matches (e.g. "iPhone 18" matching "iPhone 18 Pro Max")
+  const sortedByLength = [...REFINANCE_RATES].sort((a, b) => b.model.length - a.model.length);
+  return sortedByLength.find(r => normalized.includes(r.model.toLowerCase()) || r.model.toLowerCase().includes(normalized));
 }
 
 export type MachineOrigin = 'thai' | 'foreign'; // 'thai' = ศูนย์ไทย, 'foreign' = เครื่องนอก/เครื่องหิ้ว

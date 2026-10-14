@@ -505,6 +505,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                 </span>
                 {[
                   { id: 'all', label: 'ทั้งหมด (ทุกรุ่น)' },
+                  { id: 'iPhone 18', label: 'iPhone 18 Series' },
                   { id: 'iPhone 17', label: 'iPhone 17 Series' },
                   { id: 'iPhone 16', label: 'iPhone 16 Series' },
                   { id: 'iPhone 15', label: 'iPhone 15 Series' },
