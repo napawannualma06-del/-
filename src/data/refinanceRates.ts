@@ -53,7 +53,7 @@ export const BATTERY_CONDITIONS: BatteryCondition[] = [
 ];
 
 export const GENERAL_CONDITIONS = [
-  '⚡ อัปเดตใหม่: เพิ่มเรทผ่อน 1 เดือน (งวดเดียวจบ) สำหรับทุกรุ่นในตาราง',
+  '⚡ อัปเดตใหม่: เพิ่มเรทผ่อน 1 เดือน (งวดเดียวจบ ดอกเบี้ย 25%) ยึดตามตารางทางการ',
   '⚡ อัตราใหม่ เริ่มใช้ 1 ต.ค. 69 • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป',
   'รับเครื่องนอก • เครื่องหิ้ว ทุกโมเดล',
   'เครื่องนอก: <10k ลด ~1,000 | 10k-20k ลด ~2,000 | 20k+ ลด ~3,000 (ยึดยอดใกล้เคียงในตาราง)',
@@ -68,7 +68,7 @@ export const GENERAL_CONDITIONS = [
 ];
 
 export const FOOTER_NOTES = [
-  'อัปเดตเรท: เพิ่มผ่อน 1 เดือน (ชำระงวดเดียวจบ) สำหรับทุกรุ่นเพื่อความสะดวกของลูกค้า',
+  'อัปเดตเรท: เพิ่มผ่อน 1 เดือน (ชำระงวดเดียวจบ ดอกเบี้ย 25%) ยึดตามตารางทางการสำหรับทุกรุ่น',
   'อัตราใหม่ เริ่มใช้ 1 ต.ค. 69 • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป',
   'เครื่องนอก: ยอดจัด <10,000 ลด ~1,000 | 10,000-20,000 ลด ~2,000 | 20,000+ ลด ~3,000 แล้วเทียบหายอดจัดที่ใกล้เคียงที่สุดในตาราง',
   'เครื่องรีเฟอร์บิช (Refurbished): จัดยอดลดลง 50% แล้วเทียบหายอดจัดที่ใกล้เคียงที่สุดในตาราง',
@@ -87,21 +87,21 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     series: 'iPhone 13',
     model: 'iPhone 13',
     loanAmount: 6000,
-    plans: { term1: 7200, term3: 3200, term6: 1900, term9: 1387, term12: 1220 },
+    plans: { term1: 7500, term3: 3200, term6: 1900, term9: 1387, term12: 1220 },
   },
   {
     id: 'ip-13-pro',
     series: 'iPhone 13',
     model: 'iPhone 13 Pro',
     loanAmount: 8500,
-    plans: { term1: 10200, term3: 4533, term6: 2692, term9: 1964, term12: 1728 },
+    plans: { term1: 10625, term3: 4533, term6: 2692, term9: 1964, term12: 1728 },
   },
   {
     id: 'ip-13-pm',
     series: 'iPhone 13',
     model: 'iPhone 13 Pro Max',
     loanAmount: 9500,
-    plans: { term1: 11400, term3: 5067, term6: 3008, term9: 2196, term12: 1932 },
+    plans: { term1: 11875, term3: 5067, term6: 3008, term9: 2196, term12: 1932 },
   },
 
   // iPhone 14
@@ -110,28 +110,28 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     series: 'iPhone 14',
     model: 'iPhone 14',
     loanAmount: 7000,
-    plans: { term1: 8400, term3: 3733, term6: 2217, term9: 1618, term12: 1423 },
+    plans: { term1: 8750, term3: 3733, term6: 2217, term9: 1618, term12: 1423 },
   },
   {
     id: 'ip-14-plus',
     series: 'iPhone 14',
     model: 'iPhone 14 Plus',
     loanAmount: 9000,
-    plans: { term1: 10800, term3: 4800, term6: 2850, term9: 2080, term12: 1830 },
+    plans: { term1: 11250, term3: 4800, term6: 2850, term9: 2080, term12: 1830 },
   },
   {
     id: 'ip-14-pro',
     series: 'iPhone 14',
     model: 'iPhone 14 Pro',
     loanAmount: 10500,
-    plans: { term1: 12600, term3: 5600, term6: 3325, term9: 2427, term12: 2135 },
+    plans: { term1: 13125, term3: 5600, term6: 3325, term9: 2427, term12: 2135 },
   },
   {
     id: 'ip-14-pm',
     series: 'iPhone 14',
     model: 'iPhone 14 Pro Max',
     loanAmount: 12500,
-    plans: { term1: 15000, term3: 6667, term6: 3958, term9: 2889, term12: 2542 },
+    plans: { term1: 15625, term3: 6667, term6: 3958, term9: 2889, term12: 2542 },
   },
 
   // iPhone 15
@@ -140,28 +140,28 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     series: 'iPhone 15',
     model: 'iPhone 15',
     loanAmount: 9500,
-    plans: { term1: 11400, term3: 5067, term6: 3008, term9: 2196, term12: 1932 },
+    plans: { term1: 11875, term3: 5067, term6: 3008, term9: 2196, term12: 1932 },
   },
   {
     id: 'ip-15-plus',
     series: 'iPhone 15',
     model: 'iPhone 15 Plus',
     loanAmount: 12500,
-    plans: { term1: 15000, term3: 6667, term6: 3958, term9: 2889, term12: 2542 },
+    plans: { term1: 15625, term3: 6667, term6: 3958, term9: 2889, term12: 2542 },
   },
   {
     id: 'ip-15-pro',
     series: 'iPhone 15',
     model: 'iPhone 15 Pro',
     loanAmount: 13500,
-    plans: { term1: 16200, term3: 7200, term6: 4275, term9: 3120, term12: 2745 },
+    plans: { term1: 16875, term3: 7200, term6: 4275, term9: 3120, term12: 2745 },
   },
   {
     id: 'ip-15-pm',
     series: 'iPhone 15',
     model: 'iPhone 15 Pro Max',
     loanAmount: 17000,
-    plans: { term1: 20400, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
+    plans: { term1: 21250, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
   },
 
   // iPhone 16
@@ -170,35 +170,35 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     series: 'iPhone 16',
     model: 'iPhone 16e',
     loanAmount: 10000,
-    plans: { term1: 12000, term3: 5333, term6: 3167, term9: 2311, term12: 2033 },
+    plans: { term1: 12500, term3: 5333, term6: 3167, term9: 2311, term12: 2033 },
   },
   {
     id: 'ip-16',
     series: 'iPhone 16',
     model: 'iPhone 16',
     loanAmount: 13500,
-    plans: { term1: 16200, term3: 7200, term6: 4275, term9: 3120, term12: 2745 },
+    plans: { term1: 16875, term3: 7200, term6: 4275, term9: 3120, term12: 2745 },
   },
   {
     id: 'ip-16-plus',
     series: 'iPhone 16',
     model: 'iPhone 16 Plus',
     loanAmount: 15000,
-    plans: { term1: 18000, term3: 8000, term6: 4750, term9: 3467, term12: 3050 },
+    plans: { term1: 18750, term3: 8000, term6: 4750, term9: 3467, term12: 3050 },
   },
   {
     id: 'ip-16-pro',
     series: 'iPhone 16',
     model: 'iPhone 16 Pro',
     loanAmount: 17000,
-    plans: { term1: 20400, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
+    plans: { term1: 21250, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
   },
   {
     id: 'ip-16-pm',
     series: 'iPhone 16',
     model: 'iPhone 16 Pro Max',
     loanAmount: 21000,
-    plans: { term1: 25200, term3: 11200, term6: 6650, term9: 4853, term12: 4270, term15: 3920 },
+    plans: { term1: 26250, term3: 11200, term6: 6650, term9: 4853, term12: 4270, term15: 3920 },
   },
 
   // iPhone 17
@@ -207,35 +207,35 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     series: 'iPhone 17',
     model: 'iPhone 17e',
     loanAmount: 12000,
-    plans: { term1: 14400, term3: 6400, term6: 3800, term9: 2773, term12: 2440 },
+    plans: { term1: 15000, term3: 6400, term6: 3800, term9: 2773, term12: 2440 },
   },
   {
     id: 'ip-17',
     series: 'iPhone 17',
     model: 'iPhone 17',
     loanAmount: 17000,
-    plans: { term1: 20400, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
+    plans: { term1: 21250, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
   },
   {
     id: 'ip-17-air',
     series: 'iPhone 17',
     model: 'iPhone 17 Air',
     loanAmount: 19000,
-    plans: { term1: 22800, term3: 10133, term6: 6017, term9: 4391, term12: 3863, term15: 3547 },
+    plans: { term1: 23750, term3: 10133, term6: 6017, term9: 4391, term12: 3863, term15: 3547 },
   },
   {
     id: 'ip-17-pro',
     series: 'iPhone 17',
     model: 'iPhone 17 Pro',
     loanAmount: 24000,
-    plans: { term1: 28800, term3: 12800, term6: 7600, term9: 5547, term12: 4880, term15: 4480 },
+    plans: { term1: 30000, term3: 12800, term6: 7600, term9: 5547, term12: 4880, term15: 4480 },
   },
   {
     id: 'ip-17-pm',
     series: 'iPhone 17',
     model: 'iPhone 17 Pro Max',
     loanAmount: 28000,
-    plans: { term1: 33600, term3: 14933, term6: 8867, term9: 6471, term12: 5693, term15: 5227 },
+    plans: { term1: 35000, term3: 14933, term6: 8867, term9: 6471, term12: 5693, term15: 5227 },
   },
   {
     id: 'ip-17-pm-2tb',
@@ -243,7 +243,7 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     model: 'iPhone 17 Pro Max 2TB',
     isNew: true,
     loanAmount: 30000,
-    plans: { term1: 36000, term3: 16000, term6: 9500, term9: 6933, term12: 6100, term15: 5600 },
+    plans: { term1: 37500, term3: 16000, term6: 9500, term9: 6933, term12: 6100, term15: 5600 },
     notes: 'ความจุพิเศษ 2TB รับยอดสูงสุด',
   },
 
@@ -254,7 +254,7 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     model: 'iPhone 18',
     isNew: true,
     loanAmount: 24000,
-    plans: { term1: 28800, term3: 12800, term6: 7600, term9: 5547, term12: 4880, term15: 4480 },
+    plans: { term1: 30000, term3: 12800, term6: 7600, term9: 5547, term12: 4880, term15: 4480 },
   },
   {
     id: 'ip-18-pro',
@@ -262,7 +262,7 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     model: 'iPhone 18 Pro',
     isNew: true,
     loanAmount: 28000,
-    plans: { term1: 33600, term3: 14933, term6: 8867, term9: 6471, term12: 5693, term15: 5227 },
+    plans: { term1: 35000, term3: 14933, term6: 8867, term9: 6471, term12: 5693, term15: 5227 },
   },
   {
     id: 'ip-18-pm',
@@ -270,7 +270,7 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     model: 'iPhone 18 Pro Max',
     isNew: true,
     loanAmount: 30000,
-    plans: { term1: 36000, term3: 16000, term6: 9500, term9: 6933, term12: 6100, term15: 5600 },
+    plans: { term1: 37500, term3: 16000, term6: 9500, term9: 6933, term12: 6100, term15: 5600 },
   },
 ];
 

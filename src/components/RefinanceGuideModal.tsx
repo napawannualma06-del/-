@@ -546,7 +546,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                         {tableOrigin === 'foreign' || tableIsRefurbished || tableRepairOption !== 'none' ? 'ยอดจัด (ยึดตามตาราง)' : 'ยอดที่ได้ (บาท)'}
                       </th>
                       <th className="py-2.5 px-3 text-right bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300">
-                        1 เดือน <span className="text-[10px] font-normal text-emerald-600 dark:text-emerald-400">(ใหม่)</span>
+                        1 เดือน <span className="text-[10px] font-normal text-emerald-600 dark:text-emerald-400">(ดอก 25%)</span>
                       </th>
                       <th className="py-2.5 px-3 text-right">3 เดือน</th>
                       <th className="py-2.5 px-3 text-right">6 เดือน</th>
