@@ -67,7 +67,14 @@ import { CloseCaseModal } from './CloseCaseModal';
 import { HoldCaseModal } from './HoldCaseModal';
 import { RecentActivityFeed } from './RecentActivityFeed';
 import { AgentSelect, AgentManagerModal } from './AgentSelect';
-import { getPreviousAssignee, isStuckCase, isNewCase, isInProgressCase } from '../lib/caseUtils';
+import { 
+  getPreviousAssignee, 
+  isStuckCase, 
+  isNewCase, 
+  isInProgressCase,
+  formatDurationThai,
+  getCaseDurationMs
+} from '../lib/caseUtils';
 import { DutyWorker, Case, UserProfile } from '../types';
 import { logActivity } from '../lib/activityService';
 import {
@@ -564,6 +571,7 @@ export function Queue() {
       await updateDoc(caseRef, {
         assigneeId: user.uid,
         assigneeName: user.name,
+        acceptedAt: Date.now(),
         updatedAt: Date.now(),
       });
     } catch (error) {
@@ -664,6 +672,7 @@ export function Queue() {
           assigneeName: user.name,
           status: 'processing', // สร้างเคส = เครดิตผ่านเลย เมื่อกดรับเคสจะเริ่มทำเคสทันที
           isStuck: false,
+          acceptedAt: Date.now(),
           updatedAt: Date.now(),
         });
       });
@@ -712,7 +721,10 @@ export function Queue() {
       };
       
       if (newStatus === 'closed') {
+        const targetCase = cases.find((c) => c.id === caseId);
+        const startTime = targetCase?.acceptedAt || targetCase?.createdAt || Date.now();
         updates.completedAt = Date.now();
+        updates.durationMs = Math.max(0, Date.now() - startTime);
       }
       
       await updateDoc(caseRef, updates);
@@ -2084,6 +2096,60 @@ interface CaseCardProps {
   onOpenHoldModal?: (c: Case) => void;
 }
 
+export const CaseLiveTimer: React.FC<{ caseData: Case; compact?: boolean }> = ({ caseData, compact = false }) => {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (caseData.status !== 'processing' && caseData.status !== 'credit_check') {
+      return;
+    }
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [caseData.status]);
+
+  if (caseData.status === 'closed') {
+    const dur = getCaseDurationMs(caseData);
+    if (!dur) return null;
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shrink-0"
+        title={`เวลาที่ใช้ตั้งแต่รับจนจบเคส: ${formatDurationThai(dur)}`}
+      >
+        <Clock className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        <span>จบใน {formatDurationThai(dur, { compact })}</span>
+      </span>
+    );
+  }
+
+  if (caseData.status === 'processing' || caseData.status === 'credit_check') {
+    const startTime = caseData.acceptedAt || caseData.updatedAt || caseData.createdAt || now;
+    const elapsed = Math.max(0, now - startTime);
+    const isVeryLong = elapsed >= 60 * 60 * 1000; // >= 1 hour
+    const isLong = elapsed >= 30 * 60 * 1000; // >= 30 mins
+
+    return (
+      <span
+        className={clsx(
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-semibold border shrink-0 transition-colors",
+          isVeryLong
+            ? "bg-rose-50 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800 animate-pulse font-bold"
+            : isLong
+            ? "bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 font-medium"
+            : "bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800"
+        )}
+        title={`เริ่มรับเคสเมื่อ: ${format(startTime, 'HH:mm น.', { locale: th })} (ทำเคสนี้มาแล้ว ${formatDurationThai(elapsed)})`}
+      >
+        <Clock className={clsx("w-2.5 h-2.5 shrink-0", isVeryLong ? "text-rose-600 animate-spin" : isLong ? "text-amber-600" : "text-blue-600")} />
+        <span>ทำมาแล้ว {formatDurationThai(elapsed, { compact })}</span>
+      </span>
+    );
+  }
+
+  return null;
+};
+
 const RowCaseItem: React.FC<CaseCardProps> = ({
   data,
   currentUserId,
@@ -2289,6 +2355,9 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
             <span className="truncate max-w-[130px]">เคยรับ: <strong className="font-semibold">{prevWorker.name}</strong></span>
           </span>
         )}
+
+        {/* Case Live Timer / Total Duration */}
+        <CaseLiveTimer caseData={data} />
       </div>
 
       {/* Right content: Assignee with AnimalAvatar + Actions */}
@@ -2724,6 +2793,14 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
           >
             <RotateCcw className="w-2 h-2 text-amber-600 dark:text-amber-400 shrink-0" />
             <span className="truncate">เคยรับก่อนนี้: <span className="font-semibold">{prevWorker.name}</span></span>
+          </div>
+        )}
+
+        {/* Case Live Timer / Total Duration */}
+        {(data.status === 'processing' || data.status === 'credit_check' || data.status === 'closed') && (
+          <div className="mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-[9px] text-slate-400">เวลาทำงาน:</span>
+            <CaseLiveTimer caseData={data} compact />
           </div>
         )}
       </div>
@@ -3245,6 +3322,17 @@ const CaseCard: React.FC<CaseCardProps> = ({
             </button>
           </div>
         ) : null}
+
+        {/* Live Working Timer or Case Duration */}
+        {(data.status === 'processing' || data.status === 'credit_check' || data.status === 'closed') && (
+          <div className="mb-3 p-2 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1">
+              <Clock className="w-3 h-3 text-slate-400" />
+              {data.status === 'closed' ? 'ระยะเวลาที่ทำเคสนี้:' : 'เวลาที่กำลังทำเคสนี้:'}
+            </span>
+            <CaseLiveTimer caseData={data} />
+          </div>
+        )}
       </div>
 
       {/* Footer / Workflow Actions */}

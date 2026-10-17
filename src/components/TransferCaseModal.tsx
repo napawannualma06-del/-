@@ -70,6 +70,7 @@ export const TransferCaseModal: React.FC<TransferCaseModalProps> = ({
         assigneeId: targetUser.uid,
         assigneeName: targetUser.name,
         status: 'processing', // Keeps in progress for the new assignee
+        acceptedAt: now,
         updatedAt: now,
         remarks: newRemarks,
         remarksUpdatedAt: now,

@@ -125,3 +125,124 @@ export function isInProgressCase(c: Case, users?: MinimalUserForStatus[]): boole
   if (c.status !== 'processing' && c.status !== 'credit_check') return false;
   return !isStuckCase(c, users);
 }
+
+/**
+ * คำนวณระยะเวลาของเคส (มิลลิวินาที)
+ * - ถ้าเคสปิดแล้ว: คืนค่า durationMs ที่บันทึกไว้ หรือคำนวณจาก completedAt - (acceptedAt || createdAt)
+ * - ถ้ากำลังดำเนินการ (processing / credit_check): คืนค่าระยะเวลาตั้งแต่รับเคสจนถึงปัจจุบัน
+ */
+export function getCaseDurationMs(c: Case): number {
+  if (typeof c.durationMs === 'number' && c.durationMs >= 0) {
+    return c.durationMs;
+  }
+  if (c.status === 'closed' && c.completedAt) {
+    const startTime = c.acceptedAt || c.createdAt || 0;
+    return startTime > 0 ? Math.max(0, c.completedAt - startTime) : 0;
+  }
+  if (c.status === 'processing' || c.status === 'credit_check') {
+    const startTime = c.acceptedAt || c.updatedAt || c.createdAt || Date.now();
+    return Math.max(0, Date.now() - startTime);
+  }
+  return 0;
+}
+
+/**
+ * แปลงมิลลิวินาทีเป็นข้อความภาษาไทยที่อ่านง่าย เช่น "15 นาที", "1 ชม. 20 นาที"
+ */
+export function formatDurationThai(
+  ms: number,
+  options?: { showSeconds?: boolean; compact?: boolean }
+): string {
+  if (!ms || ms <= 0) {
+    if (options?.showSeconds) return '0 วินาที';
+    return options?.compact ? '0 น.' : 'น้อยกว่า 1 นาที';
+  }
+
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    if (options?.compact) return `${days} วัน ${hours} ชม.`;
+    return hours > 0 ? `${days} วัน ${hours} ชม.` : `${days} วัน`;
+  }
+
+  if (hours > 0) {
+    if (options?.compact) return `${hours} ชม. ${minutes} น.`;
+    return minutes > 0 ? `${hours} ชม. ${minutes} นาที` : `${hours} ชั่วโมง`;
+  }
+
+  if (minutes > 0) {
+    if (options?.showSeconds && seconds > 0) {
+      if (options?.compact) return `${minutes} น. ${seconds} วิ`;
+      return `${minutes} นาที ${seconds} วินาที`;
+    }
+    if (options?.compact) return `${minutes} น.`;
+    return `${minutes} นาที`;
+  }
+
+  // < 1 minute
+  if (options?.showSeconds && seconds > 0) {
+    return `${seconds} วินาที`;
+  }
+  return options?.compact ? '<1 นาที' : 'น้อยกว่า 1 นาที';
+}
+
+export interface CaseTimeStats {
+  count: number;
+  totalMs: number;
+  averageMs: number;
+  minMs: number;
+  maxMs: number;
+  averageFormatted: string;
+  minFormatted: string;
+  maxFormatted: string;
+}
+
+/**
+ * คำนวณสถิติเวลาของรายการเคสที่จบแล้ว
+ */
+export function calculateCaseTimeStats(casesList: Case[]): CaseTimeStats {
+  const closed = casesList.filter((c) => c.status === 'closed');
+  const validDurations: number[] = [];
+
+  for (const c of closed) {
+    const dur = getCaseDurationMs(c);
+    // Ignore unreasonable outliers like 0 or > 30 days if corrupt
+    if (dur > 0 && dur < 30 * 86400 * 1000) {
+      validDurations.push(dur);
+    }
+  }
+
+  if (validDurations.length === 0) {
+    return {
+      count: 0,
+      totalMs: 0,
+      averageMs: 0,
+      minMs: 0,
+      maxMs: 0,
+      averageFormatted: '-',
+      minFormatted: '-',
+      maxFormatted: '-',
+    };
+  }
+
+  const totalMs = validDurations.reduce((sum, d) => sum + d, 0);
+  const averageMs = Math.round(totalMs / validDurations.length);
+  const minMs = Math.min(...validDurations);
+  const maxMs = Math.max(...validDurations);
+
+  return {
+    count: validDurations.length,
+    totalMs,
+    averageMs,
+    minMs,
+    maxMs,
+    averageFormatted: formatDurationThai(averageMs),
+    minFormatted: formatDurationThai(minMs),
+    maxFormatted: formatDurationThai(maxMs),
+  };
+}
+

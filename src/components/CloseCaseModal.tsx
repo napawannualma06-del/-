@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Case, UserProfile } from '../types';
-import { CheckCircle2, X, AlertCircle, Smartphone, FileSignature, MapPin, Sparkles } from 'lucide-react';
+import { CheckCircle2, X, AlertCircle, Smartphone, FileSignature, MapPin, Sparkles, Clock } from 'lucide-react';
 import { AnimalAvatar } from './AnimalAvatar';
 import { logActivity } from '../lib/activityService';
+import { formatDurationThai, getCaseDurationMs } from '../lib/caseUtils';
 
 interface CloseCaseModalProps {
   isOpen: boolean;
@@ -55,9 +56,14 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
       const now = Date.now();
       const caseRef = doc(db, 'cases', caseData.id);
 
+      // คำนวณระยะเวลาตั้งแต่เริ่มรับเคสจนจบเคส (มิลลิวินาที)
+      const startTime = caseData.acceptedAt || caseData.createdAt || now;
+      const durationMs = Math.max(0, now - startTime);
+
       const updates: Record<string, unknown> = {
         status: 'closed',
         completedAt: now,
+        durationMs,
         updatedAt: now,
       };
 
@@ -175,16 +181,22 @@ export const CloseCaseModal: React.FC<CloseCaseModalProps> = ({
             </div>
 
             {caseData.assigneeName && (
-              <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60 text-xs">
-                <span className="text-[10px] text-slate-400">{isCustomTask ? 'ผู้รับผิดชอบงาน:' : 'ผู้รับผิดชอบเคส:'}</span>
-                <AnimalAvatar
-                  identifier={caseData.assigneeId || caseData.assigneeName}
-                  name={caseData.assigneeName}
-                  size="xs"
-                />
-                <span className="font-semibold text-slate-700 dark:text-slate-300">
-                  {caseData.assigneeName}
-                </span>
+              <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-slate-400">{isCustomTask ? 'ผู้รับผิดชอบงาน:' : 'ผู้รับผิดชอบเคส:'}</span>
+                  <AnimalAvatar
+                    identifier={caseData.assigneeId || caseData.assigneeName}
+                    name={caseData.assigneeName}
+                    size="xs"
+                  />
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    {caseData.assigneeName}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 font-medium text-[11px]">
+                  <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                  <span>ใช้เวลา: {formatDurationThai(getCaseDurationMs(caseData), { showSeconds: true })}</span>
+                </div>
               </div>
             )}
           </div>

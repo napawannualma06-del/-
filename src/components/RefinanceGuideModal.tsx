@@ -76,7 +76,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
   const [batteryReplaced, setBatteryReplaced] = useState<boolean>(false);
 
   // Term selection & Early payoff simulation state
-  const [selectedTerm, setSelectedTerm] = useState<3 | 6 | 9 | 12 | 15>(6);
+  const [selectedTerm, setSelectedTerm] = useState<1 | 3 | 6 | 9 | 12 | 15>(6);
   const [earlyClosingAt, setEarlyClosingAt] = useState<number>(1); // ปิดในงวดที่ 1, 2, 3...
   const [lateDays, setLateDays] = useState<number>(0); // วันล่าช้า
 
@@ -117,7 +117,8 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
 
   // Available terms for the matched rate
   const availableTerms = useMemo(() => {
-    const list: (3 | 6 | 9 | 12 | 15)[] = [];
+    const list: (1 | 3 | 6 | 9 | 12 | 15)[] = [];
+    if (calcResult.plans.term1) list.push(1);
     if (calcResult.plans.term3) list.push(3);
     if (calcResult.plans.term6) list.push(6);
     if (calcResult.plans.term9) list.push(9);
@@ -135,6 +136,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
 
   // Ensure selectedTerm is valid
   const currentMonthlyAmount = useMemo(() => {
+    if (selectedTerm === 1) return calcResult.plans.term1;
     if (selectedTerm === 3) return calcResult.plans.term3;
     if (selectedTerm === 6) return calcResult.plans.term6;
     if (selectedTerm === 9) return calcResult.plans.term9;
@@ -188,26 +190,32 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
       `──────────────────────────────`,
       `รุ่น: ${model}`,
       `ยอดจัดไฟแนนซ์: ${finalLoan} บาท`,
-      `ระยะเวลาสัญญา: ${term} เดือน`,
-      `ค่างวดชำระ: ${monthly} บาท / เดือน`,
+      `ระยะเวลาสัญญา: ${term} เดือน${term === 1 ? ' (งวดเดียวจบ)' : ''}`,
+      `ค่างวดชำระ: ${monthly} บาท${term === 1 ? ' (ชำระงวดเดียวครบสัญญา)' : ' / เดือน'}`,
       `──────────────────────────────`,
       ...(adjustmentReasons.length > 0 ? [
         `📌 หมายเหตุการประเมินยอดจัด:`,
         ...adjustmentReasons,
         `──────────────────────────────`,
       ] : []),
-      `🎁 สิทธิพิเศษ "ส่วนลดปิดยอดก่อนกำหนด":`,
-      `• ปิดในงวดที่ 1 ➡️ ลดทันที 20% (ประหยัด ${payoff1.discountAmount.toLocaleString()} บ. จ่ายปิดเพียง ${payoff1.netPayoffAmount.toLocaleString()} บ.)`,
-      ...(term > 1 ? [`• ปิดในงวดที่ 2 ➡️ ลดทันที 15% (ประหยัด ${payoff2.discountAmount.toLocaleString()} บ. จ่ายปิดเพียง ${payoff2.netPayoffAmount.toLocaleString()} บ.)`] : []),
-      ...(term > 2 ? [`• ปิดในงวดที่ 3 ขึ้นไป ➡️ ลดทันที 10% (ประหยัด ${payoff3.discountAmount.toLocaleString()} บ. จ่ายปิดเพียง ${payoff3.netPayoffAmount.toLocaleString()} บ.)`] : []),
-      `──────────────────────────────`,
+      ...(term > 1 ? [
+        `🎁 สิทธิพิเศษ "ส่วนลดปิดยอดก่อนกำหนด":`,
+        `• งวดที่ 1 ➡️ ชำระตามยอดสัญญา (ไม่มีส่วนลด)`,
+        `• ปิดในงวดที่ 2 ➡️ ลดทันที 15% (ประหยัด ${payoff2.discountAmount.toLocaleString()} บ. จ่ายปิดเพียง ${payoff2.netPayoffAmount.toLocaleString()} บ.)`,
+        ...(term > 2 ? [`• ปิดในงวดที่ 3 ขึ้นไป ➡️ ลดทันที 10% (ประหยัด ${payoff3.discountAmount.toLocaleString()} บ. จ่ายปิดเพียง ${payoff3.netPayoffAmount.toLocaleString()} บ.)`] : []),
+        `──────────────────────────────`,
+      ] : [
+        `🎁 การปิดยอดสัญญา:`,
+        `• สัญญาผ่อน 1 งวด ชำระตามยอดสัญญา (ไม่มีส่วนลดปิดยอดก่อนกำหนด)`,
+        `──────────────────────────────`,
+      ]),
       `⚠️ เงื่อนไขการชำระเงิน:`,
       `• ชำระตรงเวลา ไม่มีค่าบริการใดๆ เพิ่มเติมค่ะ`,
       `• กรณีชำระล่าช้า คิดวันละ 50 บาท (นับจากวันแรกที่เกินกำหนด)`,
       `• หากล่าช้าเกิน 16 วัน มีค่าบริการปลดล็อกระบบเพิ่ม 500 บาท`,
       `──────────────────────────────`,
       `✅ เครื่องอยู่กับคุณลูกค้าตลอด ไม่ต้องฝากเครื่องค่ะ`,
-      `✅ ปิดยอดก่อนกำหนดได้ตลอดสัญญาตามสัดส่วนลดด้านบนค่ะ`,
+      term > 1 ? `✅ ปิดยอดก่อนกำหนดได้ตลอดสัญญาตามสัดส่วนลดด้านบนค่ะ` : `✅ ชำระงวดเดียวครบสัญญา ลูกค้ารับเครื่องใช้งานต่อได้สบายใจค่ะ`,
       `ยินดีดำเนินการทำสัญญาให้ทันทีนะคะ 🙏`
     ];
 
@@ -242,7 +250,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
       `🔋 สุขภาพแบตเตอรี่: ${calcBattery}%`,
       calcResult.batteryNotice ? `${calcResult.batteryNotice}` : null,
       ``,
-      `🎁 ส่วนลดปิดยอดก่อนกำหนด: งวด 1 ลด 20% | งวด 2 ลด 15% | งวด 3+ ลด 10%`,
+      `🎁 ส่วนลดปิดยอดก่อนกำหนด: งวด 1 ไม่มีส่วนลด | งวด 2 ลด 15% | งวด 3+ ลด 10%`,
       `⚠️ ค่าล่าช้า: วันละ 50 บ. (เกิน 16 วัน มีค่าปลดล็อก +500 บ.)`,
     ].filter(Boolean).join('\n');
 
@@ -537,6 +545,9 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                       <th className="py-2.5 px-3 text-right bg-blue-50/70 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300">
                         {tableOrigin === 'foreign' || tableIsRefurbished || tableRepairOption !== 'none' ? 'ยอดจัด (ยึดตามตาราง)' : 'ยอดที่ได้ (บาท)'}
                       </th>
+                      <th className="py-2.5 px-3 text-right bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300">
+                        1 เดือน <span className="text-[10px] font-normal text-emerald-600 dark:text-emerald-400">(ใหม่)</span>
+                      </th>
                       <th className="py-2.5 px-3 text-right">3 เดือน</th>
                       <th className="py-2.5 px-3 text-right">6 เดือน</th>
                       <th className="py-2.5 px-3 text-right">9 เดือน</th>
@@ -548,7 +559,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 bg-white dark:bg-slate-900">
                     {filteredRates.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="py-8 text-center text-slate-400">
+                        <td colSpan={9} className="py-8 text-center text-slate-400">
                           ไม่พบข้อมูลรุ่น iPhone ที่ค้นหา
                         </td>
                       </tr>
@@ -590,6 +601,9 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                                   <span className="text-amber-600 dark:text-amber-400 font-medium">ยึด {tableCalc.matchedModelRate.model}</span>
                                 </div>
                               )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50/20 dark:bg-emerald-950/10 whitespace-nowrap">
+                              {tableCalc.plans.term1 ? `${tableCalc.plans.term1.toLocaleString()} บ.` : '-'}
                             </td>
                             <td className="py-2.5 px-3 text-right font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
                               {tableCalc.plans.term3 ? `${tableCalc.plans.term3.toLocaleString()} บ.` : '-'}
@@ -1042,8 +1056,9 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                           {[
+                            { term: 1 as const, val: calcResult.plans.term1, label: '1 เดือน' },
                             { term: 3 as const, val: calcResult.plans.term3, label: '3 เดือน' },
                             { term: 6 as const, val: calcResult.plans.term6, label: '6 เดือน' },
                             { term: 9 as const, val: calcResult.plans.term9, label: '9 เดือน' },
@@ -1131,7 +1146,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                             จำลองส่วนลดปิดยอดก่อนกำหนด & ค่าปรับล่าช้า
                           </h5>
                           <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
-                            ปิดงวด 1 ลด 20% | งวด 2 ลด 15% | งวด 3+ ลด 10%
+                            งวด 1 ไม่มีส่วนลด | งวด 2 ลด 15% | งวด 3+ ลด 10%
                           </span>
                         </div>
 
@@ -1160,7 +1175,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                               ))}
                             </div>
                             <span className="text-[10px] text-slate-400 mt-1 block">
-                              {earlyClosingAt === 1 && '✨ ปิดในงวดที่ 1 รับส่วนลดสูงสุด 20% ของยอดคงเหลือ'}
+                              {earlyClosingAt === 1 && 'ℹ️ งวดที่ 1 ชำระตามยอดสัญญา (ไม่มีส่วนลด)'}
                               {earlyClosingAt === 2 && '✨ ปิดในงวดที่ 2 รับส่วนลด 15% ของยอดคงเหลือ'}
                               {earlyClosingAt >= 3 && '✨ ปิดในงวดที่ 3 เป็นต้นไป รับส่วนลด 10% ของยอดคงเหลือ'}
                             </span>
@@ -1203,12 +1218,19 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-bold">
-                            <span className="flex items-center gap-1">
-                              <span>🎉 ส่วนลดปิดยอดก่อนกำหนด ({earlyPayoffData.discountRatePercent}%):</span>
-                            </span>
-                            <span>-{earlyPayoffData.discountAmount.toLocaleString()} บาท</span>
-                          </div>
+                          {earlyPayoffData.discountAmount > 0 ? (
+                            <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-bold">
+                              <span className="flex items-center gap-1">
+                                <span>🎉 ส่วนลดปิดยอดก่อนกำหนด ({earlyPayoffData.discountRatePercent}%):</span>
+                              </span>
+                              <span>-{earlyPayoffData.discountAmount.toLocaleString()} บาท</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs">
+                              <span>ส่วนลดปิดยอด (งวดที่ 1):</span>
+                              <span className="font-medium text-slate-400 dark:text-slate-500">ไม่มีส่วนลด (ชำระตามยอดสัญญา)</span>
+                            </div>
+                          )}
 
                           {earlyPayoffData.lateDays > 0 && (
                             <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
@@ -1229,9 +1251,15 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                               <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
                                 ยอดชำระปิดบัญชีสุทธิ
                               </span>
-                              <span className="text-[10px] text-slate-400">
-                                (ประหยัดส่วนลดไปได้ {earlyPayoffData.discountAmount.toLocaleString()} บ.)
-                              </span>
+                              {earlyPayoffData.discountAmount > 0 ? (
+                                <span className="text-[10px] text-slate-400">
+                                  (ประหยัดส่วนลดไปได้ {earlyPayoffData.discountAmount.toLocaleString()} บ.)
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400">
+                                  (ชำระตามยอดสัญญา ไม่มีส่วนลด)
+                                </span>
+                              )}
                             </div>
                             <div className="text-right">
                               <span className="text-lg font-black text-emerald-600 dark:text-emerald-400">
@@ -1287,7 +1315,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                     </div>
                     <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                      <span>ปิดก่อนกำหนดลดสูงสุด 20% ของยอดคงเหลือ</span>
+                      <span>ปิดก่อนกำหนดลดสูงสุด 15% (งวดที่ 2)</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
@@ -1304,7 +1332,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
         <div className="px-4 sm:px-6 py-3 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
-            <span>THAIPLUS: ส่วนลดปิดยอด (งวด 1: 20% • งวด 2: 15% • งวด 3+: 10%) • ล่าช้า 50 บ./วัน • ปลดล็อก 500 บ.</span>
+            <span>THAIPLUS: ส่วนลดปิดยอด (งวด 1: ไม่มีส่วนลด • งวด 2: 15% • งวด 3+: 10%) • ล่าช้า 50 บ./วัน • ปลดล็อก 500 บ.</span>
           </div>
 
           <button

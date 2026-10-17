@@ -97,6 +97,7 @@ export async function clockOutEmployee(
           isStuck: true,
           assigneeId: '',
           assigneeName: '',
+          acceptedAt: null,
           previousAssigneeName: caseData.assigneeName || employeeName || '',
           previousAssigneeId: caseData.assigneeId || employeeId || '',
           stuckAt: now,

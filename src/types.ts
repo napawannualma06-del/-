@@ -75,6 +75,8 @@ export interface Case {
   stuckReason?: string;
   createdAt: number;
   updatedAt: number;
+  acceptedAt?: number;
+  durationMs?: number; // ระยะเวลาตั้งแต่เริ่มรับเคสจนจบเคส (มิลลิวินาที)
   completedAt?: number;
   cancelledAt?: number;
   cancelledBy?: string;

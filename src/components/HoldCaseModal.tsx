@@ -68,6 +68,7 @@ export const HoldCaseModal: React.FC<HoldCaseModalProps> = ({
         stuckReason: trimmed,
         assigneeId: '',
         assigneeName: '',
+        acceptedAt: null,
         previousAssigneeName: previousWorkerName,
         previousAssigneeId: previousWorkerId,
         remarks: newRemarks,

@@ -48,6 +48,7 @@ export const ReturnCaseModal: React.FC<ReturnCaseModalProps> = ({
         status: 'pending',
         assigneeId: '',
         assigneeName: '',
+        acceptedAt: null,
         previousAssigneeName: previousWorkerName,
         previousAssigneeId: previousWorkerId,
         returnedBy: currentUser.name,

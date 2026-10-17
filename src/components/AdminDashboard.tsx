@@ -3,7 +3,6 @@ import { Navigate } from 'react-router-dom';
 import { collection, query, onSnapshot, orderBy, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Case, statusMap } from './Queue';
-import { isStuckCase, isNewCase } from '../lib/caseUtils';
 import { Logo } from './Logo';
 import { AnimalAvatar } from './AnimalAvatar';
 import { DutyWorker, CreditCheckDuty } from '../types';
@@ -39,7 +38,12 @@ import {
   ShieldAlert,
   Trash2,
   Bike,
-  QrCode
+  QrCode,
+  Timer,
+  Zap,
+  Gauge,
+  ArrowUpDown,
+  Hourglass
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -53,7 +57,15 @@ import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { AdminOTDashboard } from './AdminOTDashboard';
 import { AdminAdvanceDashboard } from './AdminAdvanceDashboard';
 import { UserManagementModal } from './UserManagementModal';
-import { getPreviousAssignee } from '../lib/caseUtils';
+import { 
+  getPreviousAssignee, 
+  isStuckCase, 
+  isNewCase, 
+  calculateCaseTimeStats, 
+  formatDurationThai, 
+  getCaseDurationMs, 
+  CaseTimeStats 
+} from '../lib/caseUtils';
 import { 
   getExpiredCases, 
   autoCancelExpiredCases, 
@@ -108,6 +120,8 @@ export function AdminDashboard() {
   const [pendingOTCount, setPendingOTCount] = useState(0);
   const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
   const [mainTab, setMainTab] = useState<'cases' | 'ot' | 'advance'>('cases');
+  const [leaderboardSortBy, setLeaderboardSortBy] = useState<'closed' | 'speed_fast' | 'speed_slow'>('closed');
+  const [showTimeAnalytics, setShowTimeAnalytics] = useState(false);
 
   // Subscribe to technical_issues count
   useEffect(() => {
@@ -308,6 +322,9 @@ export function AdminDashboard() {
   const newCases = filteredCases.filter(c => isNewCase(c, employees));
   const totalNewAndStuckCases = filteredCases.filter(c => (isStuckCase(c, employees) || isNewCase(c, employees)) && c.status !== 'closed' && c.status !== 'cancelled');
 
+  // Overall time statistics for closed cases
+  const overallTimeStats = calculateCaseTimeStats(filteredCases);
+
   // Merge registered employees with any assignee found in cases
   const employeeMap: Record<string, EmployeeProfile> = {};
   employees.forEach(emp => {
@@ -395,11 +412,13 @@ export function AdminDashboard() {
   interface EmployeeWorkload {
     employee: EmployeeProfile;
     activeCases: Case[];
+    closedCases: Case[];
     closedCount: number;
     cancelledCount: number;
     isBusy: boolean;
     isOffWork: boolean;
     isOnCreditCheckDuty: boolean;
+    timeStats: CaseTimeStats;
   }
 
   const workloads: EmployeeWorkload[] = allEmployees.map((emp) => {
@@ -418,16 +437,20 @@ export function AdminDashboard() {
     );
 
     // Filtered closed cases
-    const empClosedCount = filteredCases.filter(c => 
+    const empClosedCases = filteredCases.filter(c => 
       c.status === 'closed' &&
       matchesEmp(c.assigneeId, c.assigneeName)
-    ).length;
+    );
+    const empClosedCount = empClosedCases.length;
 
     // Filtered cancelled cases
     const empCancelledCount = filteredCases.filter(c => 
       c.status === 'cancelled' &&
       matchesEmp(c.assigneeId, c.assigneeName)
     ).length;
+
+    // Time efficiency statistics per employee
+    const timeStats = calculateCaseTimeStats(empClosedCases);
 
     // Check if this employee is currently on credit check duty (Max 2 workers)
     const isOnCreditCheckDuty = dutyWorkers.some(w => 
@@ -444,16 +467,36 @@ export function AdminDashboard() {
     return {
       employee: emp,
       activeCases: empActiveCases,
+      closedCases: empClosedCases,
       closedCount: empClosedCount,
       cancelledCount: empCancelledCount,
       isBusy,
       isOffWork,
       isOnCreditCheckDuty,
+      timeStats,
     };
   });
 
-  // Sort employees for leaderboard
-  const sortedLeaderboard = [...workloads].sort((a, b) => b.closedCount - a.closedCount);
+  // Sort employees for leaderboard based on user selection
+  const sortedLeaderboard = [...workloads].sort((a, b) => {
+    if (leaderboardSortBy === 'speed_fast') {
+      if (a.timeStats.count === 0 && b.timeStats.count === 0) return b.closedCount - a.closedCount;
+      if (a.timeStats.count === 0) return 1;
+      if (b.timeStats.count === 0) return -1;
+      return a.timeStats.averageMs - b.timeStats.averageMs;
+    }
+    if (leaderboardSortBy === 'speed_slow') {
+      if (a.timeStats.count === 0 && b.timeStats.count === 0) return b.closedCount - a.closedCount;
+      if (a.timeStats.count === 0) return 1;
+      if (b.timeStats.count === 0) return -1;
+      return b.timeStats.averageMs - a.timeStats.averageMs;
+    }
+    // Default: sort by most closed cases
+    if (b.closedCount !== a.closedCount) {
+      return b.closedCount - a.closedCount;
+    }
+    return (a.timeStats.averageMs || 0) - (b.timeStats.averageMs || 0);
+  });
 
   return (
     <div className="space-y-5 sm:space-y-7 max-w-7xl mx-auto">
@@ -808,7 +851,7 @@ export function AdminDashboard() {
           <CreditCheckDutyStation />
 
           {/* OVERVIEW STAT CARDS (Focused on Cases & Results) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3">
         {/* Closed Cases */}
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
           <div className="flex items-center justify-between">
@@ -823,6 +866,24 @@ export function AdminDashboard() {
             </div>
             <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">
               {filteredCases.length > 0 ? Math.round((closedCases.length / filteredCases.length) * 100) : 0}% สำเร็จ
+            </p>
+          </div>
+        </div>
+
+        {/* Average Time to Close Cases (สถิติเวลาเฉลี่ยจบเคสทั้งหมด) */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-indigo-200/80 dark:border-indigo-900/60 p-2 sm:p-3 transition-colors bg-gradient-to-br from-white via-indigo-50/20 to-indigo-50/40 dark:from-slate-900 dark:via-indigo-950/20 dark:to-indigo-950/30">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] sm:text-[11px] font-medium text-indigo-700 dark:text-indigo-300">เฉลี่ยจบเคสทั้งหมด</span>
+            <span className="p-1 sm:p-1.5 rounded-lg bg-indigo-100/80 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+              <Timer className="w-3.5 h-3.5" />
+            </span>
+          </div>
+          <div className="mt-1.5 sm:mt-2">
+            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-indigo-700 dark:text-indigo-300 tracking-tight">
+              {overallTimeStats.averageFormatted}
+            </div>
+            <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1" title={`สถิติเวลาจาก ${overallTimeStats.count} เคส: เร็วสุด ${overallTimeStats.minFormatted} • ช้าสุด ${overallTimeStats.maxFormatted}`}>
+              {overallTimeStats.count > 0 ? `เร็วสุด ${overallTimeStats.minFormatted} • นานสุด ${overallTimeStats.maxFormatted}` : 'รอข้อมูลจบเคส'}
             </p>
           </div>
         </div>
@@ -935,17 +996,84 @@ export function AdminDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Employee Leaderboard */}
         <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-slate-200/80 dark:border-slate-800 overflow-hidden transition-colors">
-          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center">
                 <Users className="w-4 h-4 mr-2 text-indigo-600 dark:text-indigo-400" />
-                ตารางผลงานพนักงาน (Performance Ranking)
+                ตารางผลงาน & เวลาทำงานต่อเคส (Performance & Speed)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                เรียงตามจำนวนเคสที่ปิดได้สำเร็จในช่วงเวลาที่เลือก
+                {leaderboardSortBy === 'closed'
+                  ? 'เรียงตามจำนวนเคสที่ปิดได้สำเร็จ'
+                  : leaderboardSortBy === 'speed_fast'
+                  ? '⚡ เรียงตามพนักงานที่ทำเคสเร็วที่สุด (เฉลี่ยน้อยสุด)'
+                  : '⏱️ เรียงตามพนักงานที่ใช้เวลาทำงานนานที่สุดต่อเคส'}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Sort selector */}
+              <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 text-xs shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setLeaderboardSortBy('closed')}
+                  className={clsx(
+                    "px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1",
+                    leaderboardSortBy === 'closed'
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                  )}
+                  title="เรียงตามจำนวนเคสที่ปิดได้สำเร็จ"
+                >
+                  <CheckCircle className="w-3 h-3" />
+                  <span>ปิดเคสมากสุด</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLeaderboardSortBy('speed_fast')}
+                  className={clsx(
+                    "px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1",
+                    leaderboardSortBy === 'speed_fast'
+                      ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                  )}
+                  title="เรียงตามพนักงานที่ทำเคสเร็วที่สุด (เฉลี่ยน้อยสุด)"
+                >
+                  <Zap className="w-3 h-3 text-amber-500" />
+                  <span>เร็วสุด ⚡</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLeaderboardSortBy('speed_slow')}
+                  className={clsx(
+                    "px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1",
+                    leaderboardSortBy === 'speed_slow'
+                      ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                  )}
+                  title="ดูว่าใครใช้เวลาทำงานนานที่สุดต่อเคส"
+                >
+                  <Clock className="w-3 h-3 text-amber-500" />
+                  <span>ทำงานนานสุดต่อเคส ⏱️</span>
+                </button>
+              </div>
+
+              {/* Toggle Detail Table */}
+              <button
+                type="button"
+                onClick={() => setShowTimeAnalytics(!showTimeAnalytics)}
+                className={clsx(
+                  "px-2.5 py-1 text-xs font-semibold rounded-xl border transition flex items-center gap-1 cursor-pointer shadow-2xs",
+                  showTimeAnalytics
+                    ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                    : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50"
+                )}
+                title="เปิด/ปิดตารางวิเคราะห์เวลาทำงานต่อเคสรายบุคคล"
+              >
+                <Timer className="w-3 h-3" />
+                <span>{showTimeAnalytics ? 'ซ่อนตารางเวลา' : 'ตารางเวลาต่อเคส'}</span>
+              </button>
+
               <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg">
                 {sortedLeaderboard.length} คน
               </span>
@@ -963,13 +1091,65 @@ export function AdminDashboard() {
             </div>
           </div>
 
+          {/* Detailed Time Analytics Table (ใครทำงานนานต่อเคสเท่าไร) */}
+          {showTimeAnalytics && (
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 overflow-x-auto animate-in slide-in-from-top-2 duration-150">
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <Gauge className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <span>สรุปเวลาทำงานต่อเคสรายบุคคล (ใครทำงานนานเท่าไร):</span>
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  เฉลี่ยรวมทั้งทีม: <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{overallTimeStats.averageFormatted}</strong> (จาก {overallTimeStats.count} เคส)
+                </span>
+              </div>
+              <table className="w-full text-left text-xs divide-y divide-slate-200 dark:divide-slate-700">
+                <thead>
+                  <tr className="text-slate-500 dark:text-slate-400 font-semibold">
+                    <th className="pb-2">พนักงาน</th>
+                    <th className="pb-2 text-center">ปิดเคส</th>
+                    <th className="pb-2 text-center text-indigo-600 dark:text-indigo-400 font-bold">เวลาเฉลี่ย/เคส</th>
+                    <th className="pb-2 text-center">รวมเวลาทำเคส</th>
+                    <th className="pb-2 text-center">เร็วสุด</th>
+                    <th className="pb-2 text-center">นานสุด</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                  {sortedLeaderboard.map(({ employee, closedCount, timeStats }) => (
+                    <tr key={`stat-${employee.uid}`} className="hover:bg-slate-100/60 dark:hover:bg-slate-700/30">
+                      <td className="py-2 font-medium text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                        <AnimalAvatar identifier={employee.username || employee.uid} name={employee.name} size="xs" />
+                        <span>{employee.name}</span>
+                      </td>
+                      <td className="py-2 text-center font-semibold text-slate-700 dark:text-slate-300">
+                        {closedCount}
+                      </td>
+                      <td className="py-2 text-center font-bold text-indigo-700 dark:text-indigo-300">
+                        {timeStats.count > 0 ? timeStats.averageFormatted : '-'}
+                      </td>
+                      <td className="py-2 text-center text-slate-500 dark:text-slate-400">
+                        {timeStats.count > 0 ? formatDurationThai(timeStats.totalMs, { compact: true }) : '-'}
+                      </td>
+                      <td className="py-2 text-center text-emerald-600 dark:text-emerald-400 font-medium">
+                        {timeStats.count > 0 ? timeStats.minFormatted : '-'}
+                      </td>
+                      <td className="py-2 text-center text-amber-600 dark:text-amber-400 font-medium">
+                        {timeStats.count > 0 ? timeStats.maxFormatted : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
             {sortedLeaderboard.length === 0 ? (
               <div className="py-12 text-center text-slate-400 dark:text-slate-500 text-sm">
                 ยังไม่มีข้อมูลผลงานพนักงานในช่วงเวลานี้
               </div>
             ) : (
-              sortedLeaderboard.map(({ employee, activeCases, closedCount, cancelledCount, isBusy, isOnCreditCheckDuty }, idx) => {
+              sortedLeaderboard.map(({ employee, activeCases, closedCount, cancelledCount, isBusy, isOnCreditCheckDuty, timeStats }, idx) => {
                 const isMe = user && (employee.uid === user.uid || employee.username === user.username);
                 return (
                 <div key={employee.uid} className={clsx(
@@ -1018,12 +1198,39 @@ export function AdminDashboard() {
                         {cancelledCount > 0 && (
                           <span className="text-rose-500 dark:text-rose-400">ยกเลิก: {cancelledCount}</span>
                         )}
+                        {timeStats && timeStats.count > 0 && (
+                          <span className="text-slate-400 dark:text-slate-500 hidden sm:inline">
+                            • รวมเวลาทำเคส: {formatDurationThai(timeStats.totalMs, { compact: true })}
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    <span className="px-3 py-1 text-xs font-bold rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center space-x-2 shrink-0">
+                    {/* Time efficiency badge per employee (ใครทำงานนานต่อเคสเท่าไร) */}
+                    {timeStats && timeStats.count > 0 ? (
+                      <span 
+                        className={clsx(
+                          "px-2.5 py-1 text-xs font-semibold rounded-xl border flex items-center gap-1 shrink-0",
+                          timeStats.averageMs <= 20 * 60 * 1000
+                            ? "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                            : timeStats.averageMs <= 40 * 60 * 1000
+                            ? "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800"
+                            : "bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                        )}
+                        title={`เวลาเฉลี่ยต่อเคส: ${timeStats.averageFormatted} (เร็วสุด ${timeStats.minFormatted} • ช้าสุด ${timeStats.maxFormatted} • เวลารวมทำเคส ${formatDurationThai(timeStats.totalMs)})`}
+                      >
+                        <Clock className="w-3 h-3 text-indigo-500 shrink-0" />
+                        <span>เฉลี่ย <strong className="font-bold">{timeStats.averageFormatted}</strong>/เคส</span>
+                      </span>
+                    ) : (
+                      <span className="hidden sm:inline-flex px-2 py-1 text-[11px] font-medium rounded-xl bg-slate-50 dark:bg-slate-800/80 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700">
+                        ไม่มีเวลาจบเคส
+                      </span>
+                    )}
+
+                    <span className="px-3 py-1 text-xs font-bold rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
                       ปิดแล้ว {closedCount} เคส
                     </span>
                   </div>
@@ -1079,9 +1286,17 @@ export function AdminDashboard() {
                         </span>
                       )}
                     </div>
-                    <div className="pt-1 text-[11px] text-emerald-700 dark:text-emerald-400 font-medium flex items-center">
-                      <ShieldCheck className="w-3 h-3 mr-1 text-emerald-600 dark:text-emerald-400" />
-                      {isCustom ? `ผู้จบงาน: ${c.assigneeName || 'ไม่ระบุ'}` : `ผู้จบเคส: ${c.assigneeName || 'ไม่ระบุ'}`}
+                    <div className="pt-1 text-[11px] text-emerald-700 dark:text-emerald-400 font-medium flex items-center justify-between">
+                      <span className="flex items-center">
+                        <ShieldCheck className="w-3 h-3 mr-1 text-emerald-600 dark:text-emerald-400" />
+                        {isCustom ? `ผู้จบงาน: ${c.assigneeName || 'ไม่ระบุ'}` : `ผู้จบเคส: ${c.assigneeName || 'ไม่ระบุ'}`}
+                      </span>
+                      {getCaseDurationMs(c) > 0 && (
+                        <span className="px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/80 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1 shrink-0">
+                          <Clock className="w-2.5 h-2.5" />
+                          <span>ใช้เวลา {formatDurationThai(getCaseDurationMs(c))}</span>
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
