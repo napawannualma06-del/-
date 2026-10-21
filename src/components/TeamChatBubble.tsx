@@ -263,7 +263,7 @@ export const TeamChatBubble: React.FC = () => {
   return (
     <>
       {/* Floating Chat Bubble Toggle Button */}
-      <div className="fixed bottom-5 right-5 z-40 select-none">
+      <div className="fixed bottom-20 right-4 sm:bottom-5 sm:right-5 z-40 select-none">
         {!isOpen && (
           <button
             id="open-team-chat-btn"
@@ -273,17 +273,17 @@ export const TeamChatBubble: React.FC = () => {
               setUnreadCount(0);
               lastSeenTimeRef.current = Date.now();
             }}
-            className="relative flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white rounded-full shadow-lg shadow-indigo-600/30 active:scale-95 transition-all duration-200 cursor-pointer group"
+            className="relative flex items-center gap-2 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white rounded-full shadow-lg shadow-indigo-600/30 active:scale-95 transition-all duration-200 cursor-pointer group"
           >
             <div className="relative">
-              <MessageSquare className="w-5 h-5 text-white group-hover:scale-110 transition-transform" />
+              <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-white group-hover:scale-110 transition-transform" />
               {unreadCount > 0 && (
                 <span className="absolute -top-2 -right-2 px-1.5 py-0.5 bg-rose-500 text-white text-[10px] font-bold rounded-full animate-bounce shadow-xs">
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </div>
-            <span className="text-xs font-bold tracking-wide pr-1">แชททีมงาน</span>
+            <span className="text-xs font-bold tracking-wide pr-1 hidden xs:inline sm:inline">แชททีมงาน</span>
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           </button>
         )}
@@ -293,7 +293,7 @@ export const TeamChatBubble: React.FC = () => {
       {isOpen && (
         <div 
           id="team-chat-box"
-          className="fixed bottom-4 right-4 sm:bottom-5 sm:right-5 z-50 w-[calc(100vw-32px)] sm:w-[380px] h-[520px] max-h-[85vh] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
+          className="fixed bottom-20 right-4 sm:bottom-5 sm:right-5 z-50 w-[calc(100vw-32px)] sm:w-[380px] h-[480px] sm:h-[520px] max-h-[75vh] sm:max-h-[85vh] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
         >
           {/* Chat Header */}
           <div className="px-4 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white flex items-center justify-between shrink-0 shadow-xs">

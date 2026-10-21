@@ -39,6 +39,7 @@ import { OvertimeModal } from './OvertimeModal';
 import { AdvanceModal } from './AdvanceModal';
 import { MessengerDirectoryModal } from './MessengerDirectoryModal';
 import { EmployeeQRModal } from './EmployeeQRModal';
+import { MobileBottomNav } from './MobileBottomNav';
 import { isUserAdmin } from '../store/useStore';
 
 interface TechStatusToast {
@@ -398,8 +399,8 @@ export function Layout() {
                 </div>
               </Link>
  
-              {/* Unified Nav Links */}
-              <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+              {/* Unified Nav Links (Desktop Only - Mobile uses Bottom Dock) */}
+              <div className="hidden md:flex items-center gap-1 shrink-0">
                 <Link
                   to="/"
                   className={clsx(
@@ -811,7 +812,7 @@ export function Layout() {
       </nav>
 
       {/* Main Page Area */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-7">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 pb-28 md:py-7">
         <Outlet />
       </main>
 
@@ -993,6 +994,50 @@ export function Layout() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Mobile Bottom Navigation Dock & Action Drawer */}
+      {user && (
+        <MobileBottomNav
+          user={user}
+          pendingOTCount={pendingOTCount}
+          pendingAdvanceCount={pendingAdvanceCount}
+          pendingTechCount={pendingTechCount}
+          onOpenOT={() => {
+            setOtDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+            setShowOTModal(true);
+          }}
+          onOpenAdvance={() => {
+            setAdvanceDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+            setShowAdvanceModal(true);
+          }}
+          onOpenRefinance={() => {
+            setRefinanceModalModel(undefined);
+            setShowRefinanceModal(true);
+          }}
+          onOpenMessenger={() => {
+            setMessengerInitialProvince('all');
+            setShowMessengerModal(true);
+          }}
+          onOpenEmployeeQR={() => {
+            setEmployeeQRDefaultTab('directory');
+            setShowEmployeeQRModal(true);
+          }}
+          onOpenTech={() => {
+            setShowTechModal(true);
+          }}
+          onToggleDarkMode={toggleDarkMode}
+          isDarkMode={isDarkMode}
+          onClockToggle={() => {
+            if (isOffWork) {
+              clockIn();
+            } else {
+              setShowClockOutModal(true);
+            }
+          }}
+          isOffWork={isOffWork}
+          onLogout={logout}
+        />
       )}
     </div>
   );

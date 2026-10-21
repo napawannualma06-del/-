@@ -35,7 +35,7 @@ export default function App() {
         <Route element={user ? <Layout /> : <Navigate to="/login" />}>
           <Route path="/" element={<Queue />} />
           <Route path="/agents" element={<AgentManagement />} />
-          <Route path="/admin" element={isUserAdmin(user) ? <AdminDashboard /> : <Navigate to="/" replace />} />
+          <Route path="/admin" element={<AdminDashboard />} />
         </Route>
       </Routes>
     </HashRouter>

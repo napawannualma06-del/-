@@ -126,6 +126,13 @@ export function AdminDashboard() {
   const [leaderboardSortBy, setLeaderboardSortBy] = useState<'closed' | 'speed_fast' | 'speed_slow'>('closed');
   const [showTimeAnalytics, setShowTimeAnalytics] = useState(false);
 
+  // Ensure non-admin employees can only view the cases section
+  useEffect(() => {
+    if (!isAdmin && mainTab !== 'cases') {
+      setMainTab('cases');
+    }
+  }, [isAdmin, mainTab]);
+
   // Subscribe to technical_issues count
   useEffect(() => {
     const q = query(collection(db, 'technical_issues'));
@@ -532,74 +539,81 @@ export function AdminDashboard() {
 
           {/* Action Modals and Tab Switchers */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Main Section Switcher: แดชบอร์ดเคส vs แดชบอร์ด OT vs แดชบอร์ดแอดวานซ์ vs API เว็บหลัก */}
-            <div className="flex items-center p-1 bg-slate-200/80 dark:bg-slate-800 rounded-xl overflow-x-auto max-w-full">
-              <button
-                type="button"
-                onClick={() => setMainTab('cases')}
-                className={clsx(
-                  "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
-                  mainTab === 'cases'
-                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                )}
-              >
-                <BarChart3 className="w-3.5 h-3.5 shrink-0" />
-                <span>เคส</span>
-              </button>
+            {/* Main Section Switcher: แดชบอร์ดเคส vs แดชบอร์ด OT vs แดชบอร์ดแอดวานซ์ vs API เว็บหลัก (Admin Only) */}
+            {isAdmin ? (
+              <div className="flex items-center p-1 bg-slate-200/80 dark:bg-slate-800 rounded-xl overflow-x-auto max-w-full">
+                <button
+                  type="button"
+                  onClick={() => setMainTab('cases')}
+                  className={clsx(
+                    "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
+                    mainTab === 'cases'
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+                  <span>เคส</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setMainTab('ot')}
-                className={clsx(
-                  "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
-                  mainTab === 'ot'
-                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                )}
-              >
-                <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                <span>OT</span>
-                {pendingOTCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse">
-                    {pendingOTCount}
-                  </span>
-                )}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setMainTab('ot')}
+                  className={clsx(
+                    "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                    mainTab === 'ot'
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span>OT</span>
+                  {pendingOTCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse">
+                      {pendingOTCount}
+                    </span>
+                  )}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setMainTab('advance')}
-                className={clsx(
-                  "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
-                  mainTab === 'advance'
-                    ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                )}
-              >
-                <Banknote className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>แอดวานซ์</span>
-                {pendingAdvanceCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-2xs animate-pulse">
-                    {pendingAdvanceCount}
-                  </span>
-                )}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setMainTab('advance')}
+                  className={clsx(
+                    "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                    mainTab === 'advance'
+                      ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  <Banknote className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>แอดวานซ์</span>
+                  {pendingAdvanceCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-2xs animate-pulse">
+                      {pendingAdvanceCount}
+                    </span>
+                  )}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setMainTab('api')}
-                className={clsx(
-                  "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
-                  mainTab === 'api'
-                    ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-2xs"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                )}
-              >
-                <Key className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                <span>API เว็บหลัก</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setMainTab('api')}
+                  className={clsx(
+                    "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                    mainTab === 'api'
+                      ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  <Key className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                  <span>API เว็บหลัก</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-bold text-indigo-700 dark:text-indigo-300 shadow-2xs">
+                <BarChart3 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>ภาพรวมเคส & สถิติผลงาน</span>
+              </div>
+            )}
 
             <button
               type="button"
@@ -826,51 +840,11 @@ export function AdminDashboard() {
       )}
 
       {/* Conditional Rendering based on Main Tab */}
-      {mainTab === 'ot' ? (
-        isAdmin ? (
-          <AdminOTDashboard />
-        ) : (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 text-center space-y-4 max-w-xl mx-auto my-6 shadow-xs">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
-              <Clock className="w-7 h-7" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">บันทึกเวลาทำงานล่วงเวลา (OT) ของฉัน</h3>
-              <p className="text-xs text-slate-500 mt-1">เพื่อความเป็นส่วนตัว คุณสามารถดูประวัติการขอ OT และส่งคำขอใหม่ได้ที่หน้าต่าง OT ส่วนตัว</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-ot-modal'))}
-              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-md cursor-pointer inline-flex items-center gap-2"
-            >
-              <Clock className="w-4 h-4" />
-              เปิดหน้าต่างจัดการ OT ของฉัน
-            </button>
-          </div>
-        )
-      ) : mainTab === 'advance' ? (
-        isAdmin ? (
-          <AdminAdvanceDashboard />
-        ) : (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 text-center space-y-4 max-w-xl mx-auto my-6 shadow-xs">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
-              <Banknote className="w-7 h-7" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">รายการขอเบิกเงินแอดวานซ์ (Advance) ของฉัน</h3>
-              <p className="text-xs text-slate-500 mt-1">เพื่อความเป็นส่วนตัว คุณสามารถดูประวัติการขอเบิกและสลิปการโอนเงินได้ที่หน้าต่างแอดวานซ์ส่วนตัว</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-advance-modal'))}
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-md cursor-pointer inline-flex items-center gap-2"
-            >
-              <Banknote className="w-4 h-4" />
-              เปิดหน้าต่างเบิกแอดวานซ์ของฉัน
-            </button>
-          </div>
-        )
-      ) : mainTab === 'api' ? (
+      {isAdmin && mainTab === 'ot' ? (
+        <AdminOTDashboard />
+      ) : isAdmin && mainTab === 'advance' ? (
+        <AdminAdvanceDashboard />
+      ) : isAdmin && mainTab === 'api' ? (
         <AdminApiIntegration currentAdminName={user?.name || 'Admin'} cases={cases} />
       ) : (
         <>
