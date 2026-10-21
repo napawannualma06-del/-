@@ -315,6 +315,11 @@ export const RecentActivityFeed: React.FC = () => {
                               {badge.icon}
                               <span>{badge.label}</span>
                             </span>
+                            {act.caseKey && (
+                              <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono text-[10px] font-bold border border-slate-200 dark:border-slate-700">
+                                #{act.caseKey}
+                              </span>
+                            )}
                           </div>
 
                           <p className="text-slate-600 dark:text-slate-300 leading-snug break-words">

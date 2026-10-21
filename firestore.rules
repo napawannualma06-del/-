@@ -23,6 +23,10 @@ service cloud.firestore {
              data.iphoneModel is string && data.iphoneModel.size() <= 128 &&
              data.province is string && data.province.size() <= 128 &&
              data.status in ['pending', 'credit_check', 'processing', 'closed', 'cancelled'] &&
+             (!('caseKey' in data) || data.caseKey == null || (data.caseKey is string && data.caseKey.size() <= 64)) &&
+             (!('taskTitle' in data) || data.taskTitle == null || (data.taskTitle is string && data.taskTitle.size() <= 500)) &&
+             (!('isCustomTask' in data) || data.isCustomTask == null || data.isCustomTask is bool) &&
+             (!('caseType' in data) || data.caseType == null || (data.caseType is string && data.caseType.size() <= 64)) &&
              (!('cancelledAt' in data) || (data.cancelledAt is number)) &&
              (!('cancelledBy' in data) || (data.cancelledBy is string && data.cancelledBy.size() <= 128)) &&
              (!('contractNumber' in data) || (data.contractNumber is string && data.contractNumber.size() <= 128)) &&
@@ -65,6 +69,12 @@ service cloud.firestore {
              (!('updatedAt' in data) || data.updatedAt is number);
     }
 
+    function isValidSetting(data) {
+      return (!('apiKey' in data) || (data.apiKey is string && data.apiKey.size() <= 256)) &&
+             (!('updatedAt' in data) || data.updatedAt is number) &&
+             (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128));
+    }
+
     function isValidActivity(data) {
       return data.type is string && data.type.size() <= 64 &&
              data.actorId is string && data.actorId.size() <= 128 &&
@@ -73,6 +83,7 @@ service cloud.firestore {
              data.timestamp is number &&
              (!('actorAvatarEmoji' in data) || data.actorAvatarEmoji == null || (data.actorAvatarEmoji is string && data.actorAvatarEmoji.size() <= 64)) &&
              (!('caseId' in data) || data.caseId == null || (data.caseId is string && data.caseId.size() <= 128)) &&
+             (!('caseKey' in data) || data.caseKey == null || (data.caseKey is string && data.caseKey.size() <= 64)) &&
              (!('iphoneModel' in data) || data.iphoneModel == null || (data.iphoneModel is string && data.iphoneModel.size() <= 128));
     }
 
@@ -202,6 +213,12 @@ service cloud.firestore {
     match /system_duties/{dutyId} {
       allow read: if true;
       allow create, update: if isValidDuty(incoming());
+      allow delete: if false;
+    }
+
+    match /system_settings/{settingId} {
+      allow read: if true;
+      allow create, update: if isValidSetting(incoming());
       allow delete: if false;
     }
 

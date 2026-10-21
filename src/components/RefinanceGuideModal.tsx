@@ -209,10 +209,15 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
         `• สัญญาผ่อน 1 งวด ชำระตามยอดสัญญา (ไม่มีส่วนลดปิดยอดก่อนกำหนด)`,
         `──────────────────────────────`,
       ]),
-      `⚠️ เงื่อนไขการชำระเงิน:`,
-      `• ชำระตรงเวลา ไม่มีค่าบริการใดๆ เพิ่มเติมค่ะ`,
-      `• กรณีชำระล่าช้า คิดวันละ 50 บาท (นับจากวันแรกที่เกินกำหนด)`,
-      `• หากล่าช้าเกิน 16 วัน มีค่าบริการปลดล็อกระบบเพิ่ม 500 บาท`,
+      `เงื่อนไขการชำระเงิน`,
+      ``,
+      `❗ ชำระล่าช้า มีค่าดำเนินการวันละ 50 บาท`,
+      ``,
+      `⚠️ กรณีค้างชำระและไม่มีการติดต่อ`,
+      `• ค้างชำระ 1 วันขึ้นไป: แจ้งเตือนพร้อมภาพหน้าจอ`,
+      `• ค้างชำระเกิน 7 วัน: เครื่องจะถูกจำกัดการใช้งาน โดยสามารถใช้ได้เฉพาะ LINE และแอปธนาคาร`,
+      ``,
+      `ขอความร่วมมือลูกค้าชำระตรงตามกำหนด หรือแจ้งวันนัดชำระให้บริษัททราบ เพื่อหลีกเลี่ยงค่าดำเนินการและการจำกัดการใช้งานเครื่องค่ะ 🙏`,
       `──────────────────────────────`,
       `✅ เครื่องอยู่กับคุณลูกค้าตลอด ไม่ต้องฝากเครื่องค่ะ`,
       term > 1 ? `✅ ปิดยอดก่อนกำหนดได้ตลอดสัญญาตามสัดส่วนลดด้านบนค่ะ` : `✅ ชำระงวดเดียวครบสัญญา ลูกค้ารับเครื่องใช้งานต่อได้สบายใจค่ะ`,
@@ -251,7 +256,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
       calcResult.batteryNotice ? `${calcResult.batteryNotice}` : null,
       ``,
       `🎁 ส่วนลดปิดยอดก่อนกำหนด: งวด 1 ลด 20% | งวด 2 ลด 15% | งวด 3+ ลด 10% (ยกเว้นผ่อน 1 งวด ไม่มีส่วนลด)`,
-      `⚠️ ค่าล่าช้า: วันละ 50 บ. (เกิน 16 วัน มีค่าปลดล็อก +500 บ.)`,
+      `❗ ชำระล่าช้า: มีค่าดำเนินการวันละ 50 บาท (ค้างเกิน 7 วัน จำกัดการใช้งานเครื่อง)`,
     ].filter(Boolean).join('\n');
 
     navigator.clipboard.writeText(lines);
@@ -1202,8 +1207,8 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                             />
                             <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5">
                               <span>0 วัน (ตรงเวลา)</span>
-                              <span>16 วัน (+50 บ./วัน)</span>
-                              <span className={lateDays > 16 ? "text-rose-500 font-bold" : ""}>&gt;16 วัน (+ปลดล็อก 500 บ.)</span>
+                              <span>1 วัน (แจ้งเตือน)</span>
+                              <span className={lateDays > 7 ? "text-rose-500 font-bold" : ""}>&gt;7 วัน (จำกัดการใช้งาน)</span>
                             </div>
                           </div>
                         </div>
@@ -1237,7 +1242,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
 
                           {earlyPayoffData.lateDays > 0 && (
                             <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
-                              <span>⚠️ ค่าล่าช้า ({earlyPayoffData.lateDays} วัน x 50 บ./วัน):</span>
+                              <span>⚠️ ค่าดำเนินการล่าช้า ({earlyPayoffData.lateDays} วัน x 50 บ./วัน):</span>
                               <span>+{earlyPayoffData.lateFee.toLocaleString()} บาท</span>
                             </div>
                           )}
@@ -1322,7 +1327,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                     </div>
                     <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                      <span>ค่าล่าช้า 50 บ./วัน (เกิน 16 วัน ค่าปลดล็อก 500 บ.)</span>
+                      <span>ชำระล่าช้า มีค่าดำเนินการวันละ 50 บาท (เกิน 7 วัน จำกัดการใช้งาน)</span>
                     </div>
                   </div>
                 </div>
@@ -1335,7 +1340,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
         <div className="px-4 sm:px-6 py-3 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
-            <span>THAIPLUS: ส่วนลดปิดยอด (งวด 1: 20% • งวด 2: 15% • งวด 3+: 10% • ยกเว้นผ่อน 1 งวด) • ล่าช้า 50 บ./วัน • ปลดล็อก 500 บ.</span>
+            <span>THAIPLUS: ส่วนลดปิดยอด (งวด 1: 20% • งวด 2: 15% • งวด 3+: 10%) • ล่าช้า มีค่าดำเนินการ 50 บ./วัน (เกิน 7 วัน จำกัดการใช้งาน)</span>
           </div>
 
           <button

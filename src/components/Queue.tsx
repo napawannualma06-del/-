@@ -51,7 +51,8 @@ import {
   Zap,
   Briefcase,
   Bike,
-  QrCode
+  QrCode,
+  Copy
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -73,7 +74,9 @@ import {
   isNewCase, 
   isInProgressCase,
   formatDurationThai,
-  getCaseDurationMs
+  getCaseDurationMs,
+  generateCaseKey,
+  getDisplayCaseKey
 } from '../lib/caseUtils';
 import { DutyWorker, Case, UserProfile } from '../types';
 import { logActivity } from '../lib/activityService';
@@ -598,7 +601,9 @@ export function Queue() {
     
     setIsSubmitting(true);
     try {
+      const caseKey = generateCaseKey();
       const newCase: Record<string, unknown> = {
+        caseKey,
         agentName: formData.agentName.trim(),
         iphoneModel: formData.iphoneModel,
         province: formData.province,
@@ -625,8 +630,9 @@ export function Queue() {
         actorId: user?.uid || 'unknown',
         actorName: user?.name || 'พนักงาน',
         actorAvatarEmoji: user?.avatarEmoji,
-        description: `เปิดเคสใหม่: ${formData.iphoneModel} (ตัวแทน: ${formData.agentName.trim()})`,
+        description: `เปิดเคสใหม่ #${caseKey}: ${formData.iphoneModel} (ตัวแทน: ${formData.agentName.trim()})`,
         caseId: docRef.id,
+        caseKey,
         iphoneModel: formData.iphoneModel,
       }).catch(console.error);
 
@@ -827,13 +833,16 @@ export function Queue() {
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
+      const qClean = q.replace(/^#/, '');
       const matchAgent = c.agentName.toLowerCase().includes(q);
       const matchModel = c.iphoneModel.toLowerCase().includes(q);
       const matchProvince = c.province.toLowerCase().includes(q);
       const matchAssignee = (c.assigneeName || '').toLowerCase().includes(q);
       const matchRemark = (c.remarks || '').toLowerCase().includes(q);
       const matchContract = (c.contractNumber || '').toLowerCase().includes(q);
-      return matchAgent || matchModel || matchProvince || matchAssignee || matchRemark || matchContract;
+      const displayKey = getDisplayCaseKey(c).toLowerCase();
+      const matchKey = displayKey.includes(q) || (qClean ? displayKey.includes(qClean) : false);
+      return matchAgent || matchModel || matchProvince || matchAssignee || matchRemark || matchContract || matchKey;
     }
 
     return true;
@@ -1007,7 +1016,9 @@ export function Queue() {
               }
               setIsSubmittingCustomTask(true);
               try {
+                const caseKey = generateCaseKey();
                 const newTask: Record<string, unknown> = {
+                  caseKey,
                   taskTitle: customTaskTitle.trim(),
                   agentName: 'งานพิเศษ/งานนอก',
                   iphoneModel: `[งานพิเศษ] ${customTaskTitle.trim()}`,
@@ -1028,8 +1039,9 @@ export function Queue() {
                   actorId: user?.uid || 'admin',
                   actorName: user?.name || 'แอดมิน',
                   actorAvatarEmoji: user?.avatarEmoji,
-                  description: `เพิ่มงานพิเศษ: "${customTaskTitle.trim()}"`,
+                  description: `เพิ่มงานพิเศษ #${caseKey}: "${customTaskTitle.trim()}"`,
                   caseId: docRef.id,
+                  caseKey,
                   iphoneModel: `[งานพิเศษ] ${customTaskTitle.trim()}`,
                 }).catch(console.warn);
 
@@ -2221,6 +2233,19 @@ const RowCaseItem: React.FC<CaseCardProps> = ({
               : statusInfo.label}
         </span>
 
+        {/* Case Key Badge */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigator.clipboard?.writeText(getDisplayCaseKey(data));
+          }}
+          className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-mono text-[10px] sm:text-xs font-bold border border-slate-200 dark:border-slate-700 shrink-0 cursor-pointer transition inline-flex items-center gap-1 select-all"
+          title={`รหัสเคส: #${getDisplayCaseKey(data)} (คลิกเพื่อคัดลอก)`}
+        >
+          <span>#{getDisplayCaseKey(data)}</span>
+        </button>
+
         {/* Time */}
         <span 
           className="text-[10px] sm:text-xs text-slate-400 dark:text-slate-500 font-mono shrink-0 whitespace-nowrap"
@@ -2584,36 +2609,51 @@ const CompactCaseCard: React.FC<CaseCardProps> = ({
       data.status === 'cancelled' ? "opacity-80 bg-rose-50/30 dark:bg-rose-950/20" : ""
     )}>
       <div>
-        {/* Top bar: Status Badge & Time & Admin Delete */}
+        {/* Top bar: Status Badge & Case Key & Time & Admin Delete */}
         <div className="flex items-center justify-between gap-1 mb-1.5">
-          <span className={clsx(
-            "px-1.5 py-0.5 rounded-md text-[10px] font-bold border flex items-center shrink-0 leading-none",
-            data.status === 'pending'
-              ? isStuck
-                ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700"
-                : (isCustomTask
-                    ? "bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800"
-                    : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800")
-              : statusInfo.badgeClass
-          )}>
-            {data.status === 'pending' && isStuck && (
-              <PauseCircle className="w-2.5 h-2.5 mr-0.5 text-amber-600 dark:text-amber-400" />
-            )}
-            {data.status === 'pending' && isNew && (
-              <span className={clsx("w-1.5 h-1.5 rounded-full animate-pulse mr-1", isCustomTask ? "bg-purple-500" : "bg-indigo-500")} />
-            )}
-            {data.status === 'credit_check' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-spin mr-1" />}
-            {data.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />}
-            {data.status === 'closed' && <CheckCircle2 className="w-2.5 h-2.5 mr-0.5 text-emerald-600 dark:text-emerald-400" />}
-            {data.status === 'cancelled' && <Ban className="w-2.5 h-2.5 mr-0.5 text-rose-600 dark:text-rose-400" />}
-            {data.status === 'pending'
-              ? isStuck
-                ? (isCustomTask ? 'งานค้าง' : 'เคสค้าง')
-                : (isCustomTask ? 'งานใหม่' : 'เคสใหม่')
-              : isCustomTask
-                ? (data.status === 'closed' ? 'จบงานแล้ว' : data.status === 'cancelled' ? 'ยกเลิกงาน' : 'กำลังทำงาน')
-                : statusInfo.label}
-          </span>
+          <div className="flex items-center gap-1 min-w-0 flex-wrap">
+            <span className={clsx(
+              "px-1.5 py-0.5 rounded-md text-[10px] font-bold border flex items-center shrink-0 leading-none",
+              data.status === 'pending'
+                ? isStuck
+                  ? "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700"
+                  : (isCustomTask
+                      ? "bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800"
+                      : "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800")
+                : statusInfo.badgeClass
+            )}>
+              {data.status === 'pending' && isStuck && (
+                <PauseCircle className="w-2.5 h-2.5 mr-0.5 text-amber-600 dark:text-amber-400" />
+              )}
+              {data.status === 'pending' && isNew && (
+                <span className={clsx("w-1.5 h-1.5 rounded-full animate-pulse mr-1", isCustomTask ? "bg-purple-500" : "bg-indigo-500")} />
+              )}
+              {data.status === 'credit_check' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-spin mr-1" />}
+              {data.status === 'processing' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse mr-1" />}
+              {data.status === 'closed' && <CheckCircle2 className="w-2.5 h-2.5 mr-0.5 text-emerald-600 dark:text-emerald-400" />}
+              {data.status === 'cancelled' && <Ban className="w-2.5 h-2.5 mr-0.5 text-rose-600 dark:text-rose-400" />}
+              {data.status === 'pending'
+                ? isStuck
+                  ? (isCustomTask ? 'งานค้าง' : 'เคสค้าง')
+                  : (isCustomTask ? 'งานใหม่' : 'เคสใหม่')
+                : isCustomTask
+                  ? (data.status === 'closed' ? 'จบงานแล้ว' : data.status === 'cancelled' ? 'ยกเลิกงาน' : 'กำลังทำงาน')
+                  : statusInfo.label}
+            </span>
+
+            {/* Case Key Badge */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard?.writeText(getDisplayCaseKey(data));
+              }}
+              className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-mono text-[10px] font-bold border border-slate-200 dark:border-slate-700 shrink-0 cursor-pointer transition select-all leading-none"
+              title={`รหัสเคส: #${getDisplayCaseKey(data)} (คลิกเพื่อคัดลอก)`}
+            >
+              #{getDisplayCaseKey(data)}
+            </button>
+          </div>
 
           <div 
             className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 gap-1 font-mono shrink-0 whitespace-nowrap"
@@ -3016,6 +3056,20 @@ const CaseCard: React.FC<CaseCardProps> = ({
                   : statusInfo.label}
             </span>
 
+            {/* Case Key Badge */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard?.writeText(getDisplayCaseKey(data));
+              }}
+              className="px-2 py-0.5 rounded-lg text-xs font-mono font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition flex items-center gap-1 shrink-0 cursor-pointer select-all"
+              title={`รหัสเคส: #${getDisplayCaseKey(data)} (คลิกเพื่อคัดลอก)`}
+            >
+              <span>#{getDisplayCaseKey(data)}</span>
+              <Copy className="w-3 h-3 text-slate-400" />
+            </button>
+
             {/* Contract Quick Badge in Header (Regular cases only) */}
             {!isCustomTask && (
               <button
@@ -3084,9 +3138,14 @@ const CaseCard: React.FC<CaseCardProps> = ({
                     <Briefcase className="w-4 h-4" />
                   </div>
                   <div className="min-w-0">
-                    <span className="text-[10px] uppercase tracking-wider font-bold text-purple-600 dark:text-purple-400 block">
-                      งานพิเศษ (มอบหมายโดยแอดมิน)
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] uppercase tracking-wider font-bold text-purple-600 dark:text-purple-400 block">
+                        งานพิเศษ (มอบหมายโดยแอดมิน)
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 border border-purple-200 dark:border-purple-700">
+                        #{getDisplayCaseKey(data)}
+                      </span>
+                    </div>
                     <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white break-words mt-0.5" title={data.taskTitle || data.iphoneModel}>
                       {data.taskTitle || data.iphoneModel.replace('[งานพิเศษ] ', '')}
                     </h4>
@@ -3108,8 +3167,11 @@ const CaseCard: React.FC<CaseCardProps> = ({
                   <Smartphone className="w-4 h-4 mr-2 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
                   <div>
                     <span className="text-[11px] text-slate-400 dark:text-slate-500 block font-medium">รุ่น iPhone</span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-base font-bold text-slate-900 dark:text-white">{data.iphoneModel}</span>
+                      <span className="px-1.5 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                        #{getDisplayCaseKey(data)}
+                      </span>
                       <button
                         type="button"
                         onClick={(e) => {

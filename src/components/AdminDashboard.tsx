@@ -43,7 +43,8 @@ import {
   Zap,
   Gauge,
   ArrowUpDown,
-  Hourglass
+  Hourglass,
+  Key
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -56,6 +57,7 @@ import { CloseCaseModal } from './CloseCaseModal';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { AdminOTDashboard } from './AdminOTDashboard';
 import { AdminAdvanceDashboard } from './AdminAdvanceDashboard';
+import { AdminApiIntegration } from './AdminApiIntegration';
 import { UserManagementModal } from './UserManagementModal';
 import { 
   getPreviousAssignee, 
@@ -64,7 +66,8 @@ import {
   calculateCaseTimeStats, 
   formatDurationThai, 
   getCaseDurationMs, 
-  CaseTimeStats 
+  CaseTimeStats,
+  getDisplayCaseKey
 } from '../lib/caseUtils';
 import { 
   getExpiredCases, 
@@ -119,7 +122,7 @@ export function AdminDashboard() {
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [pendingOTCount, setPendingOTCount] = useState(0);
   const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
-  const [mainTab, setMainTab] = useState<'cases' | 'ot' | 'advance'>('cases');
+  const [mainTab, setMainTab] = useState<'cases' | 'ot' | 'advance' | 'api'>('cases');
   const [leaderboardSortBy, setLeaderboardSortBy] = useState<'closed' | 'speed_fast' | 'speed_slow'>('closed');
   const [showTimeAnalytics, setShowTimeAnalytics] = useState(false);
 
@@ -507,7 +510,13 @@ export function AdminDashboard() {
             <div className="flex items-center space-x-2">
               <Logo size="sm" />
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center">
-                {mainTab === 'cases' ? 'แดชบอร์ดและสถิติภาพรวม' : mainTab === 'ot' ? 'แดชบอร์ด OT พนักงานทุกคน' : 'แดชบอร์ดขอเบิกเงินแอดวานซ์ พนักงานทุกคน'}
+                {mainTab === 'cases' 
+                  ? 'แดชบอร์ดและสถิติภาพรวม' 
+                  : mainTab === 'ot' 
+                  ? 'แดชบอร์ด OT พนักงานทุกคน' 
+                  : mainTab === 'advance' 
+                  ? 'แดชบอร์ดขอเบิกเงินแอดวานซ์ พนักงานทุกคน'
+                  : 'API ยืนยันรหัสเคสสำหรับเว็บหลัก'}
               </h1>
             </div>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 sm:mt-1">
@@ -515,13 +524,15 @@ export function AdminDashboard() {
                 ? 'สรุปข้อมูลการดำเนินงาน สถิติปิดเคส และตารางอันดับผลงาน (ระบบตัดรอบเวลาเที่ยงคืน 00:00 - 23:59 น.)'
                 : mainTab === 'ot'
                 ? 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติ สรุปยอดชั่วโมง OT รายบุคคล และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
-                : 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติเบิกเงิน โอนเงิน แนบสลิปหลักฐาน และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'}
+                : mainTab === 'advance'
+                ? 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติเบิกเงิน โอนเงิน แนบสลิปหลักฐาน และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
+                : 'จัดการ API Key ตรวจสอบความถูกต้องของเคส และทดสอบการเชื่อมต่อ API กับเว็บหลัก'}
             </p>
           </div>
 
           {/* Action Modals and Tab Switchers */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Main Section Switcher: แดชบอร์ดเคส vs แดชบอร์ด OT vs แดชบอร์ดแอดวานซ์ */}
+            {/* Main Section Switcher: แดชบอร์ดเคส vs แดชบอร์ด OT vs แดชบอร์ดแอดวานซ์ vs API เว็บหลัก */}
             <div className="flex items-center p-1 bg-slate-200/80 dark:bg-slate-800 rounded-xl overflow-x-auto max-w-full">
               <button
                 type="button"
@@ -573,6 +584,20 @@ export function AdminDashboard() {
                     {pendingAdvanceCount}
                   </span>
                 )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMainTab('api')}
+                className={clsx(
+                  "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                  mainTab === 'api'
+                    ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-2xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                <Key className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                <span>API เว็บหลัก</span>
               </button>
             </div>
 
@@ -845,6 +870,8 @@ export function AdminDashboard() {
             </button>
           </div>
         )
+      ) : mainTab === 'api' ? (
+        <AdminApiIntegration currentAdminName={user?.name || 'Admin'} cases={cases} />
       ) : (
         <>
           {/* Credit Check Duty Station (2-person duty roster visible to everyone) */}
@@ -1264,11 +1291,15 @@ export function AdminDashboard() {
                     <div className="flex items-center justify-between">
                       {isCustom ? (
                         <span className="font-semibold text-purple-700 dark:text-purple-300 truncate flex items-center gap-1">
-                          <span className="px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-950 text-[10px] font-bold">งานพิเศษ</span>
+                          <span className="px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-950 text-[10px] font-bold shrink-0">งานพิเศษ</span>
+                          <span className="px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono text-[10px] font-bold shrink-0">#{getDisplayCaseKey(c)}</span>
                           <span className="truncate text-slate-900 dark:text-white">{c.taskTitle || c.iphoneModel.replace('[งานพิเศษ] ', '')}</span>
                         </span>
                       ) : (
-                        <span className="font-semibold text-slate-900 dark:text-white truncate">{c.iphoneModel}</span>
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="font-semibold text-slate-900 dark:text-white truncate">{c.iphoneModel}</span>
+                          <span className="px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono text-[10px] font-bold shrink-0">#{getDisplayCaseKey(c)}</span>
+                        </div>
                       )}
                       <span 
                         className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 whitespace-nowrap"

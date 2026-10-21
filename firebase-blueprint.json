@@ -149,6 +149,22 @@
         "stuckReason": {
           "type": "string",
           "description": "Required reason note why case is stuck"
+        },
+        "caseKey": {
+          "type": "string",
+          "description": "Unique 6-character random alphanumeric key identifying the case"
+        },
+        "taskTitle": {
+          "type": "string",
+          "description": "Optional title for custom admin tasks"
+        },
+        "isCustomTask": {
+          "type": "boolean",
+          "description": "Whether this case is a custom task assigned by admin"
+        },
+        "caseType": {
+          "type": "string",
+          "description": "Type of case, e.g. custom_task or regular"
         }
       },
       "required": ["agentName", "iphoneModel", "province", "status", "createdAt", "updatedAt"]
@@ -181,6 +197,10 @@
         "caseId": {
           "type": "string",
           "description": "Associated case ID"
+        },
+        "caseKey": {
+          "type": "string",
+          "description": "Associated case 6-character random key"
         },
         "iphoneModel": {
           "type": "string",
@@ -501,6 +521,16 @@
         "createdAt": { "type": "number" }
       },
       "required": ["fromEmployeeId", "toEmployeeId", "amount", "createdAt"]
+    },
+    "SystemSetting": {
+      "title": "SystemSetting",
+      "description": "System-wide settings such as API keys and integration credentials",
+      "type": "object",
+      "properties": {
+        "apiKey": { "type": "string", "description": "Active API key for external webhook and verification API" },
+        "updatedAt": { "type": "number", "description": "Timestamp when setting was updated" },
+        "updatedBy": { "type": "string", "description": "Name of admin who updated the setting" }
+      }
     }
   },
   "firestore": {
@@ -543,6 +573,10 @@
     "peer_repayments/{repaymentId}": {
       "schema": "PeerRepayment",
       "description": "Employee peer repayment and reimbursement logs"
+    },
+    "system_settings/{settingId}": {
+      "schema": "SystemSetting",
+      "description": "System configurations such as API keys"
     }
   }
 }

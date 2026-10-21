@@ -4,6 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Case, UserProfile } from '../types';
 import { RotateCcw, X, AlertCircle, Check, Smartphone, User, MapPin } from 'lucide-react';
 import { AnimalAvatar } from './AnimalAvatar';
+import { getDisplayCaseKey } from '../lib/caseUtils';
 
 interface ReturnCaseModalProps {
   isOpen: boolean;
@@ -103,12 +104,17 @@ export const ReturnCaseModal: React.FC<ReturnCaseModalProps> = ({
         <form onSubmit={handleReturn} className="p-5 space-y-4 overflow-y-auto">
           {/* Case Preview Card */}
           <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center text-xs font-bold text-slate-900 dark:text-white">
-                <Smartphone className="w-4 h-4 mr-1.5 text-indigo-500" />
-                {isCustomTask ? (caseData.taskTitle || caseData.iphoneModel.replace('[งานพิเศษ] ', '')) : caseData.iphoneModel}
-              </span>
-              <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-md ${
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Smartphone className="w-4 h-4 text-indigo-500 shrink-0" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                  {isCustomTask ? (caseData.taskTitle || caseData.iphoneModel.replace('[งานพิเศษ] ', '')) : caseData.iphoneModel}
+                </span>
+                <span className="px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono text-[10px] font-bold shrink-0">
+                  #{getDisplayCaseKey(caseData)}
+                </span>
+              </div>
+              <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-md shrink-0 ${
                 isCustomTask
                   ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300'
                   : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'

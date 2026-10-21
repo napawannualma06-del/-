@@ -246,3 +246,32 @@ export function calculateCaseTimeStats(casesList: Case[]): CaseTimeStats {
   };
 }
 
+/**
+ * สุ่ม Key ประจำเคส 6 หลัก (ตัวอักษรและตัวเลขพิมพ์ใหญ่ที่อ่านง่าย)
+ * เพื่อระบุว่าเป็นเคสไหนได้อย่างกระชับ ชัดเจน
+ */
+export function generateCaseKey(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+/**
+ * ดึง Key สุ่ม 6 หลักสำหรับแสดงผล
+ * - ถ้ามี caseKey ในข้อมูลเคส จะใช้ค่านั้น
+ * - หากเป็นเคสเก่าที่สร้างก่อนหน้านี้และยังไม่มี caseKey จะใช้ 6 ตัวท้ายของ id เป็น fallback
+ */
+export function getDisplayCaseKey(caseData?: Partial<Case> | null): string {
+  if (!caseData) return '';
+  if (caseData.caseKey && caseData.caseKey.trim()) {
+    return caseData.caseKey.trim().toUpperCase();
+  }
+  if (caseData.id) {
+    const cleanId = caseData.id.replace(/[^a-zA-Z0-9]/g, '');
+    return cleanId.slice(-6).toUpperCase();
+  }
+  return '';
+}

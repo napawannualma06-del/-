@@ -51,6 +51,7 @@ export interface Agent {
 
 export interface Case {
   id: string;
+  caseKey?: string; // Key สุ่ม 6 หลักสำหรับระบุเคส เช่น 'A9B2K7'
   agentName: string;
   iphoneModel: string;
   province: string;
@@ -80,6 +81,9 @@ export interface Case {
   completedAt?: number;
   cancelledAt?: number;
   cancelledBy?: string;
+  taskTitle?: string;
+  isCustomTask?: boolean;
+  caseType?: string;
 }
 
 export interface ActivityLog {
@@ -90,6 +94,7 @@ export interface ActivityLog {
   actorAvatarEmoji?: string;
   description: string;
   caseId?: string;
+  caseKey?: string; // Key สุ่ม 6 หลักของเคส
   iphoneModel?: string;
   contractNumber?: string;
   timestamp: number;
