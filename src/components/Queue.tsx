@@ -76,6 +76,7 @@ import {
   formatDurationThai,
   getCaseDurationMs,
   generateCaseKey,
+  generateUniqueCaseKey,
   getDisplayCaseKey
 } from '../lib/caseUtils';
 import { DutyWorker, Case, UserProfile } from '../types';
@@ -601,7 +602,7 @@ export function Queue() {
     
     setIsSubmitting(true);
     try {
-      const caseKey = generateCaseKey();
+      const caseKey = await generateUniqueCaseKey(cases);
       const newCase: Record<string, unknown> = {
         caseKey,
         agentName: formData.agentName.trim(),
@@ -1016,7 +1017,7 @@ export function Queue() {
               }
               setIsSubmittingCustomTask(true);
               try {
-                const caseKey = generateCaseKey();
+                const caseKey = await generateUniqueCaseKey(cases);
                 const newTask: Record<string, unknown> = {
                   caseKey,
                   taskTitle: customTaskTitle.trim(),
