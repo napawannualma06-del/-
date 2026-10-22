@@ -2,20 +2,40 @@
 
 @variant dark (&:where(.dark, .dark *));
 
-html, body, #root {
-  min-height: 100%;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  -webkit-text-size-adjust: 100%;
-  touch-action: manipulation;
-  overflow-x: hidden;
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', 'IBM Plex Sans Thai', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  html, body, #root {
+    min-height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+    overflow-x: hidden;
+  }
+
+  body {
+    transition: background-color 0.2s ease, color 0.2s ease;
+    min-height: 100vh;
+    min-height: 100dvh;
+    letter-spacing: -0.005em;
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
 }
 
-body {
-  transition: background-color 0.2s ease, color 0.2s ease;
-  min-height: 100vh;
-  min-height: 100dvh;
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Hide scrollbar for Chrome, Safari and Opera */
@@ -38,5 +58,6 @@ body {
 .animate-bell-ring {
   animation: bell-ring 1.8s ease-in-out infinite;
 }
+
 
 

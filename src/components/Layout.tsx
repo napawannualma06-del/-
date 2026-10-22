@@ -373,113 +373,106 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex flex-col text-slate-800 dark:text-slate-100 transition-colors duration-200">
+    <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-950 flex flex-col text-slate-800 dark:text-slate-100 transition-colors duration-200">
       {/* Top Navbar */}
-      <nav className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-20 shadow-xs transition-colors">
-        <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-8">
-          <div className="flex justify-between items-center h-14 sm:h-16 gap-1 sm:gap-2">
+      <nav className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 sticky top-0 z-30 transition-colors">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-14 sm:h-16 gap-2 sm:gap-4">
             
             {/* Logo & Navigation */}
-            <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
-              <Link to="/" className="flex items-center gap-1 sm:gap-1.5 shrink-0" title="หน้าแรก">
-                <Logo size="sm" className="shrink-0 scale-90 sm:scale-100" />
-                <div className="hidden xl:block border-l border-slate-200 dark:border-slate-800 pl-2 shrink-0">
-                  <div className="flex items-center gap-1">
-                    <span className="font-bold text-xs md:text-sm text-slate-900 dark:text-white leading-none block whitespace-nowrap">
-                      ระบบจัดการคิว
-                    </span>
-                    <span className="inline-flex items-center px-1 py-0.5 rounded-full text-[8px] sm:text-[9px] font-medium bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap shrink-0">
-                      <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse mr-1"></span>
-                      ออนไลน์
-                    </span>
-                  </div>
-                  <span className="text-[9px] text-slate-400 dark:text-slate-500 font-medium whitespace-nowrap block mt-0.5">
+            <div className="flex items-center gap-3 lg:gap-6 shrink-0 min-w-0">
+              <Link to="/" className="flex items-center gap-2.5 shrink-0 group" title="หน้าแรก">
+                <Logo size="sm" className="shrink-0 scale-95 sm:scale-100 transition-transform group-hover:scale-105" />
+                <div className="hidden lg:block border-l border-slate-200 dark:border-slate-800 pl-3 shrink-0">
+                  <span className="font-bold text-sm text-slate-900 dark:text-white leading-tight block whitespace-nowrap tracking-tight">
                     ไทย พลัส+
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium whitespace-nowrap block">
+                    ระบบจัดการคิวงาน
                   </span>
                 </div>
               </Link>
  
-              {/* Unified Nav Links (Desktop Only - Mobile uses Bottom Dock) */}
-              <div className="hidden md:flex items-center gap-1 shrink-0">
+              {/* Unified Nav Links (iPad & Desktop - Mobile uses Bottom Dock) */}
+              <div className="hidden md:flex items-center gap-1 bg-slate-100/80 dark:bg-slate-800/60 p-1 rounded-xl border border-slate-200/60 dark:border-slate-700/50 shrink-0">
                 <Link
                   to="/"
                   className={clsx(
-                    'inline-flex items-center px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
+                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
                     location.pathname === '/' 
-                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold' 
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   )}
                   title="กระดานคิว"
                 >
-                  <ListTodo className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1 shrink-0" />
-                  <span className="hidden sm:inline">คิวงาน</span>
+                  <ListTodo className="w-4 h-4 shrink-0" />
+                  <span>คิวงาน</span>
                 </Link>
  
                 <Link
                   to="/admin"
                   className={clsx(
-                    'inline-flex items-center px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
+                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
                     location.pathname === '/admin' 
-                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold' 
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   )}
                   title="แดชบอร์ด & สถิติ"
                 >
-                  <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1 shrink-0" />
-                  <span className="hidden sm:inline">แดชบอร์ด</span>
+                  <BarChart3 className="w-4 h-4 shrink-0" />
+                  <span>แดชบอร์ด</span>
                 </Link>
 
                 <Link
                   to="/agents"
                   className={clsx(
-                    'inline-flex items-center px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer',
+                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
                     location.pathname === '/agents' 
-                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-xs font-bold' 
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   )}
                   title="รายชื่อ Agent & ข้อมูลบัญชีธนาคาร"
                 >
-                  <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1 shrink-0" />
-                  <span className="hidden sm:inline">Agent</span>
+                  <Building2 className="w-4 h-4 shrink-0" />
+                  <span>Agent</span>
                 </Link>
 
-                {/* เมนูดรอปดาวน์รวมเครื่องมือและบริการ (เมนูสะอาด สบายตา ไม่ล้นจอ) */}
+                {/* เมนูดรอปดาวน์รวมเครื่องมือและบริการ */}
                 <div className="relative" ref={toolsDropdownRef}>
                   <button
                     type="button"
                     onClick={() => setShowToolsDropdown(!showToolsDropdown)}
                     className={clsx(
-                      'relative inline-flex items-center gap-1 sm:gap-1.5 px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap shrink-0 cursor-pointer shadow-2xs border',
+                      'relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
                       showToolsDropdown
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-500/20'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
                         : (pendingOTCount > 0 || pendingAdvanceCount > 0 || pendingTechCount > 0)
-                        ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-800 hover:bg-amber-100'
-                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300 hover:bg-amber-500/25'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     )}
                     title="บริการและคำขอ (OT, เบิกแอดวานซ์, เรทผ่อน, แจ้งปัญหา)"
                   >
-                    <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500 shrink-0" />
-                    <span className="font-bold hidden md:inline">บริการ & คำขอ</span>
-                    <span className="font-bold inline md:hidden">บริการ</span>
+                    <Layers className={clsx("w-4 h-4 shrink-0", showToolsDropdown ? "text-white" : "text-indigo-500")} />
+                    <span>บริการ & คำขอ</span>
                     
                     {/* Badge รวมเตือนรายการรอดำเนินการ */}
                     {(pendingOTCount > 0 || pendingAdvanceCount > 0 || pendingTechCount > 0) && (
-                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-rose-500 text-white shadow-2xs animate-pulse">
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white tabular-nums">
                         {(pendingOTCount + pendingAdvanceCount) + pendingTechCount}
                       </span>
                     )}
 
                     <ChevronDown className={clsx(
-                      "w-3.5 h-3.5 transition-transform duration-200 shrink-0",
+                      "w-3.5 h-3.5 transition-transform duration-200 shrink-0 opacity-70",
                       showToolsDropdown && "rotate-180"
                     )} />
                   </button>
 
                   {/* Dropdown Menu Panel */}
                   {showToolsDropdown && (
-                    <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="absolute left-0 mt-2 w-72 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200/90 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
                       <div className="px-3.5 py-2 border-b border-slate-100 dark:border-slate-800/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                        บริการและแบบฟอร์ม
+                        บริการและแบบฟอร์มพนักงาน
                       </div>
 
                       {/* 1. ขอเบิกเงินแอดวานซ์ */}
@@ -490,25 +483,25 @@ export function Layout() {
                           setAdvanceDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
                           setShowAdvanceModal(true);
                         }}
-                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-emerald-50/70 dark:hover:bg-emerald-950/40 transition group cursor-pointer"
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 group-hover:scale-105 transition shrink-0">
+                          <span className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 shrink-0">
                             <Banknote className="w-4 h-4" />
                           </span>
                           <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-emerald-700 dark:group-hover:text-emerald-400">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
                               ขอเบิกเงินแอดวานซ์
                             </span>
-                            <span className="text-[10px] text-slate-400 block truncate">
-                              ตัดรอบทุกวันที่ 25 • แนบสลิปโอน
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              ตัดรอบทุกวันที่ 25 · แนบสลิปโอน
                             </span>
                           </div>
                         </div>
 
                         {pendingAdvanceCount > 0 && (
-                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-2xs animate-pulse shrink-0">
-                            {pendingAdvanceCount} {isUserAdmin(user) ? 'รอ' : 'ของฉันรอผล'}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white shrink-0 tabular-nums">
+                            {pendingAdvanceCount}
                           </span>
                         )}
                       </button>
@@ -521,25 +514,25 @@ export function Layout() {
                           setOtDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
                           setShowOTModal(true);
                         }}
-                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-indigo-50/70 dark:hover:bg-indigo-950/40 transition group cursor-pointer"
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-2 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 group-hover:scale-105 transition shrink-0">
+                          <span className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 shrink-0">
                             <Clock className="w-4 h-4" />
                           </span>
                           <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-700 dark:group-hover:text-indigo-400">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
                               ระบบขอและอนุมัติ OT
                             </span>
-                            <span className="text-[10px] text-slate-400 block truncate">
-                              บันทึกเวลาทำงานล่วงเวลา (ตัดรอบ 25)
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              บันทึกเวลาทำงานล่วงเวลา
                             </span>
                           </div>
                         </div>
 
                         {pendingOTCount > 0 && (
-                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse shrink-0">
-                            {pendingOTCount} {isUserAdmin(user) ? 'รอ' : 'ของฉันรอผล'}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shrink-0 tabular-nums">
+                            {pendingOTCount}
                           </span>
                         )}
                       </button>
@@ -552,18 +545,18 @@ export function Layout() {
                           setRefinanceModalModel(undefined);
                           setShowRefinanceModal(true);
                         }}
-                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-blue-50/70 dark:hover:bg-blue-950/40 transition group cursor-pointer"
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-2 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 group-hover:scale-105 transition shrink-0">
-                            <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
+                          <span className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 shrink-0">
+                            <Zap className="w-4 h-4" />
                           </span>
                           <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-blue-700 dark:group-hover:text-blue-400">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-amber-600 dark:group-hover:text-amber-400">
                               ตารางรีไฟแนนซ์ iPhone
                             </span>
-                            <span className="text-[10px] text-slate-400 block truncate">
-                              ตารางคำนวณค่างวดผ่อน & สุขภาพแบต
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              คำนวณค่างวดผ่อน & สุขภาพแบต
                             </span>
                           </div>
                         </div>
@@ -571,39 +564,7 @@ export function Layout() {
 
                       <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
 
-                      {/* 4. แจ้งปัญหาเทคนิค */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowToolsDropdown(false);
-                          setShowTechModal(true);
-                        }}
-                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-rose-50/70 dark:hover:bg-rose-950/40 transition group cursor-pointer"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-2 rounded-xl bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400 group-hover:scale-105 transition shrink-0">
-                            <Wrench className="w-4 h-4 text-rose-500" />
-                          </span>
-                          <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-rose-700 dark:group-hover:text-rose-400">
-                              แจ้งปัญหาเทคนิค
-                            </span>
-                            <span className="text-[10px] text-slate-400 block truncate">
-                              รายงานระบบขัดข้องหรือปัญหาตัวเครื่อง
-                            </span>
-                          </div>
-                        </div>
-
-                        {pendingTechCount > 0 && (
-                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white shadow-2xs animate-pulse shrink-0">
-                            {pendingTechCount} รอแก้
-                          </span>
-                        )}
-                      </button>
-
-                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-
-                      {/* 5. รายชื่อแมสเซนเจอร์ Thunder Cloud */}
+                      {/* 4. รายชื่อแมสเซนเจอร์ Thunder Cloud */}
                       <button
                         type="button"
                         onClick={() => {
@@ -611,30 +572,24 @@ export function Layout() {
                           setMessengerInitialProvince('all');
                           setShowMessengerModal(true);
                         }}
-                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-sky-50/70 dark:hover:bg-sky-950/40 transition group cursor-pointer"
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-2 rounded-xl bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-400 group-hover:scale-105 transition shrink-0">
-                            <Bike className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                          <span className="p-2 rounded-xl bg-sky-50 dark:bg-sky-950/80 text-sky-600 dark:text-sky-400 shrink-0">
+                            <Bike className="w-4 h-4" />
                           </span>
                           <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-sky-700 dark:group-hover:text-sky-400">
-                              รายชื่อแมสเซนเจอร์ (Thunder Cloud)
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-sky-600 dark:group-hover:text-sky-400">
+                              รายชื่อแมสเซนเจอร์
                             </span>
-                            <span className="text-[10px] text-slate-400 block truncate">
+                            <span className="text-[11px] text-slate-400 block truncate">
                               ติดต่อแมส 98+ คน ทุกพื้นที่ทั่วประเทศ
                             </span>
                           </div>
                         </div>
-
-                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 shrink-0">
-                          ดูรายชื่อ
-                        </span>
                       </button>
 
-                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-
-                      {/* 6. ระบบ QR Code พนักงาน (โอนเงินคืน / ฝากซื้อของ) */}
+                      {/* 5. ระบบ QR Code พนักงาน */}
                       <button
                         type="button"
                         onClick={() => {
@@ -642,53 +597,54 @@ export function Layout() {
                           setEmployeeQRDefaultTab('directory');
                           setShowEmployeeQRModal(true);
                         }}
-                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-sky-50/70 dark:hover:bg-sky-950/40 transition group cursor-pointer"
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-2 rounded-xl bg-linear-to-br from-sky-500 to-indigo-600 text-white shadow-2xs group-hover:scale-105 transition shrink-0">
-                            <QrCode className="w-4 h-4 text-white" />
+                          <span className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/80 text-purple-600 dark:text-purple-400 shrink-0">
+                            <QrCode className="w-4 h-4" />
                           </span>
                           <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-sky-700 dark:group-hover:text-sky-400">
-                              QR Code พนักงาน (โอนเงินคืน)
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-purple-600 dark:group-hover:text-purple-400">
+                              QR Code พนักงาน
                             </span>
-                            <span className="text-[10px] text-slate-400 block truncate">
-                              จ่ายเงินเกิน • ฝากซื้อของ • เพิ่ม QR ตัวเอง
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              โอนเงินคืน · ฝากซื้อของ · เพิ่ม QR
                             </span>
                           </div>
                         </div>
-
-                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0">
-                          สแกนโอน
-                        </span>
                       </button>
 
                       <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
 
-                      {/* 7. ระบบจัดการ Agent & บัญชีธนาคาร */}
-                      <Link
-                        to="/agents"
-                        onClick={() => setShowToolsDropdown(false)}
-                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-indigo-50/70 dark:hover:bg-indigo-950/40 transition group cursor-pointer"
+                      {/* 6. แจ้งปัญหาเทคนิค */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setShowTechModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-2 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 group-hover:scale-105 transition shrink-0">
-                            <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          <span className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 shrink-0">
+                            <Wrench className="w-4 h-4" />
                           </span>
                           <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-700 dark:group-hover:text-indigo-400">
-                              รายชื่อ Agent & บัญชีธนาคาร
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-rose-600 dark:group-hover:text-rose-400">
+                              แจ้งปัญหาเทคนิค
                             </span>
-                            <span className="text-[10px] text-slate-400 block truncate">
-                              บันทึกเลขบัญชี • เชื่อมโยงตอนเพิ่มงาน
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              รายงานระบบขัดข้องหรือตัวเครื่อง
                             </span>
                           </div>
                         </div>
 
-                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0">
-                          จัดการ
-                        </span>
-                      </Link>
+                        {pendingTechCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white shrink-0 tabular-nums">
+                            {pendingTechCount}
+                          </span>
+                        )}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -696,23 +652,37 @@ export function Layout() {
             </div>
  
             {/* User Profile & Actions */}
-            <div className="flex items-center gap-1 shrink-0">
-              {/* Dark Mode Toggle */}
-              <button
-                type="button"
-                onClick={toggleDarkMode}
-                className="p-1.5 sm:p-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center justify-center cursor-pointer shrink-0"
-                title={isDarkMode ? 'เปลี่ยนเป็นโหมดสว่าง' : 'เปลี่ยนเป็นโหมดมืด'}
-                aria-label="Toggle Dark Mode"
-              >
-                {isDarkMode ? (
-                  <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
-                ) : (
-                  <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500 shrink-0" />
-                )}
-              </button>
- 
-              {/* Notification Center (Bell with unread badge until opened/read) */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {/* Employee Work Shift Status (เข้างาน / เลิกงาน) */}
+              {user && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isOffWork) {
+                      clockIn();
+                    } else {
+                      setShowClockOutModal(true);
+                    }
+                  }}
+                  className={clsx(
+                    "h-9 px-2.5 sm:px-3 rounded-xl border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shrink-0 whitespace-nowrap",
+                    isOffWork
+                      ? "border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                      : "border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/80"
+                  )}
+                  title={isOffWork ? "ขณะนี้เลิกงานแล้ว (คลิกเพื่อเข้างาน)" : "ขณะนี้เข้างานอยู่ (คลิกเพื่อบันทึกเลิกงาน)"}
+                >
+                  <span className={clsx(
+                    "w-2 h-2 rounded-full shrink-0",
+                    isOffWork ? "bg-slate-400" : "bg-emerald-500"
+                  )} />
+                  <span className="hidden sm:inline">
+                    {isOffWork ? 'เลิกงานแล้ว' : 'เข้างานอยู่'}
+                  </span>
+                </button>
+              )}
+
+              {/* Notification Center */}
               <NotificationCenter
                 notifications={techNotifications}
                 unreadCount={techNotifications.filter((n) => !n.read).length}
@@ -730,45 +700,28 @@ export function Layout() {
                 onRequestNotificationPermission={handleRequestNotification}
               />
 
-              {/* Employee Work Shift Status (เข้างาน / เลิกงาน) */}
-              {user && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isOffWork) {
-                      clockIn();
-                    } else {
-                      setShowClockOutModal(true);
-                    }
-                  }}
-                  className={clsx(
-                    "px-1.5 py-1.5 sm:px-2 sm:py-1.5 rounded-xl border text-xs font-semibold transition flex items-center gap-1 cursor-pointer shrink-0 shadow-2xs whitespace-nowrap",
-                    isOffWork
-                      ? "border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
-                      : "border-emerald-300 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60"
-                  )}
-                  title={isOffWork ? "ขณะนี้เลิกงานแล้ว (คลิกเพื่อเข้างาน)" : "ขณะนี้เข้างานอยู่ (คลิกเพื่อบันทึกเลิกงาน)"}
-                >
-                  <span className={clsx(
-                    "w-2 h-2 rounded-full shrink-0",
-                    isOffWork ? "bg-slate-400" : "bg-emerald-500 animate-pulse"
-                  )} />
-                  <span className="hidden xl:inline">
-                    {isOffWork ? 'เลิกงานแล้ว' : 'เข้างานอยู่'}
-                  </span>
-                  <span className="hidden md:inline xl:hidden">
-                    {isOffWork ? 'เลิกงาน' : 'เข้างาน'}
-                  </span>
-                </button>
-              )}
-
-              {/* Current Member Badge (Click to customize avatar) */}
-              <div className="flex items-center pl-1 border-l border-slate-200 dark:border-slate-800 shrink-0">
+              {/* Dark Mode Toggle */}
+              <button
+                type="button"
+                onClick={toggleDarkMode}
+                className="w-9 h-9 rounded-xl border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center justify-center cursor-pointer shrink-0"
+                title={isDarkMode ? 'เปลี่ยนเป็นโหมดสว่าง' : 'เปลี่ยนเป็นโหมดมืด'}
+                aria-label="Toggle Dark Mode"
+              >
+                {isDarkMode ? (
+                  <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+                ) : (
+                  <Moon className="w-4 h-4 text-slate-600 shrink-0" />
+                )}
+              </button>
+ 
+              {/* Current Member Badge */}
+              <div className="flex items-center pl-1.5 sm:pl-2 border-l border-slate-200/80 dark:border-slate-800 shrink-0 gap-1">
                 <button
                   id="open-avatar-selector-btn"
                   type="button"
                   onClick={() => setShowAvatarModal(true)}
-                  className="group relative flex items-center p-0.5 sm:p-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/80 transition cursor-pointer text-left focus:outline-hidden focus:ring-2 focus:ring-amber-500/50 shrink-0"
+                  className="group relative flex items-center gap-2 p-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/80 transition cursor-pointer text-left shrink-0"
                   title="คลิกเพื่อเปลี่ยนรูปตัวการ์ตูนประจำตัว"
                 >
                   <div className="relative shrink-0">
@@ -778,32 +731,24 @@ export function Layout() {
                       name={user?.name || 'User'} 
                       size="sm" 
                     />
-                    <span 
-                      className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-500 text-white flex items-center justify-center opacity-80 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shadow-xs text-[8px]"
-                      title="เปลี่ยนรูปตัวการ์ตูน"
-                    >
-                      ✏️
-                    </span>
                   </div>
-                  <div className="hidden xl:block text-left ml-1.5 mr-1 shrink-0">
-                    <div className="flex items-center space-x-1 whitespace-nowrap">
-                      <span className="text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[90px] group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
-                        {user?.name}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center whitespace-nowrap">
-                      <span>@{user?.username || 'member'}</span>
-                    </div>
+                  <div className="hidden lg:block text-left mr-1 shrink-0">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[100px] block leading-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                      {user?.name}
+                    </span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 block leading-tight">
+                      @{user?.username || 'member'}
+                    </span>
                   </div>
                 </button>
  
                 <button
                   type="button"
                   onClick={logout}
-                  className="p-1.5 sm:p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition cursor-pointer shrink-0 ml-0.5"
+                  className="hidden md:flex w-9 h-9 items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition cursor-pointer shrink-0"
                   title="สลับผู้ใช้ / ออกจากระบบ"
                 >
-                  <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                  <LogOut className="w-4 h-4 shrink-0" />
                 </button>
               </div>
             </div>
@@ -812,7 +757,7 @@ export function Layout() {
       </nav>
 
       {/* Main Page Area */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 pb-28 md:py-7">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 pb-28 md:py-6">
         <Outlet />
       </main>
 

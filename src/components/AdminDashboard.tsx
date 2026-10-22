@@ -482,44 +482,41 @@ export function AdminDashboard() {
   });
 
   return (
-    <div className="space-y-5 sm:space-y-7 max-w-7xl mx-auto">
-      {/* Top Header - Accessible to Everyone */}
-      <div className="flex flex-col gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto">
+      {/* Top Header - Clean Card Surface */}
+      <div className="bg-white dark:bg-slate-900 p-4 sm:px-5 sm:py-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3.5">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
-            <div className="flex items-center space-x-2">
-              <Logo size="sm" />
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center">
-                {mainTab === 'cases' 
-                  ? 'แดชบอร์ดและสถิติภาพรวม' 
-                  : mainTab === 'ot' 
-                  ? 'แดชบอร์ด OT พนักงานทุกคน' 
-                  : mainTab === 'advance' 
-                  ? 'แดชบอร์ดขอเบิกเงินแอดวานซ์ พนักงานทุกคน'
-                  : 'API ยืนยันรหัสเคสสำหรับเว็บหลัก'}
-              </h1>
-            </div>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 sm:mt-1">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+              {mainTab === 'cases' 
+                ? 'แดชบอร์ดและสถิติภาพรวม' 
+                : mainTab === 'ot' 
+                ? 'แดชบอร์ด OT พนักงานทุกคน' 
+                : mainTab === 'advance' 
+                ? 'แดชบอร์ดขอเบิกเงินแอดวานซ์'
+                : 'API ยืนยันรหัสเคสสำหรับเว็บหลัก'}
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               {mainTab === 'cases'
-                ? 'สรุปข้อมูลการดำเนินงาน สถิติปิดเคส และตารางอันดับผลงาน (ระบบตัดรอบเวลาเที่ยงคืน 00:00 - 23:59 น.)'
+                ? 'สรุปผลการดำเนินงาน สถิติปิดเคส และตารางอันดับผลงาน (ตัดรอบเวลาเที่ยงคืน 00:00 - 23:59 น.)'
                 : mainTab === 'ot'
-                ? 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติ สรุปยอดชั่วโมง OT รายบุคคล และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
+                ? 'ตรวจอนุมัติ สรุปยอดชั่วโมง OT รายบุคคล และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
                 : mainTab === 'advance'
-                ? 'แดชบอร์ดแอดมินสำหรับตรวจอนุมัติเบิกเงิน โอนเงิน แนบสลิปหลักฐาน และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
+                ? 'ตรวจอนุมัติเบิกเงิน โอนเงิน แนบสลิปหลักฐาน และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
                 : 'จัดการ API Key ตรวจสอบความถูกต้องของเคส และทดสอบการเชื่อมต่อ API กับเว็บหลัก'}
             </p>
           </div>
 
           {/* Action Modals and Tab Switchers */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Main Section Switcher: แดชบอร์ดเคส vs แดชบอร์ด OT vs แดชบอร์ดแอดวานซ์ vs API เว็บหลัก (Admin Only) */}
+            {/* Main Section Switcher (Admin Only) */}
             {isAdmin ? (
-              <div className="flex items-center p-1 bg-slate-200/80 dark:bg-slate-800 rounded-xl overflow-x-auto max-w-full">
+              <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/70 dark:border-slate-700/60 overflow-x-auto max-w-full">
                 <button
                   type="button"
                   onClick={() => setMainTab('cases')}
                   className={clsx(
-                    "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0",
                     mainTab === 'cases'
                       ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
@@ -533,7 +530,7 @@ export function AdminDashboard() {
                   type="button"
                   onClick={() => setMainTab('ot')}
                   className={clsx(
-                    "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
                     mainTab === 'ot'
                       ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
@@ -542,7 +539,7 @@ export function AdminDashboard() {
                   <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                   <span>OT</span>
                   {pendingOTCount > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs animate-pulse">
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white tabular-nums">
                       {pendingOTCount}
                     </span>
                   )}
@@ -552,7 +549,7 @@ export function AdminDashboard() {
                   type="button"
                   onClick={() => setMainTab('advance')}
                   className={clsx(
-                    "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
                     mainTab === 'advance'
                       ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
@@ -561,7 +558,7 @@ export function AdminDashboard() {
                   <Banknote className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <span>แอดวานซ์</span>
                   {pendingAdvanceCount > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-2xs animate-pulse">
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-600 text-white tabular-nums">
                       {pendingAdvanceCount}
                     </span>
                   )}
@@ -571,7 +568,7 @@ export function AdminDashboard() {
                   type="button"
                   onClick={() => setMainTab('api')}
                   className={clsx(
-                    "px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
                     mainTab === 'api'
                       ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-2xs"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
@@ -582,33 +579,11 @@ export function AdminDashboard() {
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-bold text-indigo-700 dark:text-indigo-300 shadow-2xs">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/80 rounded-xl text-xs font-bold text-indigo-700 dark:text-indigo-300">
                 <BarChart3 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <span>ภาพรวมเคส & สถิติผลงาน</span>
               </div>
             )}
-
-            <button
-              type="button"
-              onClick={() => setShowTechModal(true)}
-              className={clsx(
-                "px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap",
-                pendingTechCount > 0
-                  ? "bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-100"
-                  : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-              )}
-              title="ดูรายการแจ้งปัญหาด้านเทคนิค"
-            >
-              <Wrench className="w-3.5 h-3.5 text-rose-500" />
-              <span>ปัญหาเทคนิค</span>
-              {pendingTechCount > 0 ? (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-bold animate-pulse">
-                  รอแก้ {pendingTechCount}
-                </span>
-              ) : (
-                <span className="text-[10px] text-slate-400 font-normal">(ปกติ)</span>
-              )}
-            </button>
 
             {/* User Management & Pending Approvals */}
             {isAdmin && (
@@ -616,60 +591,59 @@ export function AdminDashboard() {
                 type="button"
                 onClick={() => setShowUserModal(true)}
                 className={clsx(
-                  "px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap",
+                  "h-9 px-3 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap tabular-nums",
                   registeredUsers.some(u => u.accountStatus === 'pending')
                     ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100"
-                    : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                    : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
                 )}
                 title="จัดการบัญชีพนักงานและอนุมัติผู้สมัครใหม่"
               >
                 <Users className="w-3.5 h-3.5 text-indigo-500" />
-                <span>พนักงาน & อนุมัติ</span>
+                <span>จัดการพนักงาน</span>
                 {registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-extrabold animate-pulse">
-                    รออนุมัติ {registeredUsers.filter(u => u.accountStatus === 'pending').length}
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-bold">
+                    {registeredUsers.filter(u => u.accountStatus === 'pending').length}
                   </span>
                 )}
               </button>
             )}
 
-            {/* รายชื่อแมสเซนเจอร์ (Thunder Cloud) */}
             <button
               type="button"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('open-messenger-modal', { detail: { province: 'all' } }));
-              }}
-              className="px-3 py-1.5 rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 hover:bg-sky-100 hover:text-sky-800 dark:hover:bg-sky-900 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
-              title="ดูรายชื่อและเบอร์โทรแมสเซนเจอร์ทั้งหมด (Thunder Cloud + แมสใหม่)"
+              onClick={() => setShowTechModal(true)}
+              className={clsx(
+                "h-9 px-3 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap tabular-nums",
+                pendingTechCount > 0
+                  ? "bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-100"
+                  : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+              )}
+              title="ดูรายการแจ้งปัญหาด้านเทคนิค"
             >
-              <Bike className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-              <span>รายชื่อแมส</span>
-            </button>
-
-            {/* QR Code พนักงาน (โอนเงินคืน / ฝากซื้อของ) */}
-            <button
-              type="button"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('open-employee-qr-modal', { detail: { tab: 'directory' } }));
-              }}
-              className="px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs whitespace-nowrap"
-              title="ดู QR Code พนักงานสำหรับสแกนโอนเงินคืน / ฝากซื้อของ"
-            >
-              <QrCode className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>QR พนักงาน</span>
+              <Wrench className="w-3.5 h-3.5 text-rose-500" />
+              <span>ปัญหาเทคนิค</span>
+              {pendingTechCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-bold">
+                  {pendingTechCount}
+                </span>
+              )}
             </button>
           </div>
+        </div>
 
-          {/* Timeframe Presets - Only for cases dashboard */}
-          {mainTab === 'cases' && (
-            <div className="flex items-center flex-wrap gap-1 bg-slate-200/80 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+        {/* Timeframe Presets - Only for cases dashboard */}
+        {mainTab === 'cases' && (
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              ช่วงเวลาที่แสดงผล:
+            </span>
+            <div className="flex items-center flex-wrap gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
               <button
                 type="button"
                 onClick={() => setTimeFilter('today')}
                 className={clsx(
-                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  "px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap tabular-nums",
                   timeFilter === 'today' 
-                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold" 
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
@@ -680,9 +654,9 @@ export function AdminDashboard() {
                 type="button"
                 onClick={() => setTimeFilter('yesterday')}
                 className={clsx(
-                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  "px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
                   timeFilter === 'yesterday' 
-                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold" 
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
@@ -693,9 +667,9 @@ export function AdminDashboard() {
                 type="button"
                 onClick={() => setTimeFilter('last7days')}
                 className={clsx(
-                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  "px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
                   timeFilter === 'last7days' 
-                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold" 
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
@@ -706,9 +680,9 @@ export function AdminDashboard() {
                 type="button"
                 onClick={() => setTimeFilter('thisMonth')}
                 className={clsx(
-                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  "px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
                   timeFilter === 'thisMonth' 
-                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold" 
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
@@ -719,9 +693,9 @@ export function AdminDashboard() {
                 type="button"
                 onClick={() => setTimeFilter('custom')}
                 className={clsx(
-                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap flex items-center gap-1",
+                  "px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap flex items-center gap-1",
                   timeFilter === 'custom' 
-                    ? "bg-indigo-600 text-white shadow-xs font-bold" 
+                    ? "bg-indigo-600 text-white shadow-2xs font-bold" 
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
@@ -733,21 +707,21 @@ export function AdminDashboard() {
                 type="button"
                 onClick={() => setTimeFilter('all')}
                 className={clsx(
-                  "px-2.5 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap",
+                  "px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap tabular-nums",
                   timeFilter === 'all' 
-                    ? "bg-white dark:bg-slate-700 text-indigo-700 dark:text-white shadow-xs font-bold" 
+                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold" 
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
                 ทั้งหมด ({cases.length})
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Custom Date Range Selector (Midnight Cutoff) */}
         {mainTab === 'cases' && timeFilter === 'custom' && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-2xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-xl">
             <div className="flex items-center gap-2 text-xs text-indigo-900 dark:text-indigo-200">
               <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
               <span className="font-medium">
@@ -756,7 +730,7 @@ export function AdminDashboard() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+              <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs">
                 <span className="text-slate-400">จาก:</span>
                 <input
                   type="date"
@@ -768,7 +742,7 @@ export function AdminDashboard() {
 
               <span className="text-slate-400 text-xs">ถึง</span>
 
-              <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
+              <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs">
                 <span className="text-slate-400">ถึง:</span>
                 <input
                   type="date"
@@ -784,15 +758,15 @@ export function AdminDashboard() {
 
       {/* Pending Approvals Alert Banner for Admins */}
       {isAdmin && registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
-        <div className="p-4 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border border-amber-300 dark:border-amber-700/80 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs animate-in slide-in-from-top-2 duration-200">
+        <div className="p-4 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/60 border border-amber-300 dark:border-amber-700 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
-              <ShieldAlert className="w-5 h-5 animate-bounce" />
+              <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
               <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <span>มีผู้สมัครใหม่รอการอนุมัติ</span>
-                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-white">
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-white tabular-nums">
                   {registeredUsers.filter(u => u.accountStatus === 'pending').length} บัญชี
                 </span>
               </h4>
@@ -804,7 +778,7 @@ export function AdminDashboard() {
           <button
             type="button"
             onClick={() => setShowUserModal(true)}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <UserCheck className="w-4 h-4" />
             <span>ตรวจและอนุมัติทันที ({registeredUsers.filter(u => u.accountStatus === 'pending').length})</span>
@@ -822,182 +796,163 @@ export function AdminDashboard() {
       ) : (
         <>
           {/* OVERVIEW STAT CARDS (Focused on Cases & Results) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2.5 sm:gap-3 tabular-nums">
         {/* Closed Cases */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">จบเคสแล้ว (สำเร็จ)</span>
-            <span className="p-1 sm:p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-            </span>
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">จบเคสแล้ว</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-              {closedCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">
+              {closedCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">
-              {filteredCases.length > 0 ? Math.round((closedCases.length / filteredCases.length) * 100) : 0}% สำเร็จ
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">
+              สำเร็จ {filteredCases.length > 0 ? Math.round((closedCases.length / filteredCases.length) * 100) : 0}%
             </p>
           </div>
         </div>
 
-        {/* Average Time to Close Cases (สถิติเวลาเฉลี่ยจบเคสทั้งหมด) */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-indigo-200/80 dark:border-indigo-900/60 p-2 sm:p-3 transition-colors bg-gradient-to-br from-white via-indigo-50/20 to-indigo-50/40 dark:from-slate-900 dark:via-indigo-950/20 dark:to-indigo-950/30">
+        {/* Average Time to Close Cases */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-indigo-200/80 dark:border-indigo-900/60 p-3 sm:p-3.5 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-[11px] font-medium text-indigo-700 dark:text-indigo-300">เฉลี่ยจบเคสทั้งหมด</span>
-            <span className="p-1 sm:p-1.5 rounded-lg bg-indigo-100/80 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
-              <Timer className="w-3.5 h-3.5" />
-            </span>
+            <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">เวลาเฉลี่ยจบเคส</span>
+            <Timer className="w-4 h-4 text-indigo-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-indigo-700 dark:text-indigo-300 tracking-tight">
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 tracking-tight">
               {overallTimeStats.averageFormatted}
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1" title={`สถิติเวลาจาก ${overallTimeStats.count} เคส: เร็วสุด ${overallTimeStats.minFormatted} • ช้าสุด ${overallTimeStats.maxFormatted}`}>
-              {overallTimeStats.count > 0 ? `เร็วสุด ${overallTimeStats.minFormatted} • นานสุด ${overallTimeStats.maxFormatted}` : 'รอข้อมูลจบเคส'}
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1" title={`สถิติเวลาจาก ${overallTimeStats.count} เคส: เร็วสุด ${overallTimeStats.minFormatted} · ช้าสุด ${overallTimeStats.maxFormatted}`}>
+              {overallTimeStats.count > 0 ? `เร็วสุด ${overallTimeStats.minFormatted}` : 'รอข้อมูลจบเคส'}
             </p>
           </div>
         </div>
 
         {/* New Cases (ยังไม่มีใครรับ) */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">เคสใหม่ (รอรับ)</span>
-            <span className="p-1 sm:p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
-              <Clock className="w-3.5 h-3.5" />
-            </span>
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">เคสใหม่รอรับ</span>
+            <Clock className="w-4 h-4 text-indigo-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-indigo-600 dark:text-indigo-400">
-              {newCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
+              {newCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">ยังไม่มีใครรับ</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">ยังไม่มีผู้รับ</p>
           </div>
         </div>
 
         {/* Stuck Cases (เคสค้าง) */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-amber-200/80 dark:border-amber-900/60 p-2 sm:p-3 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-[11px] font-medium text-amber-600 dark:text-amber-400">เคสค้าง</span>
-            <span className="p-1 sm:p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
-              <StickyNote className="w-3.5 h-3.5" />
-            </span>
+            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">เคสค้าง</span>
+            <StickyNote className="w-4 h-4 text-amber-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-amber-600 dark:text-amber-400">
-              {stuckCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-extrabold text-amber-600 dark:text-amber-400">
+              {stuckCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-amber-600/80 dark:text-amber-400/80 mt-0.5 line-clamp-1">ติดหมายเหตุ/เคยรับแล้ว</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">ติดหมายเหตุ/ค้าง</p>
           </div>
         </div>
 
         {/* Active In-Progress Cases */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">กำลังทำเคส</span>
-            <span className="p-1 sm:p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
-              <Search className="w-3.5 h-3.5" />
-            </span>
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">กำลังทำเคส</span>
+            <Search className="w-4 h-4 text-blue-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-600 dark:text-blue-400">
-              {activeCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-extrabold text-blue-600 dark:text-blue-400">
+              {activeCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">มีพนักงานดูแลอยู่</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">มีพนักงานดูแลอยู่</p>
           </div>
         </div>
 
         {/* Cases with Contract */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-sky-200/80 dark:border-sky-900/60 p-2 sm:p-3 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-[11px] font-medium text-sky-600 dark:text-sky-400">มีเลขสัญญา</span>
-            <span className="p-1 sm:p-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400">
-              <FileSignature className="w-3.5 h-3.5" />
-            </span>
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">มีเลขสัญญา</span>
+            <FileSignature className="w-4 h-4 text-sky-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-sky-600 dark:text-sky-400">
-              {contractedCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-extrabold text-sky-600 dark:text-sky-400">
+              {contractedCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-sky-600/80 dark:text-sky-400/80 mt-0.5 line-clamp-1">ระบุสัญญาเรียบร้อย</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">ระบุสัญญาแล้ว</p>
           </div>
         </div>
 
         {/* Cancelled Cases */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">ยกเลิกเคส</span>
-            <span className="p-1 sm:p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
-              <Ban className="w-3.5 h-3.5" />
-            </span>
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">ยกเลิกเคส</span>
+            <Ban className="w-4 h-4 text-rose-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-rose-600 dark:text-rose-400">
-              {cancelledCases.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">เคส</span>
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-extrabold text-rose-600 dark:text-rose-400">
+              {cancelledCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
             </div>
-            <div className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1">
-              <span>เคสที่ถูกยกเลิก</span>
-              {cancelledCases.filter(c => c.remarks?.includes(AUTO_CANCEL_REMARK)).length > 0 && (
-                <span className="text-rose-600 dark:text-rose-400 font-medium">
-                  (เกิน 3 วัน {cancelledCases.filter(c => c.remarks?.includes(AUTO_CANCEL_REMARK)).length})
-                </span>
-              )}
-            </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">
+              {cancelledCases.filter(c => c.remarks?.includes(AUTO_CANCEL_REMARK)).length > 0
+                ? `เกิน 3 วัน (${cancelledCases.filter(c => c.remarks?.includes(AUTO_CANCEL_REMARK)).length})`
+                : 'เคสที่ถูกยกเลิก'}
+            </p>
           </div>
         </div>
 
         {/* Total Employees */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xs border border-slate-200/80 dark:border-slate-800 p-2 sm:p-3 transition-colors">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] sm:text-[11px] font-medium text-slate-500 dark:text-slate-400">พนักงานในระบบ</span>
-            <span className="p-1 sm:p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-              <Users className="w-3.5 h-3.5" />
-            </span>
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">พนักงาน</span>
+            <Users className="w-4 h-4 text-slate-500 shrink-0" />
           </div>
-          <div className="mt-1.5 sm:mt-2">
-            <div className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-900 dark:text-white">
-              {allEmployees.length} <span className="text-[10px] sm:text-xs font-normal text-slate-400">คน</span>
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
+              {allEmployees.length} <span className="text-xs font-medium text-slate-400">คน</span>
             </div>
-            <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">รวมทีมงานทั้งหมด</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">ทีมงานทั้งหมด</p>
           </div>
         </div>
       </div>
 
       {/* LOWER SECTION: PERFORMANCE LEADERBOARD & RECENT COMPLETED */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: Employee Leaderboard */}
-        <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-slate-200/80 dark:border-slate-800 overflow-hidden transition-colors">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden transition-colors">
           <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center">
                 <Users className="w-4 h-4 mr-2 text-indigo-600 dark:text-indigo-400" />
-                ตารางผลงาน & เวลาทำงานต่อเคส (Performance & Speed)
+                ตารางผลงาน & เวลาทำงานต่อเคส
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {leaderboardSortBy === 'closed'
                   ? 'เรียงตามจำนวนเคสที่ปิดได้สำเร็จ'
                   : leaderboardSortBy === 'speed_fast'
-                  ? '⚡ เรียงตามพนักงานที่ทำเคสเร็วที่สุด (เฉลี่ยน้อยสุด)'
-                  : '⏱️ เรียงตามพนักงานที่ใช้เวลาทำงานนานที่สุดต่อเคส'}
+                  ? 'เรียงตามพนักงานที่ทำเคสเร็วที่สุด (เฉลี่ยน้อยสุด)'
+                  : 'เรียงตามพนักงานที่ใช้เวลาทำงานนานที่สุดต่อเคส'}
               </p>
             </div>
             
             <div className="flex flex-wrap items-center gap-2">
               {/* Sort selector */}
-              <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700 text-xs shadow-2xs">
+              <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 border border-slate-200/70 dark:border-slate-700/60 text-xs">
                 <button
                   type="button"
                   onClick={() => setLeaderboardSortBy('closed')}
                   className={clsx(
                     "px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1",
                     leaderboardSortBy === 'closed'
-                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                   )}
                   title="เรียงตามจำนวนเคสที่ปิดได้สำเร็จ"
                 >
                   <CheckCircle className="w-3 h-3" />
-                  <span>ปิดเคสมากสุด</span>
+                  <span>ปิดมากสุด</span>
                 </button>
                 <button
                   type="button"
@@ -1005,13 +960,13 @@ export function AdminDashboard() {
                   className={clsx(
                     "px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1",
                     leaderboardSortBy === 'speed_fast'
-                      ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-2xs"
+                      ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-2xs font-bold"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                   )}
                   title="เรียงตามพนักงานที่ทำเคสเร็วที่สุด (เฉลี่ยน้อยสุด)"
                 >
                   <Zap className="w-3 h-3 text-amber-500" />
-                  <span>เร็วสุด ⚡</span>
+                  <span>เร็วสุด</span>
                 </button>
                 <button
                   type="button"
@@ -1019,13 +974,13 @@ export function AdminDashboard() {
                   className={clsx(
                     "px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer flex items-center gap-1",
                     leaderboardSortBy === 'speed_slow'
-                      ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs"
+                      ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs font-bold"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
                   )}
                   title="ดูว่าใครใช้เวลาทำงานนานที่สุดต่อเคส"
                 >
                   <Clock className="w-3 h-3 text-amber-500" />
-                  <span>ทำงานนานสุดต่อเคส ⏱️</span>
+                  <span>นานสุด</span>
                 </button>
               </div>
 
@@ -1034,41 +989,26 @@ export function AdminDashboard() {
                 type="button"
                 onClick={() => setShowTimeAnalytics(!showTimeAnalytics)}
                 className={clsx(
-                  "px-2.5 py-1 text-xs font-semibold rounded-xl border transition flex items-center gap-1 cursor-pointer shadow-2xs",
+                  "px-2.5 py-1.5 text-xs font-semibold rounded-xl border transition flex items-center gap-1 cursor-pointer",
                   showTimeAnalytics
-                    ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                    ? "bg-indigo-600 text-white border-indigo-600"
                     : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50"
                 )}
                 title="เปิด/ปิดตารางวิเคราะห์เวลาทำงานต่อเคสรายบุคคล"
               >
-                <Timer className="w-3 h-3" />
-                <span>{showTimeAnalytics ? 'ซ่อนตารางเวลา' : 'ตารางเวลาต่อเคส'}</span>
+                <Timer className="w-3.5 h-3.5" />
+                <span>{showTimeAnalytics ? 'ซ่อนตารางเวลา' : 'ตารางเวลา'}</span>
               </button>
-
-              <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg">
-                {sortedLeaderboard.length} คน
-              </span>
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => setShowUserModal(true)}
-                  className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition flex items-center gap-1 cursor-pointer"
-                  title="จัดการและลบบัญชีพนักงาน"
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>จัดการบัญชี</span>
-                </button>
-              )}
             </div>
           </div>
 
-          {/* Detailed Time Analytics Table (ใครทำงานนานต่อเคสเท่าไร) */}
+          {/* Detailed Time Analytics Table */}
           {showTimeAnalytics && (
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 overflow-x-auto animate-in slide-in-from-top-2 duration-150">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 overflow-x-auto animate-in slide-in-from-top-2 duration-150 tabular-nums">
               <div className="flex items-center justify-between mb-2.5">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
                   <Gauge className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  <span>สรุปเวลาทำงานต่อเคสรายบุคคล (ใครทำงานนานเท่าไร):</span>
+                  <span>สรุปเวลาทำงานต่อเคสรายบุคคล:</span>
                 </div>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                   เฉลี่ยรวมทั้งทีม: <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{overallTimeStats.averageFormatted}</strong> (จาก {overallTimeStats.count} เคส)
@@ -1114,7 +1054,7 @@ export function AdminDashboard() {
             </div>
           )}
 
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
             {sortedLeaderboard.length === 0 ? (
               <div className="py-12 text-center text-slate-400 dark:text-slate-500 text-sm">
                 ยังไม่มีข้อมูลผลงานพนักงานในช่วงเวลานี้
@@ -1124,8 +1064,8 @@ export function AdminDashboard() {
                 const isMe = user && (employee.uid === user.uid || employee.username === user.username);
                 return (
                 <div key={employee.uid} className={clsx(
-                  "px-5 py-3.5 flex items-center justify-between transition",
-                  isMe ? "bg-indigo-50/80 dark:bg-indigo-950/50 border-l-4 border-indigo-600" : "hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
+                  "px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition",
+                  isMe ? "bg-indigo-50/50 dark:bg-indigo-950/30 ring-1 ring-inset ring-indigo-500/20" : "hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
                 )}>
                   <div className="flex items-center min-w-0">
                     <div className="mr-3 shrink-0 relative">
@@ -1140,40 +1080,38 @@ export function AdminDashboard() {
                       </span>
                     </div>
                     <div className="truncate">
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
+                      <p className="text-sm font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
                         {employee.name}
                         {isMe && (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-indigo-600 text-white font-bold shadow-xs">
+                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-indigo-600 text-white font-bold">
                             คุณ
                           </span>
                         )}
-                        {/* ซ่อนคำว่า แอดมิน ตามคำขอ */}
                         {isBusy ? (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-normal">
+                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/80 font-semibold">
                             กำลังทำ {activeCases.length} งาน
                           </span>
                         ) : (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-normal">
-                            ว่างงาน
+                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/80 font-semibold">
+                            ว่าง
                           </span>
                         )}
                       </p>
                       <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-2 mt-0.5">
-                        <span>รหัส: @{employee.username}</span>
+                        <span>@{employee.username}</span>
                         {cancelledCount > 0 && (
-                          <span className="text-rose-500 dark:text-rose-400">ยกเลิก: {cancelledCount}</span>
+                          <span className="text-rose-500 dark:text-rose-400">· ยกเลิก {cancelledCount}</span>
                         )}
                         {timeStats && timeStats.count > 0 && (
                           <span className="text-slate-400 dark:text-slate-500 hidden sm:inline">
-                            • รวมเวลาทำเคส: {formatDurationThai(timeStats.totalMs, { compact: true })}
+                            · รวมเวลา {formatDurationThai(timeStats.totalMs, { compact: true })}
                           </span>
                         )}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-2 shrink-0">
-                    {/* Time efficiency badge per employee (ใครทำงานนานต่อเคสเท่าไร) */}
+                  <div className="flex items-center justify-end gap-2 shrink-0">
                     {timeStats && timeStats.count > 0 ? (
                       <span 
                         className={clsx(
@@ -1184,7 +1122,7 @@ export function AdminDashboard() {
                             ? "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800"
                             : "bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
                         )}
-                        title={`เวลาเฉลี่ยต่อเคส: ${timeStats.averageFormatted} (เร็วสุด ${timeStats.minFormatted} • ช้าสุด ${timeStats.maxFormatted} • เวลารวมทำเคส ${formatDurationThai(timeStats.totalMs)})`}
+                        title={`เวลาเฉลี่ยต่อเคส: ${timeStats.averageFormatted} (เร็วสุด ${timeStats.minFormatted} · ช้าสุด ${timeStats.maxFormatted})`}
                       >
                         <Clock className="w-3 h-3 text-indigo-500 shrink-0" />
                         <span>เฉลี่ย <strong className="font-bold">{timeStats.averageFormatted}</strong>/เคส</span>

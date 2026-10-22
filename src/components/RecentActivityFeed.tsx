@@ -151,43 +151,39 @@ export const RecentActivityFeed: React.FC = () => {
       {/* Real-time Ticker Bar */}
       <div 
         id="recent-activity-ticker"
-        className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-2 sm:px-3.5 sm:py-2 shadow-2xs flex items-center justify-between gap-2.5 transition-colors"
+        className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between gap-3 transition-colors"
       >
-        <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {/* Live indicator dot */}
-          <div className="flex items-center space-x-1.5 shrink-0">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 hidden sm:inline">
+              ล่าสุด:
             </span>
-            <div className="flex items-center gap-1 text-[11px] sm:text-xs font-bold text-slate-800 dark:text-slate-200">
-              <Activity className="w-3.5 h-3.5 text-indigo-500 hidden xs:inline" />
-              <span>กิจกรรมล่าสุด:</span>
-            </div>
           </div>
 
           {/* Latest Item Summary */}
           {latest ? (
-            <div className="flex items-center space-x-2 min-w-0 text-xs truncate">
+            <div className="flex items-center gap-2 min-w-0 text-xs truncate">
               <AnimalAvatar
                 identifier={latest.actorId}
                 name={latest.actorName}
                 avatarEmoji={latest.actorAvatarEmoji}
                 size="xs"
               />
-              <span className="font-semibold text-slate-900 dark:text-white shrink-0">
+              <span className="font-bold text-slate-900 dark:text-white shrink-0">
                 {latest.actorName}
               </span>
-              <span className="text-slate-500 dark:text-slate-400 truncate">
+              <span className="text-slate-600 dark:text-slate-400 truncate">
                 {latest.description}
               </span>
-              <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 hidden md:inline">
-                • {formatDistanceToNow(latest.timestamp, { addSuffix: true, locale: th })}
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 shrink-0 hidden md:inline">
+                · {formatDistanceToNow(latest.timestamp, { addSuffix: true, locale: th })}
               </span>
             </div>
           ) : (
-            <span className="text-xs text-slate-400 italic truncate">
-              ยังไม่มีกิจกรรมใหม่เกิดขึ้นในระบบ
+            <span className="text-xs text-slate-400 truncate">
+              ยังไม่มีกิจกรรมใหม่ในระบบ
             </span>
           )}
         </div>
@@ -196,9 +192,9 @@ export const RecentActivityFeed: React.FC = () => {
         <button
           type="button"
           onClick={() => setIsExpanded(true)}
-          className="shrink-0 px-2.5 py-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-xl transition flex items-center gap-1 cursor-pointer"
+          className="shrink-0 px-2.5 py-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-lg transition flex items-center gap-1 cursor-pointer tabular-nums"
         >
-          <span>ดูทั้งหมด ({activities.length})</span>
+          <span>ประวัติ ({activities.length})</span>
           <ChevronRight className="w-3.5 h-3.5" />
         </button>
       </div>
