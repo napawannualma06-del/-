@@ -6,7 +6,8 @@ import {
   doc, 
   getDoc, 
   writeBatch, 
-  updateDoc 
+  updateDoc,
+  addDoc
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { CreditCheckDuty, UserProfile, Case } from '../types';
@@ -18,16 +19,21 @@ export interface ShiftActionResult {
   message: string;
 }
 
+export const AUTO_CLOCKOUT_INACTIVITY_MS = 2 * 60 * 60 * 1000; // 2 hours in ms
+
 /**
- * บันทึก "เลิกงาน" สำหรับพนักงาน:
+ * บันทึก "เลิกงาน" สำหรับพนักงาน (ทั้งแบบปกติและระบบออกงานอัตโนมัติ):
  * 1. ดึงเคสทั้งหมดที่พนักงานกำลังทำอยู่ (status = 'processing' หรือ 'credit_check')
  * 2. ปรับสถานะเคสเหล่านั้นทั้งหมดกลับเป็น "รอรับเคส" (status = 'pending') พร้อมเคลียร์ผู้รับผิดชอบ
  * 3. ปลดพนักงานออกจากเวรเช็คเครดิต (ถ้ามี)
  * 4. ปรับสถานะพนักงานเป็น 'off_work' ใน users/{uid}
+ * 5. บันทึกประวัติ Activity Log แจ้งเตือนทีมงาน
  */
 export async function clockOutEmployee(
   employeeId: string, 
-  employeeName?: string
+  employeeName?: string,
+  reason: string = 'พนักงานออกงาน/เลิกงาน',
+  isAuto: boolean = false
 ): Promise<ShiftActionResult> {
   if (!employeeId) {
     return {
@@ -39,7 +45,6 @@ export async function clockOutEmployee(
   }
 
   try {
-    const batch = writeBatch(db);
     const now = Date.now();
     const returnedCaseIds: string[] = [];
 
@@ -77,9 +82,11 @@ export async function clockOutEmployee(
 
     // 2. คืนเคสทั้งหมดกลับไปเป็น "รอรับเคส" (status: 'pending')
     const caseEntries = Array.from(activeDocs.entries());
-    
-    // Firestore batch limit is 500 operations. We chunk cases into batches of 400.
     const CHUNK_SIZE = 400;
+    const actorLabel = isAuto 
+      ? 'ระบบออกงานอัตโนมัติ (ไม่มีการเคลื่อนไหวเกิน 2 ชม.)'
+      : (employeeName || 'พนักงานเลิกงาน');
+
     for (let i = 0; i < caseEntries.length; i += CHUNK_SIZE) {
       const chunk = caseEntries.slice(i, i + CHUNK_SIZE);
       const chunkBatch = writeBatch(db);
@@ -89,7 +96,10 @@ export async function clockOutEmployee(
         returnedCaseIds.push(caseId);
         
         const currentRemarks = caseData.remarks ? `${caseData.remarks} | ` : '';
-        const rawRemarks = `${currentRemarks}[พนักงานเลิกงาน: ส่งกลับไปรอรับเคส]`;
+        const remarkTag = isAuto
+          ? '[ระบบออกงานอัตโนมัติ (ไม่มีการเคลื่อนไหวเกิน 2 ชม.): ส่งกลับไปรอรับเคส]'
+          : '[พนักงานเลิกงาน: ส่งกลับไปรอรับเคส]';
+        const rawRemarks = `${currentRemarks}${remarkTag}`;
         const safeRemarks = rawRemarks.length > 4500 ? rawRemarks.slice(-4500) : rawRemarks;
         
         const updatePayload: Record<string, unknown> = {
@@ -101,15 +111,15 @@ export async function clockOutEmployee(
           previousAssigneeName: caseData.assigneeName || employeeName || '',
           previousAssigneeId: caseData.assigneeId || employeeId || '',
           stuckAt: now,
-          stuckBy: employeeName || 'พนักงานเลิกงาน',
-          stuckReason: 'พนักงานออกงาน/เลิกงาน',
+          stuckBy: actorLabel,
+          stuckReason: isAuto ? 'ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง' : reason,
           returnedAt: now,
-          returnedBy: employeeName || 'พนักงานเลิกงาน',
-          returnedReason: 'พนักงานออกงาน/เลิกงาน',
+          returnedBy: actorLabel,
+          returnedReason: isAuto ? 'ระบบออกงานอัตโนมัติ (ไม่มีการเคลื่อนไหวเกิน 2 ชม.)' : reason,
           updatedAt: now,
           remarks: safeRemarks,
           remarksUpdatedAt: now,
-          remarksUpdatedBy: 'ระบบจัดการกะ',
+          remarksUpdatedBy: isAuto ? 'ระบบออกงานอัตโนมัติ' : 'ระบบจัดการกะ',
         };
         
         chunkBatch.update(caseDocRef, updatePayload);
@@ -132,6 +142,7 @@ export async function clockOutEmployee(
     await updateDoc(userDocRef, {
       workStatus: 'off_work',
       offWorkAt: now,
+      autoClockOutReason: isAuto ? (reason || 'ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง') : null,
       updatedAt: now,
     });
 
@@ -159,6 +170,21 @@ export async function clockOutEmployee(
       console.warn('Could not remove worker from credit check duty on clock out', e);
     }
 
+    // 5. บันทึกกิจกรรมลง Activity Log
+    try {
+      await addDoc(collection(db, 'activities'), {
+        type: isAuto ? 'auto_clock_out' : 'clock_out',
+        actorId: employeeId,
+        actorName: employeeName || 'พนักงาน',
+        description: isAuto
+          ? `ระบบออกงานอัตโนมัติให้ ${employeeName || 'พนักงาน'} (ไม่มีการเคลื่อนไหวเกิน 2 ชม.)${returnedCaseIds.length > 0 ? ` ส่งคืนเคส ${returnedCaseIds.length} เคส` : ''}`
+          : `ลงเวลาเลิกงาน${returnedCaseIds.length > 0 ? ` ส่งคืนเคสกลับไปรอรับใหม่ ${returnedCaseIds.length} เคส` : ''}`,
+        timestamp: now,
+      });
+    } catch (e) {
+      console.warn('Could not record activity log for shift action', e);
+    }
+
     return {
       success: true,
       returnedCasesCount: returnedCaseIds.length,
@@ -182,7 +208,7 @@ export async function clockOutEmployee(
 /**
  * บันทึก "เข้างาน" (เริ่มกะใหม่) สำหรับพนักงาน
  */
-export async function clockInEmployee(employeeId: string): Promise<{ success: boolean; message: string }> {
+export async function clockInEmployee(employeeId: string, employeeName?: string): Promise<{ success: boolean; message: string }> {
   if (!employeeId) {
     return { success: false, message: 'ไม่พบรหัสพนักงาน' };
   }
@@ -198,11 +224,25 @@ export async function clockInEmployee(employeeId: string): Promise<{ success: bo
       }
     }
 
+    const now = Date.now();
     await updateDoc(userDocRef, {
       workStatus: 'working',
       offWorkAt: null,
-      updatedAt: Date.now(),
+      clockedInAt: now,
+      lastActiveAt: now,
+      autoClockOutReason: null,
+      updatedAt: now,
     });
+
+    try {
+      await addDoc(collection(db, 'activities'), {
+        type: 'clock_in',
+        actorId: employeeId,
+        actorName: employeeName || (snap.exists() ? (snap.data() as UserProfile).name : 'พนักงาน'),
+        description: `ลงเวลาเข้างาน พร้อมรับเคสแล้ว`,
+        timestamp: now,
+      });
+    } catch (_) {}
 
     return {
       success: true,
@@ -216,4 +256,35 @@ export async function clockInEmployee(employeeId: string): Promise<{ success: bo
       message: 'เกิดข้อผิดพลาดในการบันทึกเข้างาน: ' + (error as Error).message,
     };
   }
+}
+
+/**
+ * อัปเดต Heartbeat ความเคลื่อนไหวล่าสุดของพนักงานลงใน Firestore
+ */
+export async function updateEmployeeHeartbeat(employeeId: string): Promise<void> {
+  if (!employeeId) return;
+  try {
+    const userDocRef = doc(db, 'users', employeeId);
+    await updateDoc(userDocRef, {
+      lastActiveAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  } catch (e) {
+    // Silently ignore transient errors for heartbeats
+  }
+}
+
+/**
+ * ตรวจสอบและออกงานอัตโนมัติให้พนักงานที่ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง
+ */
+export async function autoClockOutInactiveEmployee(
+  employeeId: string, 
+  employeeName: string
+): Promise<ShiftActionResult> {
+  return await clockOutEmployee(
+    employeeId,
+    employeeName,
+    'ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง (ระบบออกงานอัตโนมัติ)',
+    true
+  );
 }

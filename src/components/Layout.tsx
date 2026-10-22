@@ -41,6 +41,8 @@ import { MessengerDirectoryModal } from './MessengerDirectoryModal';
 import { EmployeeQRModal } from './EmployeeQRModal';
 import { MobileBottomNav } from './MobileBottomNav';
 import { isUserAdmin } from '../store/useStore';
+import { useInactivityTracker } from '../hooks/useInactivityTracker';
+import { InactivityWarningModal } from './InactivityWarningModal';
 
 interface TechStatusToast {
   id: string;
@@ -55,6 +57,14 @@ interface TechStatusToast {
 
 export function Layout() {
   const { user, logout, isDarkMode, toggleDarkMode, clockIn } = useStore();
+  const {
+    isWarning: isIdleWarning,
+    remainingMs: idleRemainingMs,
+    isAutoClockedOut,
+    returnedCasesCount: autoReturnedCasesCount,
+    resetActivity,
+    dismissAutoClockOut,
+  } = useInactivityTracker();
   const location = useLocation();
   const [notifGranted, setNotifGranted] = useState(false);
   const [showClockOutModal, setShowClockOutModal] = useState(false);
@@ -784,6 +794,16 @@ export function Layout() {
           }}
         />
       )}
+
+      {/* Auto Clock-Out & Inactivity Warning Modal */}
+      <InactivityWarningModal
+        isWarning={isIdleWarning}
+        remainingMs={idleRemainingMs}
+        isAutoClockedOut={isAutoClockedOut}
+        returnedCasesCount={autoReturnedCasesCount}
+        onResetActivity={resetActivity}
+        onDismissAutoClockOut={dismissAutoClockOut}
+      />
 
       {/* Real-time Team Chat Floating Bubble */}
       {user && <TeamChatBubble />}

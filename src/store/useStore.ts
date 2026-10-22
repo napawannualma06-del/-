@@ -53,7 +53,7 @@ interface AppState {
   rejectUser: (uid: string) => Promise<{ success: boolean; message?: string }>;
   deleteUserAccount: (uid: string) => Promise<{ success: boolean; message?: string }>;
   setUserDirectly: (profile: UserProfile) => void;
-  clockOut: () => Promise<ShiftActionResult>;
+  clockOut: (reason?: string, isAuto?: boolean) => Promise<ShiftActionResult>;
   clockIn: () => Promise<{ success: boolean; message: string }>;
   logout: () => Promise<void>;
   initAuth: () => Promise<void>;
@@ -99,10 +99,25 @@ function setupUserSync(
         let nextOffWorkAt = currentUser.offWorkAt;
         let nextName = currentUser.name;
         let nextAvatarEmoji = currentUser.avatarEmoji;
+        let nextLastActiveAt = currentUser.lastActiveAt;
+        let nextClockedInAt = currentUser.clockedInAt;
+        let nextAutoClockOutReason = currentUser.autoClockOutReason;
 
         if (freshData.workStatus !== undefined && freshData.workStatus !== currentUser.workStatus) {
           nextWorkStatus = freshData.workStatus;
           nextOffWorkAt = freshData.offWorkAt;
+          changed = true;
+        }
+        if (freshData.lastActiveAt !== undefined && freshData.lastActiveAt !== currentUser.lastActiveAt) {
+          nextLastActiveAt = freshData.lastActiveAt;
+          changed = true;
+        }
+        if (freshData.clockedInAt !== undefined && freshData.clockedInAt !== currentUser.clockedInAt) {
+          nextClockedInAt = freshData.clockedInAt;
+          changed = true;
+        }
+        if (freshData.autoClockOutReason !== undefined && freshData.autoClockOutReason !== currentUser.autoClockOutReason) {
+          nextAutoClockOutReason = freshData.autoClockOutReason;
           changed = true;
         }
         if (freshData.name && freshData.name !== currentUser.name && currentUser.username?.toLowerCase() !== SUPER_ADMIN_USERNAME) {
@@ -120,6 +135,9 @@ function setupUserSync(
             name: nextName,
             workStatus: nextWorkStatus,
             offWorkAt: nextOffWorkAt,
+            lastActiveAt: nextLastActiveAt,
+            clockedInAt: nextClockedInAt,
+            autoClockOutReason: nextAutoClockOutReason,
             avatarEmoji: nextAvatarEmoji,
           };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProfile));
@@ -536,7 +554,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  clockOut: async () => {
+  clockOut: async (reason?: string, isAuto?: boolean) => {
     const currentUser = get().user;
     if (!currentUser) {
       return {
@@ -546,12 +564,14 @@ export const useStore = create<AppState>((set, get) => ({
         message: 'ไม่ได้เข้าสู่ระบบ',
       };
     }
-    const res = await clockOutEmployee(currentUser.uid, currentUser.name);
+    const res = await clockOutEmployee(currentUser.uid, currentUser.name, reason, isAuto);
     if (res.success) {
+      const now = Date.now();
       const updated: UserProfile = {
         ...currentUser,
         workStatus: 'off_work',
-        offWorkAt: Date.now(),
+        offWorkAt: now,
+        autoClockOutReason: isAuto ? (reason || 'ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง') : undefined,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       set({ user: updated });
@@ -568,12 +588,16 @@ export const useStore = create<AppState>((set, get) => ({
         message: 'ไม่ได้เข้าสู่ระบบ',
       };
     }
-    const res = await clockInEmployee(currentUser.uid);
+    const res = await clockInEmployee(currentUser.uid, currentUser.name);
     if (res.success) {
+      const now = Date.now();
       const updated: UserProfile = {
         ...currentUser,
         workStatus: 'working',
         offWorkAt: undefined,
+        clockedInAt: now,
+        lastActiveAt: now,
+        autoClockOutReason: undefined,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       set({ user: updated });

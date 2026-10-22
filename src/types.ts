@@ -12,6 +12,9 @@ export interface UserProfile {
   fcmToken?: string;
   workStatus?: WorkStatus;
   offWorkAt?: number;
+  lastActiveAt?: number;
+  clockedInAt?: number;
+  autoClockOutReason?: string;
   avatarEmoji?: string;
   createdAt: number;
   accountStatus?: AccountStatus;
@@ -88,7 +91,7 @@ export interface Case {
 
 export interface ActivityLog {
   id: string;
-  type: 'create_case' | 'accept_case' | 'stuck_case' | 'return_case' | 'transfer_case' | 'close_case' | 'contract_case' | 'remark_case' | 'cancel_case';
+  type: 'create_case' | 'accept_case' | 'stuck_case' | 'return_case' | 'transfer_case' | 'close_case' | 'contract_case' | 'remark_case' | 'cancel_case' | 'auto_clock_out' | 'clock_in' | 'clock_out';
   actorId: string;
   actorName: string;
   actorAvatarEmoji?: string;

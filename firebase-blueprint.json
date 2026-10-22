@@ -37,6 +37,31 @@
         "approvedBy": {
           "type": "string",
           "description": "Name of admin who approved the account"
+        },
+        "workStatus": {
+          "type": "string",
+          "enum": ["working", "off_work"],
+          "description": "Employee current shift work status"
+        },
+        "offWorkAt": {
+          "type": "number",
+          "description": "Timestamp when employee clocked off"
+        },
+        "lastActiveAt": {
+          "type": "number",
+          "description": "Timestamp when employee was last active in the system"
+        },
+        "clockedInAt": {
+          "type": "number",
+          "description": "Timestamp when employee clocked in"
+        },
+        "autoClockOutReason": {
+          "type": "string",
+          "description": "Reason for automated clock out"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp when user doc was last updated"
         }
       },
       "required": ["name", "role", "createdAt"]

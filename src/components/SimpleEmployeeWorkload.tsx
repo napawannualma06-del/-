@@ -37,6 +37,8 @@ interface EmployeeWorkloadSummary {
   isBusy: boolean;
   isOffWork: boolean;
   offWorkAt?: number;
+  lastActiveAt?: number;
+  autoClockOutReason?: string;
   closedCount: number;
   isAdmin: boolean;
 }
@@ -98,6 +100,8 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
       isBusy,
       isOffWork,
       offWorkAt: emp.offWorkAt,
+      lastActiveAt: emp.lastActiveAt,
+      autoClockOutReason: emp.autoClockOutReason,
       closedCount,
       isAdmin: isSuperAdmin,
     };
@@ -265,8 +269,11 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                       <div className="flex items-center gap-1.5 mt-1 flex-wrap tabular-nums">
                         {emp.isOffWork ? (
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
-                              เลิกงาน
+                            <span 
+                              className="text-[11px] font-medium text-slate-400 dark:text-slate-500"
+                              title={emp.autoClockOutReason ? `ออกงานอัตโนมัติ: ${emp.autoClockOutReason}` : undefined}
+                            >
+                              เลิกงาน{emp.autoClockOutReason ? ' (ระบบ)' : ''}
                             </span>
                             {canManage && (
                               <button
