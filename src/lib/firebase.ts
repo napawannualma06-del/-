@@ -59,6 +59,18 @@ export interface FirestoreErrorInfo {
   }
 }
 
+export function isQuotaExceededError(error: unknown): boolean {
+  if (!error) return false;
+  const msg = error instanceof Error ? error.message : typeof error === 'string' ? error : JSON.stringify(error);
+  return (
+    msg.includes('Quota exceeded') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('Free daily read units') ||
+    msg.includes('free tier database')
+  );
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
@@ -77,5 +89,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+
+  if (typeof window !== 'undefined' && isQuotaExceededError(errInfo.error)) {
+    try {
+      window.dispatchEvent(new CustomEvent('firestore-quota-exceeded', { detail: errInfo }));
+      sessionStorage.setItem('firestore_quota_exceeded', 'true');
+    } catch {
+      // ignore
+    }
+  }
+
   throw new Error(JSON.stringify(errInfo));
 }

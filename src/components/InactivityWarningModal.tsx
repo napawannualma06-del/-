@@ -27,7 +27,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
   const seconds = totalSeconds % 60;
   const timeFormatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
-  // 1. Auto Changed to "ว่างงาน" (Off Work) Modal
+  // 1. Auto Changed to "ว่างงาน" Modal (หลังจากครบ 2 ชม. + รอ 1 ชม. แล้วไม่มีการยืนยัน)
   if (isAutoClockedOut) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in duration-200">
@@ -53,8 +53,8 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
           <div className="py-4 space-y-3.5">
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
               เนื่องจากไม่มีการ
-              <strong className="mx-1 text-amber-700 dark:text-amber-300 font-semibold">สร้างเคส, รับเคส, ใส่หมายเหตุ หรือแอคชั่นใดๆ ในระบบ</strong>
-              ต่อเนื่องนานเกิน <strong className="text-rose-600 dark:text-rose-400 font-bold">2 ชั่วโมง</strong>
+              <strong className="mx-1 text-amber-700 dark:text-amber-300 font-semibold">สร้างเคส, รับเคส, ใส่หมายเหตุ หรือทำแอคชั่นใดๆ</strong>
+              เกิน 2 ชั่วโมง และ<strong className="text-rose-600 dark:text-rose-400 font-bold">ไม่ได้รับการยืนยันว่าทำงานอยู่ภายใน 1 ชั่วโมงหลังจากแจ้งเตือน</strong>
               ระบบจึงได้ปรับสถานะเป็น <strong>"ว่างงาน"</strong> ให้อัตโนมัติ เพื่อป้องกันเคสค้าง
             </p>
 
@@ -98,7 +98,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
     );
   }
 
-  // 2. Inactivity Warning Modal (10 minutes before reaching 2 hours)
+  // 2. เด้งแจ้งเตือนเมื่อไม่มีแอคชั่นครบ 2 ชม. (และรออีก 1 ชม. เพื่อนับถอยหลัง)
   if (isWarning) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -117,10 +117,10 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
             </div>
             <div>
               <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 mb-1">
-                เตือนความเคลื่อนไหวเคส (2 ชม.)
+                แจ้งเตือนความเคลื่อนไหว (ครบ 2 ชม.)
               </span>
               <h3 className="font-bold text-base text-slate-900 dark:text-white leading-tight">
-                ไม่มีการทำเคสหรือแอคชั่นในระบบ
+                คุณยังกำลังทำงานอยู่หรือไม่?
               </h3>
             </div>
           </div>
@@ -128,22 +128,21 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
           {/* Countdown & Info */}
           <div className="py-4 space-y-4">
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              ไม่มีการสร้างเคส รับเคส หรือใส่หมายเหตุในระบบมานานเกือบ 2 ชั่วโมง ระบบจะทำการ
-              <strong className="mx-1 text-amber-700 dark:text-amber-300 font-semibold">เปลี่ยนสถานะเป็น "ว่างงาน" และส่งคืนเคสอัตโนมัติ</strong>
-              ในอีก:
+              ไม่มีการสร้างเคส รับเคส ใส่หมายเหตุ หรือทำแอคชั่นในระบบมาครบ <strong className="text-amber-700 dark:text-amber-300 font-semibold">2 ชั่วโมงแล้ว</strong>
+              ระบบจะรอการยืนยันอีก <strong>1 ชั่วโมง</strong> หากไม่ได้กดยืนยันว่ากำลังทำงานอยู่ ระบบจะเปลี่ยนสถานะเป็น <strong>"ว่างงาน"</strong> และส่งคืนเคสให้อัตโนมัติในอีก:
             </p>
 
             {/* Countdown Badge */}
             <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800/80 text-center space-y-1">
               <div className="flex items-center justify-center gap-2 text-amber-800 dark:text-amber-200">
                 <Clock className="w-4 h-4 animate-spin text-amber-600" />
-                <span className="text-xs font-semibold">เวลานับถอยหลังก่อนเปลี่ยนเป็นว่างงาน:</span>
+                <span className="text-xs font-semibold">เวลารอยืนยัน (นับถอยหลัง 1 ชม.):</span>
               </div>
               <div className="font-mono text-3xl font-extrabold text-amber-700 dark:text-amber-300 tabular-nums tracking-wider">
                 {timeFormatted} <span className="text-xs font-normal">นาที</span>
               </div>
               <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
-                หากคุณยังปฏิบัติงานอยู่ ให้กดปุ่มด้านล่างเพื่ออัปเดตสถานะและต่อเวลา
+                หากคุณกำลังทำงานอยู่ กรุณากดปุ่มด้านล่างเพื่อยืนยันสถานะ
               </p>
             </div>
           </div>
@@ -153,10 +152,10 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
             <button
               type="button"
               onClick={onResetActivity}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 active:scale-95 transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full sm:w-auto px-6 py-3 rounded-xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 active:scale-95 transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>ฉันยังปฏิบัติงานอยู่ (คลิกเพื่อต่อเวลา)</span>
+              <span>ฉันกำลังทำงานอยู่ (กดยืนยัน)</span>
             </button>
           </div>
         </div>

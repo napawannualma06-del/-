@@ -43,6 +43,7 @@ import { MobileBottomNav } from './MobileBottomNav';
 import { isUserAdmin } from '../store/useStore';
 import { useInactivityTracker } from '../hooks/useInactivityTracker';
 import { InactivityWarningModal } from './InactivityWarningModal';
+import { QuotaExceededBanner } from './QuotaExceededBanner';
 
 interface TechStatusToast {
   id: string;
@@ -66,6 +67,16 @@ export function Layout() {
     dismissAutoClockOut,
   } = useInactivityTracker();
   const location = useLocation();
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && sessionStorage.getItem('firestore_quota_exceeded') === 'true';
+  });
+
+  useEffect(() => {
+    const handleQuotaEvent = () => setIsQuotaExceeded(true);
+    window.addEventListener('firestore-quota-exceeded', handleQuotaEvent);
+    return () => window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
+  }, []);
+
   const [notifGranted, setNotifGranted] = useState(false);
   const [showClockOutModal, setShowClockOutModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
@@ -768,6 +779,11 @@ export function Layout() {
 
       {/* Main Page Area */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 pb-28 md:py-6">
+        {isQuotaExceeded && location.pathname !== '/' && (
+          <div className="mb-4">
+            <QuotaExceededBanner />
+          </div>
+        )}
         <Outlet />
       </main>
 

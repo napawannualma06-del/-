@@ -11,8 +11,9 @@ import {
   orderBy,
   runTransaction 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, isQuotaExceededError } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
+import { QuotaExceededBanner } from './QuotaExceededBanner';
 import { 
   Clock, 
   CheckCircle2, 
@@ -365,6 +366,20 @@ export function Queue() {
   const [isCheckingAutoCancel, setIsCheckingAutoCancel] = useState(false);
   const [autoCancelToast, setAutoCancelToast] = useState<string | null>(null);
   const lastAutoCancelCheckRef = useRef<number>(0);
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && sessionStorage.getItem('firestore_quota_exceeded') === 'true';
+  });
+
+  useEffect(() => {
+    const handleQuotaEvent = () => setIsQuotaExceeded(true);
+    window.addEventListener('firestore-quota-exceeded', handleQuotaEvent);
+    return () => window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
+  }, []);
+
+  const registeredUsersRef = useRef(registeredUsers);
+  useEffect(() => {
+    registeredUsersRef.current = registeredUsers;
+  }, [registeredUsers]);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -407,20 +422,32 @@ export function Queue() {
       const now = Date.now();
       if (now - lastAutoCancelCheckRef.current > 30000) {
         lastAutoCancelCheckRef.current = now;
-        const expired = getExpiredCases(casesData, now, registeredUsers);
+        const expired = getExpiredCases(casesData, now, registeredUsersRef.current);
         if (expired.length > 0) {
-          autoCancelExpiredCases(expired, 'auto', registeredUsers).catch((err) => {
+          autoCancelExpiredCases(expired, 'auto', registeredUsersRef.current).catch((err) => {
             console.error('Error auto-cancelling expired cases:', err);
           });
         }
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'cases');
+      const isQuota = isQuotaExceededError(error);
+      if (isQuota) {
+        setIsQuotaExceeded(true);
+      }
+      try {
+        handleFirestoreError(error, OperationType.GET, 'cases');
+      } catch (err: any) {
+        if (isQuotaExceededError(err) || isQuota) {
+          setIsQuotaExceeded(true);
+        } else {
+          console.error('Queue onSnapshot error:', err);
+        }
+      }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [registeredUsers]);
+  }, []);
 
   // Periodic check every 3 minutes for cases that cross 3 days
   useEffect(() => {
@@ -890,7 +917,7 @@ export function Queue() {
   const endIndex = Math.min(startIndex + CASES_PER_PAGE, totalCases);
   const paginatedCases = filteredCases.slice(startIndex, endIndex);
 
-  if (loading) {
+  if (loading && !isQuotaExceeded) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-slate-500 dark:text-slate-400">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-3"></div>
@@ -901,6 +928,11 @@ export function Queue() {
 
   return (
     <div className="space-y-4 sm:space-y-5 max-w-7xl mx-auto">
+      {/* Quota Exceeded Alert Banner */}
+      {isQuotaExceeded && (
+        <QuotaExceededBanner className="mb-2" />
+      )}
+
       {/* Action Header & Primary CTA */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white dark:bg-slate-900 p-4 sm:px-5 sm:py-4 rounded-2xl border border-slate-200/80 dark:border-slate-800">
         <div className="min-w-0">
@@ -1579,9 +1611,13 @@ export function Queue() {
           <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-3">
             <Filter className="w-6 h-6" />
           </div>
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">ไม่พบเคสตามเงื่อนไขที่เลือก</h3>
+          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            {isQuotaExceeded ? 'ข้อมูลคิวงานถูกระงับชั่วคราวเนื่องจากโควต้า Firestore รายวันเต็ม' : 'ไม่พบเคสตามเงื่อนไขที่เลือก'}
+          </h3>
           <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-            {searchQuery ? 'ลองเปลี่ยนคำค้นหา หรือกดล้างการค้นหา' : 'คุณสามารถกด "เพิ่มเคสใหม่" ด้านบนเพื่อเริ่มเปิดเคส'}
+            {isQuotaExceeded 
+              ? 'โควต้าการอ่านฟรีจะรีเซ็ตอัตโนมัติในวันถัดไป หรือกดเปิด Firebase Console เพื่ออัปเกรดโครงการ' 
+              : (searchQuery ? 'ลองเปลี่ยนคำค้นหา หรือกดล้างการค้นหา' : 'คุณสามารถกด "เพิ่มเคสใหม่" ด้านบนเพื่อเริ่มเปิดเคส')}
           </p>
         </div>
       ) : viewMode === 'row' ? (
