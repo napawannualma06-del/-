@@ -13,6 +13,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
 import { OvertimeRequest, OvertimeStatus } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
+import { recordSystemAction } from '../lib/activityService';
 import { 
   Clock, 
   Calendar, 
@@ -229,6 +230,9 @@ export function OvertimeModal({
       }
 
       await addDoc(collection(db, 'overtime_requests'), newOT);
+      if (user?.uid) {
+        recordSystemAction(user.uid, 'submit_ot');
+      }
 
       setSubmitSuccess(true);
       setReason('');

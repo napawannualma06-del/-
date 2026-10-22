@@ -13,6 +13,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
 import { AdvanceRequest, AdvanceStatus } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
+import { recordSystemAction } from '../lib/activityService';
 import { 
   Banknote, 
   Calendar, 
@@ -264,6 +265,9 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
       if (user.avatarEmoji) newAdvance.employeeAvatarEmoji = user.avatarEmoji;
 
       await addDoc(collection(db, 'advance_requests'), newAdvance);
+      if (user?.uid) {
+        recordSystemAction(user.uid, 'submit_advance');
+      }
 
       setSubmitSuccess(true);
       setAmountStr('');

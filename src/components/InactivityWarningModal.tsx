@@ -1,7 +1,6 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
 import { AlertTriangle, Clock, LogOut, CheckCircle2, RotateCcw } from 'lucide-react';
-import { clsx } from 'clsx';
 
 interface InactivityWarningModalProps {
   isWarning: boolean;
@@ -20,7 +19,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
   onResetActivity,
   onDismissAutoClockOut,
 }) => {
-  const { clockIn, user } = useStore();
+  const { clockIn } = useStore();
 
   // Format remaining time into MM:SS
   const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
@@ -28,46 +27,47 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
   const seconds = totalSeconds % 60;
   const timeFormatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
-  // 1. Auto Clocked-Out Notification Modal
+  // 1. Auto Changed to "ว่างงาน" (Off Work) Modal
   if (isAutoClockedOut) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in duration-200">
         <div 
-          className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-200 dark:border-rose-900/60 text-slate-900 dark:text-slate-100 animate-in zoom-in-95 duration-200"
+          className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-amber-300 dark:border-amber-800/80 text-slate-900 dark:text-slate-100 animate-in zoom-in-95 duration-200"
           role="alertdialog"
           aria-modal="true"
         >
           <div className="flex items-center gap-3.5 pb-4 border-b border-slate-100 dark:border-slate-800">
-            <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 shadow-inner">
+            <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
               <LogOut className="w-6 h-6" />
             </div>
             <div>
-              <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 mb-1">
+              <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 mb-1">
                 ระบบจัดการกะอัตโนมัติ
               </span>
               <h3 className="font-bold text-base text-slate-900 dark:text-white leading-tight">
-                คุณถูกบันทึก "เลิกงาน" อัตโนมัติ
+                สถานะของคุณเปลี่ยนเป็น "ว่างงาน" แล้ว
               </h3>
             </div>
           </div>
 
           <div className="py-4 space-y-3.5">
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              เนื่องจากไม่มีการเคลื่อนไหวหรือการใช้งานในระบบต่อเนื่องนานเกิน 
-              <strong className="mx-1 text-rose-600 dark:text-rose-400 font-semibold">2 ชั่วโมง</strong>
-              ระบบจึงได้บันทึกเลิกงานให้อัตโนมัติ เพื่อป้องกันเคสค้างในระบบ
+              เนื่องจากไม่มีการ
+              <strong className="mx-1 text-amber-700 dark:text-amber-300 font-semibold">สร้างเคส, รับเคส, ใส่หมายเหตุ หรือแอคชั่นใดๆ ในระบบ</strong>
+              ต่อเนื่องนานเกิน <strong className="text-rose-600 dark:text-rose-400 font-bold">2 ชั่วโมง</strong>
+              ระบบจึงได้ปรับสถานะเป็น <strong>"ว่างงาน"</strong> ให้อัตโนมัติ เพื่อป้องกันเคสค้าง
             </p>
 
-            <div className="p-3.5 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-900 dark:text-amber-200 space-y-1">
-              <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-300">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-amber-600" />
-                <span>การจัดการเคสค้าง</span>
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 text-xs text-slate-800 dark:text-slate-200 space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-300">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                <span>การคืนเคสสู่กองกลาง</span>
               </div>
-              <p className="text-[11px] leading-relaxed text-amber-800/90 dark:text-amber-300/90">
+              <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-400">
                 {returnedCasesCount > 0 ? (
-                  <>เคสที่คุณกำลังดำเนินการอยู่ทั้งหมด <strong className="font-bold underline">จำนวน {returnedCasesCount} เคส</strong> ได้ถูกส่งคืนกลับไปที่ <strong>"รอรับเคส"</strong> เรียบร้อยแล้ว เพื่อให้เพื่อนร่วมทีมรับไปดำเนินการต่อได้ทันที</>
+                  <>เคสที่คุณกำลังดำเนินการอยู่ทั้งหมด <strong className="font-bold underline text-indigo-600 dark:text-indigo-400">จำนวน {returnedCasesCount} เคส</strong> ได้ถูกส่งคืนกลับไปที่ <strong>"รอรับเคส"</strong> เรียบร้อยแล้ว เพื่อให้เพื่อนร่วมทีมรับไปดำเนินการต่อได้ทันที</>
                 ) : (
-                  <>ไม่มีเคสค้างที่กำลังทำอยู่ สถานะของคุณถูกเปลี่ยนเป็น <strong>"เลิกงานแล้ว"</strong> เรียบร้อยแล้ว</>
+                  <>ไม่มีเคสค้างที่กำลังทำอยู่ สถานะถูกเปลี่ยนเป็น <strong>"ว่างงาน"</strong> เรียบร้อยแล้ว</>
                 )}
               </p>
             </div>
@@ -98,7 +98,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
     );
   }
 
-  // 2. Inactivity Warning Modal (with countdown before auto clock-out)
+  // 2. Inactivity Warning Modal (10 minutes before reaching 2 hours)
   if (isWarning) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -107,7 +107,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
           role="alertdialog"
           aria-modal="true"
         >
-          {/* Header with pulsing indicator */}
+          {/* Header */}
           <div className="flex items-center gap-3.5 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="relative">
               <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
@@ -117,10 +117,10 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
             </div>
             <div>
               <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 mb-1">
-                เตือนความเคลื่อนไหว (Idle Timeout)
+                เตือนความเคลื่อนไหวเคส (2 ชม.)
               </span>
               <h3 className="font-bold text-base text-slate-900 dark:text-white leading-tight">
-                คุณยังปฏิบัติงานอยู่หรือไม่?
+                ไม่มีการทำเคสหรือแอคชั่นในระบบ
               </h3>
             </div>
           </div>
@@ -128,8 +128,8 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
           {/* Countdown & Info */}
           <div className="py-4 space-y-4">
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              ไม่มีการเคลื่อนไหวหรือการกดใช้งานในระบบมานานเกือบ 2 ชั่วโมง ระบบจะทำการ
-              <strong className="mx-1 text-amber-700 dark:text-amber-300 font-semibold">บันทึกเลิกงานและส่งคืนเคสให้อัตโนมัติ</strong>
+              ไม่มีการสร้างเคส รับเคส หรือใส่หมายเหตุในระบบมานานเกือบ 2 ชั่วโมง ระบบจะทำการ
+              <strong className="mx-1 text-amber-700 dark:text-amber-300 font-semibold">เปลี่ยนสถานะเป็น "ว่างงาน" และส่งคืนเคสอัตโนมัติ</strong>
               ในอีก:
             </p>
 
@@ -137,13 +137,13 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
             <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800/80 text-center space-y-1">
               <div className="flex items-center justify-center gap-2 text-amber-800 dark:text-amber-200">
                 <Clock className="w-4 h-4 animate-spin text-amber-600" />
-                <span className="text-xs font-semibold">เวลานับถอยหลังก่อนออกงาน:</span>
+                <span className="text-xs font-semibold">เวลานับถอยหลังก่อนเปลี่ยนเป็นว่างงาน:</span>
               </div>
               <div className="font-mono text-3xl font-extrabold text-amber-700 dark:text-amber-300 tabular-nums tracking-wider">
                 {timeFormatted} <span className="text-xs font-normal">นาที</span>
               </div>
               <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
-                หากคุณยังทำงานอยู่ ให้กดปุ่มด้านล่างเพื่อยืนยันและรีเซ็ตเวลา
+                หากคุณยังปฏิบัติงานอยู่ ให้กดปุ่มด้านล่างเพื่ออัปเดตสถานะและต่อเวลา
               </p>
             </div>
           </div>
@@ -156,7 +156,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
               className="w-full sm:w-auto px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 active:scale-95 transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>ฉันยังทำงานอยู่ (คลิกเพื่อต่อเวลา)</span>
+              <span>ฉันยังปฏิบัติงานอยู่ (คลิกเพื่อต่อเวลา)</span>
             </button>
           </div>
         </div>

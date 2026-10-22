@@ -680,14 +680,14 @@ export function Layout() {
                       ? "border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
                       : "border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/80"
                   )}
-                  title={isOffWork ? "ขณะนี้เลิกงานแล้ว (คลิกเพื่อเข้างาน)" : "ขณะนี้เข้างานอยู่ (คลิกเพื่อบันทึกเลิกงาน)"}
+                  title={isOffWork ? "ขณะนี้ว่างงาน (คลิกเพื่อเข้างาน)" : "ขณะนี้เข้างานอยู่ (คลิกเพื่อบันทึกเลิกงาน)"}
                 >
                   <span className={clsx(
                     "w-2 h-2 rounded-full shrink-0",
                     isOffWork ? "bg-slate-400" : "bg-emerald-500"
                   )} />
                   <span className="hidden sm:inline">
-                    {isOffWork ? 'เลิกงานแล้ว' : 'เข้างานอยู่'}
+                    {isOffWork ? 'ว่างงาน' : 'เข้างานอยู่'}
                   </span>
                 </button>
               )}

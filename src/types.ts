@@ -13,6 +13,7 @@ export interface UserProfile {
   workStatus?: WorkStatus;
   offWorkAt?: number;
   lastActiveAt?: number;
+  lastActionAt?: number;
   clockedInAt?: number;
   autoClockOutReason?: string;
   avatarEmoji?: string;

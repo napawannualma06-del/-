@@ -19,6 +19,7 @@ service cloud.firestore {
              (!('workStatus' in data) || data.workStatus in ['working', 'off_work']) &&
              (!('offWorkAt' in data) || data.offWorkAt == null || data.offWorkAt is number) &&
              (!('lastActiveAt' in data) || data.lastActiveAt == null || data.lastActiveAt is number) &&
+             (!('lastActionAt' in data) || data.lastActionAt == null || data.lastActionAt is number) &&
              (!('clockedInAt' in data) || data.clockedInAt == null || data.clockedInAt is number) &&
              (!('autoClockOutReason' in data) || data.autoClockOutReason == null || (data.autoClockOutReason is string && data.autoClockOutReason.size() <= 256)) &&
              (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is number);

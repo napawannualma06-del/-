@@ -100,12 +100,17 @@ function setupUserSync(
         let nextName = currentUser.name;
         let nextAvatarEmoji = currentUser.avatarEmoji;
         let nextLastActiveAt = currentUser.lastActiveAt;
+        let nextLastActionAt = currentUser.lastActionAt;
         let nextClockedInAt = currentUser.clockedInAt;
         let nextAutoClockOutReason = currentUser.autoClockOutReason;
 
         if (freshData.workStatus !== undefined && freshData.workStatus !== currentUser.workStatus) {
           nextWorkStatus = freshData.workStatus;
           nextOffWorkAt = freshData.offWorkAt;
+          changed = true;
+        }
+        if (freshData.lastActionAt !== undefined && freshData.lastActionAt !== currentUser.lastActionAt) {
+          nextLastActionAt = freshData.lastActionAt;
           changed = true;
         }
         if (freshData.lastActiveAt !== undefined && freshData.lastActiveAt !== currentUser.lastActiveAt) {
@@ -136,6 +141,7 @@ function setupUserSync(
             workStatus: nextWorkStatus,
             offWorkAt: nextOffWorkAt,
             lastActiveAt: nextLastActiveAt,
+            lastActionAt: nextLastActionAt,
             clockedInAt: nextClockedInAt,
             autoClockOutReason: nextAutoClockOutReason,
             avatarEmoji: nextAvatarEmoji,
@@ -597,9 +603,11 @@ export const useStore = create<AppState>((set, get) => ({
         offWorkAt: undefined,
         clockedInAt: now,
         lastActiveAt: now,
+        lastActionAt: now,
         autoClockOutReason: undefined,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      localStorage.setItem(`qmanage_last_action_${currentUser.uid}`, String(now));
       set({ user: updated });
       get().fetchRegisteredUsers();
     }

@@ -13,6 +13,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
 import { TechnicalIssue, TechnicalIssueStatus } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
+import { recordSystemAction } from '../lib/activityService';
 import { 
   Wrench, 
   AlertCircle, 
@@ -152,6 +153,10 @@ export function TechnicalIssueModal({
         createdAt: now,
         updatedAt: now,
       });
+
+      if (user?.uid) {
+        recordSystemAction(user.uid, 'submit_tech_issue');
+      }
 
       // Clear form
       setTitle('');

@@ -493,6 +493,16 @@ export function Queue() {
         updates.remarks = trimmed;
         updates.remarksUpdatedAt = Date.now();
         updates.remarksUpdatedBy = user?.name || 'พนักงาน';
+        logActivity({
+          type: 'remark_case',
+          actorId: user?.uid || 'unknown',
+          actorName: user?.name || 'พนักงาน',
+          actorAvatarEmoji: user?.avatarEmoji,
+          description: `ใส่หมายเหตุเคส ${activeRemarkCase.iphoneModel}: "${trimmed.slice(0, 60)}${trimmed.length > 60 ? '...' : ''}"`,
+          caseId: activeRemarkCase.id,
+          caseKey: activeRemarkCase.caseKey,
+          iphoneModel: activeRemarkCase.iphoneModel,
+        }).catch(console.error);
       } else {
         updates.remarks = '';
       }
@@ -542,6 +552,17 @@ export function Queue() {
         updates.contractNumber = trimmed;
         updates.contractUpdatedAt = Date.now();
         updates.contractUpdatedBy = user?.name || 'พนักงาน';
+        logActivity({
+          type: 'contract_case',
+          actorId: user?.uid || 'unknown',
+          actorName: user?.name || 'พนักงาน',
+          actorAvatarEmoji: user?.avatarEmoji,
+          description: `ระบุเลขสัญญาเคส ${activeContractCase.iphoneModel}: ${trimmed}`,
+          caseId: activeContractCase.id,
+          caseKey: activeContractCase.caseKey,
+          iphoneModel: activeContractCase.iphoneModel,
+          contractNumber: trimmed,
+        }).catch(console.error);
       } else {
         updates.contractNumber = '';
       }
@@ -655,7 +676,7 @@ export function Queue() {
     if (!user) return;
     if (user.workStatus === 'off_work') {
       const confirmClockIn = window.confirm(
-        'ขณะนี้คุณอยู่ในสถานะ "เลิกงานแล้ว" ต้องการเปลี่ยนสถานะเป็น "เข้างาน" และรับเคสนี้ใช่หรือไม่?'
+        'ขณะนี้คุณอยู่ในสถานะ "ว่างงาน" ต้องการเปลี่ยนสถานะเป็น "เข้างาน" และรับเคสนี้ใช่หรือไม่?'
       );
       if (!confirmClockIn) return;
       await clockIn();

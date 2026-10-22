@@ -229,6 +229,7 @@ export async function clockInEmployee(employeeId: string, employeeName?: string)
       workStatus: 'working',
       offWorkAt: null,
       clockedInAt: now,
+      lastActionAt: now,
       lastActiveAt: now,
       autoClockOutReason: null,
       updatedAt: now,
@@ -279,12 +280,13 @@ export async function updateEmployeeHeartbeat(employeeId: string): Promise<void>
  */
 export async function autoClockOutInactiveEmployee(
   employeeId: string, 
-  employeeName: string
+  employeeName: string,
+  reason: string = 'ไม่มีการสร้างเคส รับเคส ใส่หมายเหตุ หรือแอคชั่นในระบบเกิน 2 ชั่วโมง'
 ): Promise<ShiftActionResult> {
   return await clockOutEmployee(
     employeeId,
     employeeName,
-    'ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง (ระบบออกงานอัตโนมัติ)',
+    reason,
     true
   );
 }

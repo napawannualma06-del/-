@@ -4,6 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { ChatMessage, UserProfile } from '../types';
 import { useStore } from '../store/useStore';
 import { AnimalAvatar } from './AnimalAvatar';
+import { recordSystemAction } from '../lib/activityService';
 import { 
   MessageSquare, 
   X, 
@@ -192,6 +193,7 @@ export const TeamChatBubble: React.FC = () => {
 
     try {
       await addDoc(collection(db, 'team_chats'), payload);
+      recordSystemAction(user.uid, 'team_chat');
       setInputText('');
       setShowMentionList(false);
       setShowEmojiPicker(false);
