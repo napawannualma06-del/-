@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useStore } from '../store/useStore';
+import { useStore, isUserAdmin } from '../store/useStore';
 import { 
   autoClockOutInactiveEmployee, 
   AUTO_CLOCKOUT_INACTIVITY_MS 
@@ -24,10 +24,11 @@ export interface InactivityState {
  * Hook ตรวจสอบความเคลื่อนไหวจาก "แอคชั่นทางธุรกิจในระบบเท่านั้น"
  * (สร้างเคส, รับเคส, ใส่หมายเหตุ, เลขสัญญา, จบเคส, ส่งแชท ฯลฯ)
  * ไม่ใช้การตรวจจับเมาส์/คีย์บอร์ด/การเลื่อนหน้าจอ
- * หากไม่มีการกระทำใดๆ ในระบบเกิน 2 ชั่วโมง จะเปลี่ยนสถานะเป็น "ว่างงาน" อัตโนมัติ
+ * หากไม่มีการกระทำใดๆ ในระบบเกิน 2 ชั่วโมง จะเปลี่ยนสถานะเป็น "ว่างงาน" อัตโนมัติ (ยกเว้น Admin)
  */
 export function useInactivityTracker(): InactivityState {
   const { user, clockOut, registeredUsers, fetchRegisteredUsers } = useStore();
+  const isAdmin = isUserAdmin(user);
   const [isWarning, setIsWarning] = useState(false);
   const [remainingMs, setRemainingMs] = useState(0);
   const [isAutoClockedOut, setIsAutoClockedOut] = useState(false);
@@ -56,7 +57,8 @@ export function useInactivityTracker(): InactivityState {
 
   // ฟัง Custom Event เมื่อมีการทำแอคชั่นในระบบ (สร้างเคส, รับเคส, หมายเหตุ, แชท ฯลฯ)
   useEffect(() => {
-    if (!user || user.workStatus !== 'working') {
+    // ยกเว้น Admin: ไม่ต้องจับเวลา idle
+    if (!user || user.workStatus !== 'working' || isAdmin) {
       setIsWarning(false);
       return;
     }
@@ -74,11 +76,12 @@ export function useInactivityTracker(): InactivityState {
     return () => {
       window.removeEventListener('system-action', handleSystemAction);
     };
-  }, [user?.uid, user?.workStatus, storageKey]);
+  }, [user?.uid, user?.workStatus, isAdmin, storageKey]);
 
   // ตรวจสอบระยะเวลาที่ไม่มีแอคชั่นในระบบ (รันทุก 5 วินาที)
   useEffect(() => {
-    if (!user || user.workStatus !== 'working') {
+    // ยกเว้น Admin: ไม่มีการเปลี่ยนสถานะเป็นว่างงานอัตโนมัติ
+    if (!user || user.workStatus !== 'working' || isAdmin) {
       setIsWarning(false);
       return;
     }
@@ -117,7 +120,7 @@ export function useInactivityTracker(): InactivityState {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [user, clockOut, getLatestActionTime]);
+  }, [user, isAdmin, clockOut, getLatestActionTime]);
 
   // ระบบตรวจสอบพนักงานคนอื่นที่เข้างานทิ้งไว้แต่ไม่มีแอคชั่นเกิน 2 ชั่วโมง (รันทุก 1 นาที)
   useEffect(() => {
@@ -132,6 +135,8 @@ export function useInactivityTracker(): InactivityState {
         const staleWorkers = registeredUsers.filter((u) => {
           if (u.uid === user.uid) return false;
           if (u.workStatus !== 'working') return false;
+          // ยกเว้น Admin จากการถูกสวีปออกงาน
+          if (isUserAdmin(u)) return false;
           const lastAction = Math.max(
             u.lastActionAt || 0,
             u.lastActiveAt || 0,

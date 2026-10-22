@@ -283,6 +283,28 @@ export async function autoClockOutInactiveEmployee(
   employeeName: string,
   reason: string = 'ไม่มีการสร้างเคส รับเคส ใส่หมายเหตุ หรือแอคชั่นในระบบเกิน 2 ชั่วโมง'
 ): Promise<ShiftActionResult> {
+  // ยกเว้น Admin / Super Admin จากการออกงานอัตโนมัติ
+  const nameClean = (employeeName || '').toLowerCase().trim();
+  const idClean = (employeeId || '').toLowerCase().trim();
+  const isAdminTarget = 
+    idClean === 'admin_gametpl' ||
+    idClean === 'admin_napawan' ||
+    idClean.startsWith('admin_') ||
+    nameClean === 'game' ||
+    nameClean === 'gametpl' ||
+    nameClean === 'คุณเกม' ||
+    nameClean.includes('napawan') ||
+    nameClean.includes('นภวรรณ');
+
+  if (isAdminTarget) {
+    return {
+      success: false,
+      returnedCasesCount: 0,
+      returnedCaseIds: [],
+      message: 'ยกเว้นผู้ดูแลระบบ (Admin) จากการเปลี่ยนเป็นว่างงานอัตโนมัติ',
+    };
+  }
+
   return await clockOutEmployee(
     employeeId,
     employeeName,
