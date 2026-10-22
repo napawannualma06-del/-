@@ -5,7 +5,6 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Case, statusMap } from './Queue';
 import { Logo } from './Logo';
 import { AnimalAvatar } from './AnimalAvatar';
-import { DutyWorker, CreditCheckDuty } from '../types';
 import { 
   BarChart3, 
   Users, 
@@ -49,7 +48,6 @@ import {
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { clsx } from 'clsx';
-import { CreditCheckDutyStation } from './CreditCheckDutyStation';
 import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { TransferCaseModal } from './TransferCaseModal';
 import { ReturnCaseModal } from './ReturnCaseModal';
@@ -100,7 +98,6 @@ export function AdminDashboard() {
 
   const [cases, setCases] = useState<Case[]>([]);
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
-  const [dutyWorkers, setDutyWorkers] = useState<DutyWorker[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Date Granularity (Cutoff at Midnight: 00:00:00 - 23:59:59.999)
@@ -198,20 +195,7 @@ export function AdminDashboard() {
       console.warn('Could not read users collection, using fallback from cases:', error);
     });
 
-    // 3. Subscribe to credit check duty station (so duty workers are NEVER marked idle/ว่างงาน)
-    const dutyDocRef = doc(db, 'system_duties', 'credit_check');
-    const unsubDuty = onSnapshot(dutyDocRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data() as CreditCheckDuty;
-        setDutyWorkers(Array.isArray(data.workers) ? data.workers : []);
-      } else {
-        setDutyWorkers([]);
-      }
-    }, (err) => {
-      console.warn('Could not read credit check duty in admin dashboard:', err);
-    });
-
-    // 4. Subscribe to overtime_requests count
+    // 3. Subscribe to overtime_requests count
     const qOT = query(collection(db, 'overtime_requests'));
     const unsubOT = onSnapshot(qOT, (snap) => {
       let count = 0;
@@ -224,7 +208,7 @@ export function AdminDashboard() {
       setPendingOTCount(count);
     }, () => {});
 
-    // 5. Subscribe to advance_requests count
+    // 4. Subscribe to advance_requests count
     const qAdv = query(collection(db, 'advance_requests'));
     const unsubAdv = onSnapshot(qAdv, (snap) => {
       let count = 0;
@@ -240,7 +224,6 @@ export function AdminDashboard() {
     return () => {
       unsubCases();
       unsubUsers();
-      unsubDuty();
       unsubOT();
       unsubAdv();
     };
@@ -427,7 +410,6 @@ export function AdminDashboard() {
     cancelledCount: number;
     isBusy: boolean;
     isOffWork: boolean;
-    isOnCreditCheckDuty: boolean;
     timeStats: CaseTimeStats;
   }
 
@@ -462,17 +444,9 @@ export function AdminDashboard() {
     // Time efficiency statistics per employee
     const timeStats = calculateCaseTimeStats(empClosedCases);
 
-    // Check if this employee is currently on credit check duty (Max 2 workers)
-    const isOnCreditCheckDuty = dutyWorkers.some(w => 
-      w.uid === emp.uid || 
-      (w.username && w.username.toLowerCase() === emp.username.toLowerCase()) || 
-      (w.name && w.name.toLowerCase() === emp.name.toLowerCase()) ||
-      (isGame && (w.name === 'คุณเกม' || w.name === 'Game'))
-    );
-
     const isOffWork = emp.workStatus === 'off_work';
     // If off work, they are not busy and cannot hold active cases
-    const isBusy = !isOffWork && (empActiveCases.length > 0 || isOnCreditCheckDuty);
+    const isBusy = !isOffWork && empActiveCases.length > 0;
 
     return {
       employee: emp,
@@ -482,7 +456,6 @@ export function AdminDashboard() {
       cancelledCount: empCancelledCount,
       isBusy,
       isOffWork,
-      isOnCreditCheckDuty,
       timeStats,
     };
   });
@@ -848,9 +821,6 @@ export function AdminDashboard() {
         <AdminApiIntegration currentAdminName={user?.name || 'Admin'} cases={cases} />
       ) : (
         <>
-          {/* Credit Check Duty Station (2-person duty roster visible to everyone) */}
-          <CreditCheckDutyStation />
-
           {/* OVERVIEW STAT CARDS (Focused on Cases & Results) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3">
         {/* Closed Cases */}
@@ -1150,7 +1120,7 @@ export function AdminDashboard() {
                 ยังไม่มีข้อมูลผลงานพนักงานในช่วงเวลานี้
               </div>
             ) : (
-              sortedLeaderboard.map(({ employee, activeCases, closedCount, cancelledCount, isBusy, isOnCreditCheckDuty, timeStats }, idx) => {
+              sortedLeaderboard.map(({ employee, activeCases, closedCount, cancelledCount, isBusy, timeStats }, idx) => {
                 const isMe = user && (employee.uid === user.uid || employee.username === user.username);
                 return (
                 <div key={employee.uid} className={clsx(
@@ -1179,15 +1149,9 @@ export function AdminDashboard() {
                         )}
                         {/* ซ่อนคำว่า แอดมิน ตามคำขอ */}
                         {isBusy ? (
-                          isOnCreditCheckDuty && activeCases.length === 0 ? (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-normal">
-                              เวรเช็คเครดิต
-                            </span>
-                          ) : (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-normal">
-                              กำลังทำ {activeCases.length} งาน
-                            </span>
-                          )
+                          <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-normal">
+                            กำลังทำ {activeCases.length} งาน
+                          </span>
                         ) : (
                           <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-normal">
                             ว่างงาน

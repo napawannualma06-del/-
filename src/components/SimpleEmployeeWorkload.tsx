@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, doc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore } from '../store/useStore';
-import { Case, DutyWorker, CreditCheckDuty, UserProfile } from '../types';
+import { Case, UserProfile } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { clockInEmployee } from '../lib/shiftService';
@@ -10,7 +10,6 @@ import {
   Users, 
   UserCheck, 
   Clock, 
-  ShieldCheck, 
   ChevronDown, 
   ChevronUp, 
   Moon,
@@ -35,7 +34,6 @@ interface EmployeeWorkloadSummary {
   regularCaseCount: number;
   customTaskCount: number;
   activeCases: Case[];
-  isOnDuty: boolean;
   isBusy: boolean;
   isOffWork: boolean;
   offWorkAt?: number;
@@ -52,7 +50,6 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
   const { user: currentUser, clockIn, fetchRegisteredUsers } = useStore();
   const isAdmin = currentUser?.role === 'admin';
   const [employees, setEmployees] = useState<UserProfile[]>([]);
-  const [dutyWorkers, setDutyWorkers] = useState<DutyWorker[]>([]);
   const [isExpanded, setIsExpanded] = useState(true);
   const [clockOutTarget, setClockOutTarget] = useState<UserProfile | null>(null);
 
@@ -76,22 +73,6 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
     return () => unsub();
   }, []);
 
-  // Subscribe to Credit Check Duty Station
-  useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'system_duties', 'credit_check'), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data() as CreditCheckDuty;
-        setDutyWorkers(data.workers || []);
-      } else {
-        setDutyWorkers([]);
-      }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'system_duties/credit_check');
-    });
-
-    return () => unsub();
-  }, []);
-
   // Calculate workloads
   const workloads: EmployeeWorkloadSummary[] = employees.map((emp) => {
     const isSuperAdmin = emp.username?.toLowerCase() === 'gametpl' || emp.uid === 'admin_gametpl' || emp.name === 'Game' || emp.name === 'คุณเกม';
@@ -102,9 +83,8 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
     const regularCaseCount = activeCases.filter(c => !c.isCustomTask && c.caseType !== 'custom_task').length;
     const customTaskCount = activeCases.filter(c => c.isCustomTask || c.caseType === 'custom_task').length;
     const closedCount = cases.filter((c) => (c.assigneeId === emp.uid || c.assigneeName === emp.name || (isGame && (c.assigneeName === 'คุณเกม' || c.assigneeName === 'Game'))) && c.status === 'closed').length;
-    const isOnDuty = dutyWorkers.some((w) => w.uid === emp.uid || w.username === emp.username);
     const isOffWork = emp.workStatus === 'off_work';
-    const isBusy = !isOffWork && (activeCases.length > 0 || isOnDuty);
+    const isBusy = !isOffWork && activeCases.length > 0;
 
     return {
       uid: emp.uid,
@@ -115,7 +95,6 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
       regularCaseCount,
       customTaskCount,
       activeCases,
-      isOnDuty,
       isBusy,
       isOffWork,
       offWorkAt: emp.offWorkAt,
@@ -131,11 +110,10 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
     return true;
   });
 
-  // Sort: Busy employees first, then on duty, then idle, then off-work at the bottom
+  // Sort: Busy employees first, then idle, then off-work at the bottom
   regularEmployees.sort((a, b) => {
     if (a.isOffWork !== b.isOffWork) return a.isOffWork ? 1 : -1;
     if (b.activeCount !== a.activeCount) return b.activeCount - a.activeCount;
-    if (b.isOnDuty !== a.isOnDuty) return b.isOnDuty ? 1 : -1;
     return a.name.localeCompare(b.name, 'th');
   });
 
@@ -226,8 +204,6 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                         ? "bg-slate-50/70 dark:bg-slate-900/30 border-slate-200/70 dark:border-slate-800/80 opacity-75 hover:opacity-100"
                         : emp.activeCount > 0
                         ? "bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/60"
-                        : emp.isOnDuty
-                        ? "bg-indigo-50/30 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-900/60"
                         : "bg-emerald-50/20 dark:bg-emerald-950/10 border-slate-200/80 dark:border-slate-800"
                     )}
                   >
@@ -242,10 +218,7 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                       {emp.isOffWork ? (
                         <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-slate-400 ring-1 ring-white dark:ring-slate-900" title="เลิกงานแล้ว" />
                       ) : emp.isBusy ? (
-                        <span className={clsx(
-                          "absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-white dark:ring-slate-900",
-                          emp.isOnDuty && emp.activeCount === 0 ? "bg-indigo-600" : "bg-amber-500 animate-pulse"
-                        )} />
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-1 ring-white dark:ring-slate-900 bg-amber-500 animate-pulse" />
                       ) : (
                         <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white dark:ring-slate-900" />
                       )}
@@ -330,22 +303,6 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                                 {emp.customTaskCount} งาน
                               </span>
                             )}
-                            {emp.isOnDuty && (
-                              <span className="text-[9px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-100/70 dark:bg-indigo-950/70 px-1 py-0.5 rounded inline-flex items-center shrink-0 whitespace-nowrap border border-indigo-200/60 dark:border-indigo-800/60">
-                                <ShieldCheck className="w-2.5 h-2.5 mr-0.5" />
-                                เวรเช็ค
-                              </span>
-                            )}
-                          </>
-                        ) : emp.isOnDuty ? (
-                          <>
-                            <span className="text-[9px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-100/70 dark:bg-indigo-950/70 px-1 py-0.5 rounded inline-flex items-center shrink-0 whitespace-nowrap border border-indigo-200/60 dark:border-indigo-800/60">
-                              <ShieldCheck className="w-2.5 h-2.5 mr-0.5" />
-                              เวรเช็ค
-                            </span>
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
-                              ว่าง
-                            </span>
                           </>
                         ) : (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">

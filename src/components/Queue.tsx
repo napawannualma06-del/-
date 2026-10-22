@@ -58,7 +58,6 @@ import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { clsx } from 'clsx';
 import { findRefinanceRate, getForeignMachineMatchingRate, getRefurbishedMatchingRate, getPreviousLowerTierRate } from '../data/refinanceRates';
-import { CreditCheckDutyStation } from './CreditCheckDutyStation';
 import { SimpleEmployeeWorkload } from './SimpleEmployeeWorkload';
 import { AnimalAvatar } from './AnimalAvatar';
 import { ClockOutConfirmModal } from './ClockOutConfirmModal';
@@ -79,7 +78,7 @@ import {
   generateUniqueCaseKey,
   getDisplayCaseKey
 } from '../lib/caseUtils';
-import { DutyWorker, Case, UserProfile } from '../types';
+import { Case, UserProfile } from '../types';
 import { logActivity } from '../lib/activityService';
 import {
   getExpiredCases,
@@ -321,16 +320,6 @@ export function Queue() {
   const [customTaskTitle, setCustomTaskTitle] = useState('');
   const [customTaskRemarks, setCustomTaskRemarks] = useState('');
   const [isSubmittingCustomTask, setIsSubmittingCustomTask] = useState(false);
-
-  // Credit Check Duty State (Max 2 workers, only they + admin can create cases)
-  const [isCreditChecker, setIsCreditChecker] = useState(false);
-  const [dutyWorkers, setDutyWorkers] = useState<DutyWorker[]>([]);
-  const canCreateCase = isAdmin || isCreditChecker;
-
-  const handleDutyStatusChange = useCallback((isWorker: boolean, workers: DutyWorker[]) => {
-    setIsCreditChecker(isWorker);
-    setDutyWorkers(workers);
-  }, []);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -594,11 +583,6 @@ export function Queue() {
   const handleAddCase = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.agentName.trim() || !formData.iphoneModel || !formData.province) return;
-
-    if (!canCreateCase) {
-      alert('เฉพาะผู้ที่กำลังปฏิบัติหน้าที่ "งานเช็คเครดิต" (จำกัด 2 คน) หรือแอดมินเท่านั้นที่สามารถสร้างเคสได้\n\nกรุณากดปุ่ม "เข้าประจำเวรเช็คเครดิต" ด้านบนก่อนเปิดเคส');
-      return;
-    }
     
     setIsSubmitting(true);
     try {
@@ -891,7 +875,7 @@ export function Queue() {
             </span>
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            ไทย พลัส+ | สร้างเคส = เครดิตผ่านทันที • เฉพาะผู้เข้าเวรเช็คเครดิต (2 คน) เท่านั้นที่สร้างเคสได้
+            ไทย พลัส+ | สร้างเคส = เครดิตผ่านทันที • พนักงานทุกคนสามารถเพิ่มเคสได้
           </p>
         </div>
 
@@ -958,30 +942,12 @@ export function Queue() {
 
           <button
             type="button"
-            onClick={() => {
-              if (!canCreateCase) {
-                alert('เฉพาะผู้ที่กำลังปฏิบัติหน้าที่ "งานเช็คเครดิต" (จำกัด 2 คนพร้อมกัน) หรือแอดมินเท่านั้นที่สามารถสร้างเคสได้\n\n👉 กรุณากดปุ่ม "เข้าประจำเวรเช็คเครดิต" ที่กล่องด้านล่างก่อนเริ่มเปิดเคส');
-                return;
-              }
-              setShowAddForm(!showAddForm);
-            }}
-            className={clsx(
-              "inline-flex items-center px-4 py-2.5 border rounded-xl shadow-xs text-sm font-semibold transition cursor-pointer active:scale-95",
-              canCreateCase
-                ? "border-transparent text-white bg-indigo-600 hover:bg-indigo-700"
-                : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700"
-            )}
-            title={canCreateCase ? "สร้างเคสใหม่" : "เฉพาะผู้เข้าเวรเช็คเครดิต 2 คน หรือแอดมินเท่านั้นที่สามารถสร้างเคสได้"}
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="inline-flex items-center px-4 py-2.5 border border-transparent rounded-xl shadow-xs text-sm font-semibold transition cursor-pointer active:scale-95 text-white bg-indigo-600 hover:bg-indigo-700"
+            title={showAddForm ? 'ปิดแบบฟอร์ม' : 'เพิ่มเคสใหม่ (ทุกคนสามารถเปิดเคสได้)'}
           >
-            {canCreateCase ? (
-              <Plus className="w-4 h-4 mr-1.5" />
-            ) : (
-              <Lock className="w-4 h-4 mr-1.5 text-slate-400" />
-            )}
+            <Plus className="w-4 h-4 mr-1.5" />
             {showAddForm ? 'ปิดแบบฟอร์ม' : 'เพิ่มเคสใหม่'}
-            {!canCreateCase && (
-              <span className="ml-1 text-[11px] font-normal opacity-80">(เฉพาะเวรเช็คเครดิต)</span>
-            )}
           </button>
         </div>
       </div>
@@ -1107,11 +1073,6 @@ export function Queue() {
 
       {/* Real-time Activity Feed Banner & Modal */}
       <RecentActivityFeed />
-
-      {/* CREDIT CHECK DUTY STATION (Max 2 workers, only they can create cases) */}
-      <CreditCheckDutyStation 
-        onStatusChange={handleDutyStatusChange} 
-      />
 
       {/* SIMPLE EMPLOYEE WORKLOAD OVERVIEW (ใครกำลังรับงานอยู่กี่เคส แสดงแบบง่ายๆ) */}
       <SimpleEmployeeWorkload 
