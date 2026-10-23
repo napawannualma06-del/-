@@ -49,13 +49,37 @@ export function useInactivityTracker(): InactivityState {
   const isClockingOutRef = useRef<boolean>(false);
   const sweepLockRef = useRef<boolean>(false);
   const hasAlertedRef = useRef<boolean>(false);
+  const sessionMountedAtRef = useRef<number>(Date.now());
   const lastLocalActionTimeRef = useRef<number>(Date.now());
+  const hasAnnouncedArrivalRef = useRef<boolean>(false);
 
   const storageKey = user?.uid ? `qmanage_last_action_${user.uid}` : 'qmanage_last_action_guest';
 
+  // เมื่อผู้ใช้เข้าสู่ระบบหรือเปิดหน้านี้ ให้รีเซ็ตเวลาเรื่มต้นของเซสชันนี้ทันที
+  useEffect(() => {
+    if (!user?.uid || isAdmin || user.workStatus !== 'working') return;
+    if (!hasAnnouncedArrivalRef.current) {
+      hasAnnouncedArrivalRef.current = true;
+      const now = Date.now();
+      sessionMountedAtRef.current = now;
+      lastLocalActionTimeRef.current = now;
+      try {
+        localStorage.setItem(storageKey, String(now));
+      } catch (_) {}
+      recordSystemAction(user.uid, 'session_enter');
+    }
+  }, [user?.uid, user?.workStatus, isAdmin, storageKey]);
+
   // อ่านเวลา action ล่าสุด (sync ข้ามแท็บ)
   const getLatestActionTime = useCallback((): number => {
-    let latest = user?.lastActionAt || user?.clockedInAt || user?.createdAt || lastLocalActionTimeRef.current;
+    // สำคัญ: ห้ามนำ timestamp เก่าจากวันก่อนหน้าหรือก่อนเปิดเซสชันมาคิด
+    // ผู้ใช้ที่เพิ่งเปิดหน้าเว็บ/เพิ่งเข้าสู่ระบบ จะต้องมีเวลาแอคชั่นเริ่มต้นอย่างน้อยเท่ากับเวลาที่เปิดหน้าเว็บนี้ (sessionMountedAtRef.current)
+    let latest = Math.max(
+      user?.lastActionAt || 0,
+      user?.clockedInAt || 0,
+      sessionMountedAtRef.current,
+      lastLocalActionTimeRef.current
+    );
     try {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
@@ -66,7 +90,7 @@ export function useInactivityTracker(): InactivityState {
       }
     } catch (_) {}
     return latest;
-  }, [user?.lastActionAt, user?.clockedInAt, user?.createdAt, storageKey]);
+  }, [user?.lastActionAt, user?.clockedInAt, storageKey]);
 
   // ฟัง Custom Event เมื่อมีการทำแอคชั่นในระบบ (สร้างเคส, รับเคส, หมายเหตุ, แชท ฯลฯ)
   useEffect(() => {

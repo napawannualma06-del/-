@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { auth, db } from '../lib/firebase';
-import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, onSnapshot, updateDoc } from 'firebase/firestore';
 import { signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { UserProfile, Role, WorkStatus, AccountStatus } from '../types';
 import { clockOutEmployee, clockInEmployee, ShiftActionResult } from '../lib/shiftService';
@@ -309,6 +309,7 @@ export const useStore = create<AppState>((set, get) => ({
           if (data.accountStatus === 'rejected') {
             return { success: false, message: 'บัญชีนี้ไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
           }
+          const now = Date.now();
           const isAdmin = isUserAdmin({ ...data, uid: directDoc.id, username: cleanUsername });
           const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
           const profile: UserProfile = { 
@@ -317,10 +318,20 @@ export const useStore = create<AppState>((set, get) => ({
             name: cleanName || data.name,
             role: isAdmin ? 'admin' : 'employee',
             accountStatus: data.accountStatus || 'approved',
+            lastActionAt: now,
+            lastActiveAt: now,
           };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+          localStorage.setItem(`qmanage_last_action_${profile.uid}`, String(now));
           set({ user: profile });
           setupUserSync(profile.uid, get, set);
+          try {
+            updateDoc(doc(db, 'users', profile.uid), {
+              lastActionAt: now,
+              lastActiveAt: now,
+              updatedAt: now,
+            }).catch(() => {});
+          } catch (_) {}
           return { success: true };
         }
         return { success: false, message: 'ไม่พบบัญชีผู้ใช้นี้ กรุณาลงทะเบียนพนักงานก่อน' };
@@ -338,6 +349,7 @@ export const useStore = create<AppState>((set, get) => ({
         return { success: false, message: 'บัญชีนี้ไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
       }
 
+      const now = Date.now();
       const isAdmin = isUserAdmin({ ...data, uid: userDoc.id, username: cleanUsername });
       const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
       const profile: UserProfile = {
@@ -346,11 +358,21 @@ export const useStore = create<AppState>((set, get) => ({
         name: cleanName || data.name,
         role: isAdmin ? 'admin' : 'employee',
         accountStatus: data.accountStatus || 'approved',
+        lastActionAt: now,
+        lastActiveAt: now,
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+      localStorage.setItem(`qmanage_last_action_${profile.uid}`, String(now));
       set({ user: profile });
       setupUserSync(profile.uid, get, set);
+      try {
+        updateDoc(doc(db, 'users', profile.uid), {
+          lastActionAt: now,
+          lastActiveAt: now,
+          updatedAt: now,
+        }).catch(() => {});
+      } catch (_) {}
       return { success: true };
     } catch (error) {
       console.error('Login error', error);
@@ -502,17 +524,28 @@ export const useStore = create<AppState>((set, get) => ({
     if (profile.accountStatus === 'pending' || profile.accountStatus === 'rejected') {
       return;
     }
+    const now = Date.now();
     const isAdmin = isUserAdmin(profile);
     const cleanName = (profile.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
     const enforcedProfile: UserProfile = {
       ...profile,
       name: cleanName || profile.name,
       role: isAdmin ? 'admin' : 'employee',
-      accountStatus: profile.accountStatus || 'approved'
+      accountStatus: profile.accountStatus || 'approved',
+      lastActionAt: now,
+      lastActiveAt: now,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(enforcedProfile));
+    localStorage.setItem(`qmanage_last_action_${enforcedProfile.uid}`, String(now));
     set({ user: enforcedProfile });
     setupUserSync(enforcedProfile.uid, get, set);
+    try {
+      updateDoc(doc(db, 'users', enforcedProfile.uid), {
+        lastActionAt: now,
+        lastActiveAt: now,
+        updatedAt: now,
+      }).catch(() => {});
+    } catch (_) {}
   },
 
   loginWithGoogle: async (role: Role = 'employee') => {
@@ -699,6 +732,14 @@ export const useStore = create<AppState>((set, get) => ({
               role: isAdmin ? 'admin' : 'employee',
               name: cleanName || (isAdmin ? SUPER_ADMIN_NAME : parsed.name),
             };
+            const now = Date.now();
+            localStorage.setItem(`qmanage_last_action_${enforcedProfile.uid}`, String(now));
+            try {
+              updateDoc(doc(db, 'users', enforcedProfile.uid), {
+                lastActionAt: now,
+                lastActiveAt: now,
+              }).catch(() => {});
+            } catch (_) {}
             set({ user: enforcedProfile, loading: false });
             setupUserSync(enforcedProfile.uid, get, set);
             get().fetchRegisteredUsers();
