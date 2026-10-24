@@ -34,6 +34,7 @@ interface MobileBottomNavProps {
   onOpenMessenger: () => void;
   onOpenEmployeeQR: () => void;
   onOpenTech: () => void;
+  onOpenChangePassword?: () => void;
   onToggleDarkMode: () => void;
   isDarkMode: boolean;
   onClockToggle: () => void;
@@ -52,6 +53,7 @@ export function MobileBottomNav({
   onOpenMessenger,
   onOpenEmployeeQR,
   onOpenTech,
+  onOpenChangePassword,
   onToggleDarkMode,
   isDarkMode,
   onClockToggle,
@@ -430,6 +432,33 @@ export function MobileBottomNav({
                 </div>
                 <ChevronRight className="w-4 h-4 text-sky-500" />
               </Link>
+            )}
+
+            {/* Change Password / PIN button for Mobile */}
+            {onOpenChangePassword && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDrawer(false);
+                  onOpenChangePassword();
+                }}
+                className="w-full mb-3 p-3 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 rounded-2xl flex items-center justify-between text-left active:scale-[0.98] transition cursor-pointer group"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2 rounded-xl bg-amber-500 text-white shrink-0">
+                    <Key className="w-4 h-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <h5 className="text-xs font-bold text-amber-950 dark:text-amber-200 group-hover:text-amber-600 transition-colors">
+                      เปลี่ยนรหัสผ่าน / PIN
+                    </h5>
+                    <p className="text-[10px] text-amber-700/80 dark:text-amber-400 truncate">
+                      ตั้งรหัส PIN 4 หลักป้องกันการเข้าใช้งาน
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-amber-500 shrink-0" />
+              </button>
             )}
 
             {/* Settings & System Actions Row */}

@@ -17,6 +17,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { ForgotPasswordModal } from './ForgotPasswordModal';
 
 export function Login() {
   const { 
@@ -34,6 +35,7 @@ export function Login() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [pendingApprovalNotice, setPendingApprovalNotice] = useState<string | null>(null);
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
 
   // Login Form
   const [loginUsername, setLoginUsername] = useState('');
@@ -266,6 +268,18 @@ export function Login() {
                   />
                   <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 </div>
+                <div className="flex justify-end mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForgotPasswordModal(true);
+                      setErrorMsg(null);
+                    }}
+                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold hover:underline transition cursor-pointer"
+                  >
+                    ลืมรหัสผ่าน / PIN?
+                  </button>
+                </div>
               </div>
 
               <button
@@ -343,6 +357,16 @@ export function Login() {
 
         </div>
       </div>
+
+      <ForgotPasswordModal
+        isOpen={showForgotPasswordModal}
+        onClose={() => setShowForgotPasswordModal(false)}
+        onSuccessReset={(u, p) => {
+          setLoginUsername(u);
+          setLoginPin(p);
+          setSuccessMsg('รีเซ็ตรหัสผ่านสำเร็จแล้ว! สามารถกดเข้าสู่ระบบได้ทันที');
+        }}
+      />
     </div>
   );
 }

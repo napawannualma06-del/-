@@ -12,6 +12,10 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.name is string && data.name.size() <= 128 &&
              data.role in ['employee', 'admin'] &&
+             (!('pin' in data) || data.pin == null || (data.pin is string && data.pin.size() <= 128)) &&
+             (!('username' in data) || data.username == null || (data.username is string && data.username.size() <= 128)) &&
+             (!('passwordResetRequested' in data) || data.passwordResetRequested == null || data.passwordResetRequested is bool) &&
+             (!('passwordResetRequestedAt' in data) || data.passwordResetRequestedAt == null || data.passwordResetRequestedAt is number) &&
              (!('avatarEmoji' in data) || (data.avatarEmoji is string && data.avatarEmoji.size() <= 64)) &&
              (!('accountStatus' in data) || data.accountStatus in ['pending', 'approved', 'rejected']) &&
              (!('approvedBy' in data) || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&

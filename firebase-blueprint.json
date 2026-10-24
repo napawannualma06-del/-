@@ -63,6 +63,22 @@
           "type": "string",
           "description": "Reason for automated clock out"
         },
+        "pin": {
+          "type": "string",
+          "description": "User login PIN or password"
+        },
+        "username": {
+          "type": "string",
+          "description": "User login username"
+        },
+        "passwordResetRequested": {
+          "type": "boolean",
+          "description": "Flag indicating employee requested admin to reset password"
+        },
+        "passwordResetRequestedAt": {
+          "type": "number",
+          "description": "Timestamp of password reset request"
+        },
         "updatedAt": {
           "type": "number",
           "description": "Timestamp when user doc was last updated"

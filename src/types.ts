@@ -21,6 +21,8 @@ export interface UserProfile {
   accountStatus?: AccountStatus;
   approvedAt?: number;
   approvedBy?: string;
+  passwordResetRequested?: boolean;
+  passwordResetRequestedAt?: number;
 }
 
 export interface DutyWorker {

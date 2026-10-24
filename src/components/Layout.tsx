@@ -31,7 +31,8 @@ import {
   Layers,
   Bike,
   QrCode,
-  Building2
+  Building2,
+  KeyRound
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
@@ -39,6 +40,7 @@ import { OvertimeModal } from './OvertimeModal';
 import { AdvanceModal } from './AdvanceModal';
 import { MessengerDirectoryModal } from './MessengerDirectoryModal';
 import { EmployeeQRModal } from './EmployeeQRModal';
+import { ChangePasswordModal } from './ChangePasswordModal';
 import { MobileBottomNav } from './MobileBottomNav';
 import { isUserAdmin } from '../store/useStore';
 import { useInactivityTracker } from '../hooks/useInactivityTracker';
@@ -96,6 +98,7 @@ export function Layout() {
   const [showEmployeeQRModal, setShowEmployeeQRModal] = useState(false);
   const [employeeQRDefaultTab, setEmployeeQRDefaultTab] = useState<'directory' | 'my_qr' | 'history'>('directory');
   const [selectedEmployeeQRId, setSelectedEmployeeQRId] = useState<string | undefined>(undefined);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [activeTechToast, setActiveTechToast] = useState<TechStatusToast | null>(null);
   const [techNotifications, setTechNotifications] = useState<TechNotificationItem[]>([]);
@@ -666,6 +669,32 @@ export function Layout() {
                           </span>
                         )}
                       </button>
+
+                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                      {/* 7. เปลี่ยนรหัสผ่าน / PIN */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setShowChangePasswordModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 shrink-0">
+                            <KeyRound className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-amber-600 dark:group-hover:text-amber-400">
+                              เปลี่ยนรหัสผ่าน / PIN
+                            </span>
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              ตั้งหรือเปลี่ยนรหัสผ่าน 4 หลัก
+                            </span>
+                          </div>
+                        </div>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -763,6 +792,15 @@ export function Layout() {
                   </div>
                 </button>
  
+                <button
+                  type="button"
+                  onClick={() => setShowChangePasswordModal(true)}
+                  className="hidden md:flex w-9 h-9 items-center justify-center text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-xl transition cursor-pointer shrink-0"
+                  title="เปลี่ยนรหัสผ่าน / PIN พนักงาน"
+                >
+                  <KeyRound className="w-4 h-4 shrink-0" />
+                </button>
+
                 <button
                   type="button"
                   onClick={logout}
@@ -1017,9 +1055,16 @@ export function Layout() {
             }
           }}
           isOffWork={isOffWork}
+          onOpenChangePassword={() => setShowChangePasswordModal(true)}
           onLogout={logout}
         />
       )}
+
+      {/* Change Password / PIN Modal */}
+      <ChangePasswordModal
+        isOpen={showChangePasswordModal}
+        onClose={() => setShowChangePasswordModal(false)}
+      />
     </div>
   );
 }

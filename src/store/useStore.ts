@@ -52,6 +52,9 @@ interface AppState {
   approveUser: (uid: string) => Promise<{ success: boolean; message?: string }>;
   rejectUser: (uid: string) => Promise<{ success: boolean; message?: string }>;
   deleteUserAccount: (uid: string) => Promise<{ success: boolean; message?: string }>;
+  updateUserPin: (uid: string, newPin: string | null) => Promise<{ success: boolean; message: string }>;
+  verifyAndResetForgottenPin: (username: string, registeredName: string, newPin: string | null) => Promise<{ success: boolean; message: string }>;
+  requestAdminPasswordReset: (usernameOrName: string) => Promise<{ success: boolean; message: string }>;
   setUserDirectly: (profile: UserProfile) => void;
   clockOut: (reason?: string, isAuto?: boolean) => Promise<ShiftActionResult>;
   clockIn: () => Promise<{ success: boolean; message: string }>;
@@ -495,6 +498,156 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (error) {
       console.error('Delete user account error', error);
       return { success: false, message: 'ไม่สามารถลบบัญชีได้: ' + (error as Error).message };
+    }
+  },
+
+  updateUserPin: async (uid: string, newPin: string | null) => {
+    try {
+      const cleanPin = newPin ? newPin.trim() : null;
+      const userRef = doc(db, 'users', uid);
+      await updateDoc(userRef, {
+        pin: cleanPin,
+        passwordResetRequested: false,
+        passwordResetRequestedAt: null,
+        updatedAt: Date.now(),
+      });
+
+      // Update current user if changing own PIN
+      const currentUser = get().user;
+      if (currentUser && currentUser.uid === uid) {
+        const updated: UserProfile = {
+          ...currentUser,
+          pin: cleanPin || undefined,
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        set({ user: updated });
+      }
+
+      // Update in registeredUsers
+      const nextUsers = get().registeredUsers.map((u) => {
+        if (u.uid === uid) {
+          return { ...u, pin: cleanPin || undefined, passwordResetRequested: false };
+        }
+        return u;
+      });
+      set({ registeredUsers: nextUsers });
+      return { success: true, message: 'บันทึกรหัสผ่านเรียบร้อยแล้ว' };
+    } catch (error) {
+      console.error('Update pin error', error);
+      return { success: false, message: 'เกิดข้อผิดพลาดในการบันทึกรหัสผ่าน: ' + (error as Error).message };
+    }
+  },
+
+  verifyAndResetForgottenPin: async (username: string, registeredName: string, newPin: string | null) => {
+    try {
+      const cleanU = username.trim().toLowerCase();
+      const cleanN = registeredName.trim().toLowerCase();
+
+      // Find user
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('username', '==', cleanU));
+      const snap = await getDocs(q);
+
+      let targetDocId: string | null = null;
+      let userData: UserProfile | null = null;
+
+      if (!snap.empty) {
+        targetDocId = snap.docs[0].id;
+        userData = snap.docs[0].data() as UserProfile;
+      } else {
+        const directDoc = await getDoc(doc(db, 'users', cleanU));
+        if (directDoc.exists()) {
+          targetDocId = directDoc.id;
+          userData = directDoc.data() as UserProfile;
+        }
+      }
+
+      if (!targetDocId || !userData) {
+        return { success: false, message: 'ไม่พบชื่อผู้ใช้ / รหัสพนักงานนี้ในระบบ' };
+      }
+
+      // Compare registered name
+      const actualName = (userData.name || '').trim().toLowerCase();
+      const actualCleanName = actualName.replace(/\(แอดมิน.*?\)/g, '').trim();
+
+      const isMatch = actualName.includes(cleanN) || actualCleanName.includes(cleanN) || cleanN.includes(actualCleanName);
+      if (!isMatch) {
+        return { success: false, message: 'ชื่อที่ระบุไม่ตรงกับชื่อที่ลงทะเบียนไว้ของบัญชีนี้' };
+      }
+
+      // If dry run verification
+      if (newPin === '__CHECK_ONLY__') {
+        return { success: true, message: 'ยืนยันตัวตนสำเร็จ' };
+      }
+
+      // Proceed to update PIN
+      const cleanPin = newPin ? newPin.trim() : null;
+      await updateDoc(doc(db, 'users', targetDocId), {
+        pin: cleanPin,
+        passwordResetRequested: false,
+        passwordResetRequestedAt: null,
+        updatedAt: Date.now(),
+      });
+
+      await get().fetchRegisteredUsers();
+      return { success: true, message: 'รีเซ็ตรหัสผ่านสำเร็จเรียบร้อยแล้ว' };
+    } catch (error) {
+      console.error('Verify and reset error', error);
+      return { success: false, message: 'เกิดข้อผิดพลาดในการรีเซ็ตรหัสผ่าน: ' + (error as Error).message };
+    }
+  },
+
+  requestAdminPasswordReset: async (usernameOrName: string) => {
+    try {
+      const cleanQuery = usernameOrName.trim().toLowerCase();
+      const usersRef = collection(db, 'users');
+      
+      // Try finding by username
+      const q = query(usersRef, where('username', '==', cleanQuery));
+      const snap = await getDocs(q);
+
+      let targetDocId: string | null = null;
+      let targetName: string = usernameOrName.trim();
+
+      if (!snap.empty) {
+        targetDocId = snap.docs[0].id;
+        targetName = snap.docs[0].data().name || targetName;
+      } else {
+        // Try finding by document id
+        const directDoc = await getDoc(doc(db, 'users', cleanQuery));
+        if (directDoc.exists()) {
+          targetDocId = directDoc.id;
+          targetName = directDoc.data().name || targetName;
+        } else {
+          // Look in all registered users
+          const matched = get().registeredUsers.find(
+            (u) =>
+              (u.username && u.username.toLowerCase() === cleanQuery) ||
+              (u.name && u.name.toLowerCase().includes(cleanQuery))
+          );
+          if (matched) {
+            targetDocId = matched.uid;
+            targetName = matched.name;
+          }
+        }
+      }
+
+      if (targetDocId) {
+        await updateDoc(doc(db, 'users', targetDocId), {
+          passwordResetRequested: true,
+          passwordResetRequestedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        await get().fetchRegisteredUsers();
+      }
+
+      return {
+        success: true,
+        message: `ส่งคำขอรีเซ็ตรหัสผ่านสำหรับ "${targetName}" ถึงแอดมินเรียบร้อยแล้ว แอดมินสามารถกำหนดรหัสผ่านใหม่ให้ได้ทันทีค่ะ`,
+      };
+    } catch (error) {
+      console.error('Request admin reset error', error);
+      return { success: false, message: 'เกิดข้อผิดพลาดในการส่งคำขอ: ' + (error as Error).message };
     }
   },
 

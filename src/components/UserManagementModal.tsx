@@ -20,6 +20,7 @@ import { th } from 'date-fns/locale';
 import { clsx } from 'clsx';
 import { useStore, UserProfile } from '../store/useStore';
 import { AnimalAvatar } from './AnimalAvatar';
+import { ChangePasswordModal } from './ChangePasswordModal';
 
 interface UserManagementModalProps {
   isOpen: boolean;
@@ -31,6 +32,7 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
   const [activeTab, setActiveTab] = useState<'pending' | 'approved'>('pending');
   const [searchTerm, setSearchTerm] = useState('');
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
+  const [userToResetPassword, setUserToResetPassword] = useState<UserProfile | null>(null);
   const [loadingActionId, setLoadingActionId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -325,6 +327,11 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
                                 ออกกะ
                               </span>
                             )}
+                            {emp.passwordResetRequested && (
+                              <span className="px-1.5 py-0.2 rounded-md bg-amber-500 text-white text-[9px] font-bold animate-pulse">
+                                ขอรีเซ็ต PIN
+                              </span>
+                            )}
                           </p>
                           <p className="text-[11px] text-slate-400 dark:text-slate-500 flex items-center gap-2 mt-0.5">
                             <span>@{emp.username}</span>
@@ -336,6 +343,22 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
                       </div>
 
                       <div className="shrink-0 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setUserToResetPassword(emp)}
+                          className={clsx(
+                            "px-2 py-1.5 rounded-lg border text-xs font-semibold transition flex items-center gap-1 cursor-pointer",
+                            emp.passwordResetRequested
+                              ? "border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 hover:bg-amber-100"
+                              : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-300"
+                          )}
+                          title={`ตั้งรหัสผ่าน / รีเซ็ต PIN ให้ ${emp.name}`}
+                        >
+                          <KeyRound className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                          <span className="hidden sm:inline">
+                            {emp.passwordResetRequested ? 'รีเซ็ต PIN ด่วน' : 'รหัสผ่าน'}
+                          </span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -444,6 +467,13 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
           </div>
         </div>
       )}
+
+      {/* Change / Reset Password Modal for Admin */}
+      <ChangePasswordModal
+        isOpen={Boolean(userToResetPassword)}
+        onClose={() => setUserToResetPassword(null)}
+        targetUser={userToResetPassword}
+      />
     </div>
   );
 }
