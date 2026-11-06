@@ -4,17 +4,16 @@ import { Link } from 'react-router-dom';
 import { 
   collection, 
   query, 
-  onSnapshot, 
   addDoc, 
   updateDoc,
   deleteDoc, 
   doc, 
-  orderBy, 
   setDoc, 
   getDocs, 
   where 
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useStore } from '../store/useStore';
 import { Agent, Case, UserProfile } from '../types';
 import { THAI_BANKS, getBankInfo } from '../lib/promptpay';
 import { 
@@ -33,8 +32,7 @@ import {
   ChevronDown,
   ExternalLink,
   Phone,
-  MapPin,
-  Sparkles
+  RefreshCw
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -78,8 +76,14 @@ export function AgentManagerModal({
   initialManageView = false,
   initialEditingAgent = null,
 }: AgentManagerModalProps) {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [deletedNames, setDeletedNames] = useState<string[]>([]);
+  const {
+    agents,
+    deletedAgentNames: deletedNames,
+    agentsLoading,
+    fetchAgents,
+    upsertAgentInCache,
+    removeAgentFromCache,
+  } = useStore();
   
   // Add / Edit form state
   const [editingAgent, setEditingAgent] = useState<Agent | null>(initialEditingAgent);
@@ -104,9 +108,10 @@ export function AgentManagerModal({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Reset or fill form on open or switch
+  // Reset or fill form on open or switch, and load cached/on-demand agents
   useEffect(() => {
     if (isOpen) {
+      fetchAgents(false);
       if (initialEditingAgent) {
         setEditingAgent(initialEditingAgent);
         setFormName(initialEditingAgent.name || '');
@@ -132,94 +137,7 @@ export function AgentManagerModal({
       setSearchTerm('');
       setDeleteTarget(null);
     }
-  }, [isOpen, initialManageView, initialEditingAgent]);
-
-  // Subscribe to deleted agents blacklist
-  useEffect(() => {
-    const unsubDeleted = onSnapshot(
-      doc(db, 'system_duties', 'deleted_agents'),
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setDeletedNames(Array.isArray(data?.names) ? data.names : []);
-        } else {
-          setDeletedNames([]);
-        }
-      },
-      (err) => {
-        console.warn('deleted_agents listen notice:', err);
-      }
-    );
-
-    return () => unsubDeleted();
-  }, []);
-
-  // Real-time subscribe to agents collection
-  useEffect(() => {
-    const q = query(collection(db, 'agents'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const loadedAgents: Agent[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          loadedAgents.push({
-            id: docSnap.id,
-            name: data.name || '',
-            createdAt: data.createdAt || 0,
-            createdBy: data.createdBy,
-            createdById: data.createdById,
-            bankName: data.bankName,
-            bankAccountNumber: data.bankAccountNumber,
-            bankAccountName: data.bankAccountName,
-            promptpayType: data.promptpayType,
-            phone: data.phone,
-            province: data.province,
-            notes: data.notes,
-            qrImageUrl: data.qrImageUrl,
-            updatedAt: data.updatedAt,
-            updatedBy: data.updatedBy,
-          });
-        });
-        setAgents(loadedAgents);
-
-        // Auto-seed if collection is completely empty
-        if (loadedAgents.length === 0) {
-          seedInitialAgents();
-        }
-      },
-      (error) => {
-        console.warn('agents listen notice:', error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
-
-  // Seed default agents once if collection is empty
-  const seedInitialAgents = async () => {
-    try {
-      const historicalAgentNames = Array.from(
-        new Set(cases.map((c) => c.agentName?.trim()).filter(Boolean))
-      );
-      const combined = Array.from(
-        new Set([...DEFAULT_SEEDED_AGENTS, ...historicalAgentNames])
-      );
-
-      for (const name of combined) {
-        if (!name) continue;
-        await addDoc(collection(db, 'agents'), {
-          name,
-          createdAt: Date.now(),
-          createdBy: 'ระบบเริ่มต้น',
-          createdById: 'system',
-          bankName: 'ธนาคารกสิกรไทย (KBANK)',
-        });
-      }
-    } catch (err) {
-      console.warn('Initial agent seeding note:', err);
-    }
-  };
+  }, [isOpen, initialManageView, initialEditingAgent, fetchAgents]);
 
   // Combine loaded agents and historical cases, filtered by deletedNames
   const allAvailableAgents = useMemo(() => {
@@ -313,12 +231,21 @@ export function AgentManagerModal({
 
       if (editingAgent && !editingAgent.id.startsWith('legacy-')) {
         await updateDoc(doc(db, 'agents', editingAgent.id), agentData);
+        upsertAgentInCache({
+          ...editingAgent,
+          ...agentData,
+        });
       } else {
-        await addDoc(collection(db, 'agents'), {
+        const createdPayload = {
           ...agentData,
           createdAt: editingAgent ? editingAgent.createdAt : Date.now(),
           createdBy: currentUser?.name || currentUser?.username || 'พนักงาน',
           createdById: currentUser?.uid || '',
+        };
+        const docRef = await addDoc(collection(db, 'agents'), createdPayload);
+        upsertAgentInCache({
+          id: docRef.id,
+          ...createdPayload,
         });
       }
 
@@ -362,6 +289,8 @@ export function AgentManagerModal({
         { names: nextDeleted },
         { merge: true }
       );
+
+      removeAgentFromCache(targetName, deleteTarget.id);
 
       // Clear current selection if it was this agent
       if (currentSelectedAgent === targetName && onSelectAgent) {
@@ -675,14 +604,27 @@ export function AgentManagerModal({
                 <span>
                   💡 กดปุ่ม <span className="text-indigo-600 font-semibold">"แก้ไข"</span> เพื่อเพิ่มเลขบัญชี หรือ <span className="text-rose-600 font-semibold">"ลบ"</span> ออกจากระบบ
                 </span>
-                <Link
-                  to="/agents"
-                  onClick={onClose}
-                  className="text-indigo-600 hover:underline font-bold inline-flex items-center"
-                >
-                  เปิดหน้าเต็ม
-                  <ExternalLink className="w-3 h-3 ml-0.5" />
-                </Link>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fetchAgents(true)}
+                    disabled={agentsLoading}
+                    className="text-slate-500 hover:text-indigo-600 font-semibold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title="ดึงรายชื่อ Agent ล่าสุดจากฐานข้อมูล"
+                  >
+                    <RefreshCw className={clsx("w-3 h-3", agentsLoading && "animate-spin")} />
+                    รีเฟรช
+                  </button>
+                  <span>•</span>
+                  <Link
+                    to="/agents"
+                    onClick={onClose}
+                    className="text-indigo-600 hover:underline font-bold inline-flex items-center"
+                  >
+                    เปิดหน้าเต็ม
+                    <ExternalLink className="w-3 h-3 ml-0.5" />
+                  </Link>
+                </div>
               </div>
 
               <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800">
@@ -863,9 +805,13 @@ export function AgentSelect({
   cases = [],
   disabled = false,
 }: AgentSelectProps) {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [deletedNames, setDeletedNames] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const {
+    agents,
+    deletedAgentNames: deletedNames,
+    agentsLoading: isLoading,
+    fetchAgents,
+    removeAgentFromCache,
+  } = useStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [manageView, setManageView] = useState(false);
   const [editingAgentTarget, setEditingAgentTarget] = useState<Agent | null>(null);
@@ -878,60 +824,10 @@ export function AgentSelect({
   const [copiedBankKey, setCopiedBankKey] = useState<string | null>(null);
   const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 1. Subscribe to deleted agents blacklist
+  // Load agents on-demand when AgentSelect is mounted (uses 6-hour localStorage cache)
   useEffect(() => {
-    const unsubDeleted = onSnapshot(
-      doc(db, 'system_duties', 'deleted_agents'),
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setDeletedNames(Array.isArray(data?.names) ? data.names : []);
-        } else {
-          setDeletedNames([]);
-        }
-      },
-      (err) => {
-        console.warn('deleted_agents listen notice:', err);
-      }
-    );
-
-    return () => unsubDeleted();
-  }, []);
-
-  // 2. Real-time subscribe to agents collection
-  useEffect(() => {
-    const q = query(collection(db, 'agents'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const loadedAgents: Agent[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          loadedAgents.push({
-            id: docSnap.id,
-            name: data.name || '',
-            createdAt: data.createdAt || 0,
-            createdBy: data.createdBy,
-            createdById: data.createdById,
-            bankName: data.bankName,
-            bankAccountNumber: data.bankAccountNumber,
-            bankAccountName: data.bankAccountName,
-            phone: data.phone,
-            province: data.province,
-            notes: data.notes,
-          });
-        });
-        setAgents(loadedAgents);
-        setIsLoading(false);
-      },
-      (error) => {
-        console.warn('agents collection listen notice:', error);
-        setIsLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, []);
+    fetchAgents(false);
+  }, [fetchAgents]);
 
   // Combine loaded agents and historical cases, filtered by deletedNames
   const allAvailableAgents = useMemo(() => {
@@ -990,6 +886,8 @@ export function AgentSelect({
       const nextDeleted = Array.from(new Set([...deletedNames, targetName]));
       await setDoc(doc(db, 'system_duties', 'deleted_agents'), { names: nextDeleted }, { merge: true });
 
+      removeAgentFromCache(targetName);
+
       if (value === targetName) {
         onChange('');
       }
@@ -1020,6 +918,19 @@ export function AgentSelect({
         </label>
         
         <div className="flex items-center space-x-2 text-[11px]">
+          <button
+            type="button"
+            onClick={() => fetchAgents(true)}
+            disabled={isLoading}
+            className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer hover:underline inline-flex items-center disabled:opacity-50"
+            title="รีเฟรชรายชื่อตัวแทนล่าสุด"
+          >
+            <RefreshCw className={clsx("w-3 h-3 mr-0.5", isLoading && "animate-spin")} />
+            รีเฟรช
+          </button>
+
+          <span className="text-slate-300 dark:text-slate-600">•</span>
+
           {/* Link to full Agent Page */}
           <Link
             to="/agents"

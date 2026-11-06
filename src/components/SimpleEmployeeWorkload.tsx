@@ -50,31 +50,10 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
   onSelectEmployee,
   className,
 }) => {
-  const { user: currentUser, clockIn, fetchRegisteredUsers } = useStore();
+  const { user: currentUser, registeredUsers: employees, clockIn, fetchRegisteredUsers } = useStore();
   const isAdmin = currentUser?.role === 'admin';
-  const [employees, setEmployees] = useState<UserProfile[]>([]);
   const [isExpanded, setIsExpanded] = useState(true);
   const [clockOutTarget, setClockOutTarget] = useState<UserProfile | null>(null);
-
-  // Subscribe to registered users
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const list: UserProfile[] = [];
-      snapshot.forEach((d) => {
-        const data = d.data() as UserProfile;
-        let displayName = data.name;
-        if (displayName === 'คุณเกม' || data.username?.toLowerCase() === 'gametpl' || d.id === 'admin_gametpl') {
-          displayName = 'Game';
-        }
-        list.push({ ...data, name: displayName, uid: d.id });
-      });
-      setEmployees(list);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'users');
-    });
-
-    return () => unsub();
-  }, []);
 
   // Calculate workloads
   const workloads: EmployeeWorkloadSummary[] = employees.map((emp) => {

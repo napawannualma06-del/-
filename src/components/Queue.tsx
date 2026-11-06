@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   collection, 
@@ -282,11 +282,26 @@ function playNotificationChime() {
 }
 
 export function Queue() {
-  const { user, registeredUsers, clockIn } = useStore();
+  const {
+    user,
+    registeredUsers,
+    clockIn,
+    cases: liveCases,
+    historicalCases,
+    casesLoading: loading,
+    fetchHistoricalCases,
+  } = useStore();
   const isAdmin = isUserAdmin(user);
-  const [cases, setCases] = useState<Case[]>([]);
-  const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | 'new' | 'pending' | 'in_progress' | 'stuck' | 'remarks' | 'mine' | 'closed' | 'cancelled'>('all');
+
+  // Merge active/today liveCases with any on-demand loaded historicalCases
+  const cases = useMemo(() => {
+    const map = new Map<string, Case>();
+    historicalCases.forEach((c) => map.set(c.id, c));
+    // Live cases always override historical snapshot for up-to-date status
+    liveCases.forEach((c) => map.set(c.id, c));
+    return Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [liveCases, historicalCases]);
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string | null>(null);
   const [showQueueClockOutModal, setShowQueueClockOutModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -365,10 +380,8 @@ export function Queue() {
   const [activeCloseCase, setActiveCloseCase] = useState<Case | null>(null);
   const [activeHoldCase, setActiveHoldCase] = useState<Case | null>(null);
 
-  const initialLoadRef = useRef(true);
   const [isCheckingAutoCancel, setIsCheckingAutoCancel] = useState(false);
   const [autoCancelToast, setAutoCancelToast] = useState<string | null>(null);
-  const lastAutoCancelCheckRef = useRef<number>(0);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(() => {
     return typeof window !== 'undefined' && sessionStorage.getItem('firestore_quota_exceeded') === 'true';
   });
@@ -379,91 +392,32 @@ export function Queue() {
     return () => window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
   }, []);
 
-  const registeredUsersRef = useRef(registeredUsers);
+  // Load historical closed/cancelled cases via getDocs (with limit) ONLY when user clicks closed/cancelled tab
   useEffect(() => {
-    registeredUsersRef.current = registeredUsers;
-  }, [registeredUsers]);
+    if (activeFilter === 'closed' || activeFilter === 'cancelled') {
+      fetchHistoricalCases({ status: activeFilter, limitCount: 150 });
+    }
+  }, [activeFilter, fetchHistoricalCases]);
 
+  // Listen for new pending case notification events from centralized store listener
   useEffect(() => {
     if ('Notification' in window) {
       setNotificationStatus(Notification.permission);
     }
 
-    const q = query(collection(db, 'cases'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const casesData: Case[] = [];
-      let hasNewPending = false;
-
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added' && !initialLoadRef.current) {
-          const addedData = change.doc.data() as Case;
-          if (addedData.status === 'pending') {
-            hasNewPending = true;
-          }
-        }
-      });
-
-      if (hasNewPending && !initialLoadRef.current) {
-        playNotificationChime();
-        if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('มีเคสใหม่เข้ามาในคิว!', {
-            body: 'มีเคสใหม่รอพนักงานกดรับงาน ตรวจสอบในหน้าคิวงานได้ทันที',
-            icon: '/vite.svg',
-          });
-        }
-      }
-
-      snapshot.forEach((doc) => {
-        casesData.push({ id: doc.id, ...doc.data() } as Case);
-      });
-
-      setCases(casesData);
-      setLoading(false);
-      initialLoadRef.current = false;
-
-      // Auto-cancel check: only stuck cases & new cases older than 3 days (never cancel closed cases)
-      const now = Date.now();
-      if (now - lastAutoCancelCheckRef.current > 30000) {
-        lastAutoCancelCheckRef.current = now;
-        const expired = getExpiredCases(casesData, now, registeredUsersRef.current);
-        if (expired.length > 0) {
-          autoCancelExpiredCases(expired, 'auto', registeredUsersRef.current).catch((err) => {
-            console.error('Error auto-cancelling expired cases:', err);
-          });
-        }
-      }
-    }, (error) => {
-      const isQuota = isQuotaExceededError(error);
-      if (isQuota) {
-        setIsQuotaExceeded(true);
-      }
-      try {
-        handleFirestoreError(error, OperationType.GET, 'cases');
-      } catch (err: any) {
-        if (isQuotaExceededError(err) || isQuota) {
-          setIsQuotaExceeded(true);
-        } else {
-          console.error('Queue onSnapshot error:', err);
-        }
-      }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Periodic check every 3 minutes for cases that cross 3 days
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const expired = getExpiredCases(cases, Date.now(), registeredUsers);
-      if (expired.length > 0) {
-        autoCancelExpiredCases(expired, 'auto', registeredUsers).catch((err) => {
-          console.error('Periodic auto-cancel error:', err);
+    const handleNewPending = () => {
+      playNotificationChime();
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('มีเคสใหม่เข้ามาในคิว!', {
+          body: 'มีเคสใหม่รอพนักงานกดรับงาน ตรวจสอบในหน้าคิวงานได้ทันที',
+          icon: '/vite.svg',
         });
       }
-    }, 3 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [cases, registeredUsers]);
+    };
+
+    window.addEventListener('thaiplus-new-pending-case', handleNewPending);
+    return () => window.removeEventListener('thaiplus-new-pending-case', handleNewPending);
+  }, []);
 
   // Manual trigger for checking and cancelling cases older than 3 days (stuck & new cases only)
   const handleManualAutoCancelCheck = async () => {

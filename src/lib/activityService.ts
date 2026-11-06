@@ -2,53 +2,76 @@ import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { ActivityLog } from '../types';
 
-/**
- * บันทึก System Action (การกระทำใดๆ ในระบบ เช่น สร้างเคส, รับเคส, ใส่หมายเหตุ, แชท, OT ฯลฯ)
- * อัปเดต timestamp ความเคลื่อนไหวทางธุรกิจของพนักงาน
- */
-export async function recordSystemAction(actorId: string, _actionName?: string): Promise<void> {
-  if (!actorId) return;
+const ACTION_HEARTBEAT_THROTTLE_MS = 30 * 60 * 1000; // 30 minutes
+const lastActionWriteByUser: Record<string, number> = {};
+
+function shouldWriteUserActivityTimestamp(userId: string, force = false): boolean {
+  if (!userId || userId === 'unknown' || userId === 'system' || userId === 'admin') {
+    return false;
+  }
+  if (!force && typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+    return false;
+  }
   const now = Date.now();
-
-  // 1. บันทึกลง localStorage เพื่อ sync ระหว่างแท็บ
-  try {
-    localStorage.setItem(`qmanage_last_action_${actorId}`, String(now));
-  } catch (_) {}
-
-  // 2. ส่ง custom event ภายใน window
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('system-action', { detail: { actorId, timestamp: now } }));
+  const lastWrite = lastActionWriteByUser[userId] || 0;
+  if (!force && now - lastWrite < ACTION_HEARTBEAT_THROTTLE_MS) {
+    return false;
   }
-
-  // 3. บันทึก lastActionAt ลง Firestore document ของพนักงาน
-  try {
-    const userDocRef = doc(db, 'users', actorId);
-    await updateDoc(userDocRef, {
-      lastActionAt: now,
-      updatedAt: now,
-    });
-  } catch (err) {
-    // Silently ignore if user is demo/transient or temporary network
-  }
+  lastActionWriteByUser[userId] = now;
+  return true;
 }
 
 /**
- * บันทึก Activity Log สำหรับประวัติการกระทำเคส
- * พร้อมอัปเดต lastActionAt ให้พนักงานโดยอัตโนมัติ
+ * Records an active system action timestamp (`lastActionAt` & `lastActiveAt`) on the employee's user document.
+ * Throttled to at most once every 30 minutes unless `force = true`.
  */
-export async function logActivity(activity: Omit<ActivityLog, 'id' | 'timestamp'>) {
+export async function recordSystemAction(userId?: string, _actionName?: string, force = false) {
+  if (!userId || !shouldWriteUserActivityTimestamp(userId, force)) return;
+  const now = Date.now();
   try {
-    const now = Date.now();
-    const activitiesRef = collection(db, 'activities');
-    await addDoc(activitiesRef, {
-      ...activity,
-      timestamp: now,
+    await updateDoc(doc(db, 'users', userId), {
+      lastActionAt: now,
+      lastActiveAt: now,
     });
+  } catch {
+    // Ignore transient update errors
+  }
+}
 
-    if (activity.actorId) {
-      recordSystemAction(activity.actorId, activity.type);
+export async function logActivity(params: Omit<ActivityLog, 'id' | 'timestamp'>) {
+  const now = Date.now();
+  try {
+    // Remove undefined values to prevent Firestore errors
+    const cleanData: Record<string, unknown> = {
+      type: params.type,
+      actorId: params.actorId,
+      actorName: params.actorName,
+      description: params.description,
+      timestamp: now,
+    };
+
+    if (params.actorAvatarEmoji) cleanData.actorAvatarEmoji = params.actorAvatarEmoji;
+    if (params.caseId) cleanData.caseId = params.caseId;
+    if (params.caseKey) cleanData.caseKey = params.caseKey;
+    if (params.iphoneModel) cleanData.iphoneModel = params.iphoneModel;
+    if (params.contractNumber) cleanData.contractNumber = params.contractNumber;
+
+    await addDoc(collection(db, 'activities'), cleanData);
+
+    // Item 9: Immediately update lastActionAt & lastActiveAt when creating, accepting, or closing a case;
+    // otherwise throttle to at most once every 30 minutes.
+    const isImmediateCaseAction =
+      params.type === 'create_case' ||
+      params.type === 'accept_case' ||
+      params.type === 'close_case';
+
+    if (params.actorId && shouldWriteUserActivityTimestamp(params.actorId, isImmediateCaseAction)) {
+      updateDoc(doc(db, 'users', params.actorId), {
+        lastActionAt: now,
+        lastActiveAt: now,
+      }).catch(() => {});
     }
-  } catch (error) {
-    console.warn('Failed to log activity:', error);
+  } catch (err) {
+    console.error('Failed to log activity:', err);
   }
 }

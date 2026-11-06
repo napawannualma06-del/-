@@ -23,17 +23,25 @@ import { formatDistanceToNow, format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { clsx } from 'clsx';
 
+import { useStore } from '../store/useStore';
+
 export const RecentActivityFeed: React.FC = () => {
+  const { user } = useStore();
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
 
   useEffect(() => {
+    if (!user?.uid) {
+      setActivities([]);
+      return;
+    }
+
     const q = query(
       collection(db, 'activities'),
       orderBy('timestamp', 'desc'),
-      limit(50)
+      limit(30)
     );
 
     const unsubscribe = onSnapshot(
@@ -64,7 +72,7 @@ export const RecentActivityFeed: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [user?.uid]);
 
   const latest = activities[0];
 

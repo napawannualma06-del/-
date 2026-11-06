@@ -1,314 +1,268 @@
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  doc, 
-  getDoc, 
-  writeBatch, 
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  writeBatch,
   updateDoc,
-  addDoc
+  getDoc,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
-import { CreditCheckDuty, UserProfile, Case } from '../types';
+import { db } from './firebase';
+import { Case } from '../types';
+import { logActivity } from './activityService';
+
+const HEARTBEAT_MIN_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+const lastHeartbeatWriteByUser: Record<string, number> = {};
 
 export interface ShiftActionResult {
-  success: boolean;
   returnedCasesCount: number;
-  returnedCaseIds: string[];
-  message: string;
+  success: boolean;
+  error?: string;
 }
 
-export const AUTO_CLOCKOUT_INACTIVITY_MS = 2 * 60 * 60 * 1000; // 2 hours in ms
-
 /**
- * บันทึก "เลิกงาน" สำหรับพนักงาน (ทั้งแบบปกติและระบบออกงานอัตโนมัติ):
- * 1. ดึงเคสทั้งหมดที่พนักงานกำลังทำอยู่ (status = 'processing' หรือ 'credit_check')
- * 2. ปรับสถานะเคสเหล่านั้นทั้งหมดกลับเป็น "รอรับเคส" (status = 'pending') พร้อมเคลียร์ผู้รับผิดชอบ
- * 3. ปลดพนักงานออกจากเวรเช็คเครดิต (ถ้ามี)
- * 4. ปรับสถานะพนักงานเป็น 'off_work' ใน users/{uid}
- * 5. บันทึกประวัติ Activity Log แจ้งเตือนทีมงาน
+ * Clocks out an employee ("เลิกงาน") and returns all of their active cases
+ * ('credit_check' or 'processing') back to 'pending' (รอรับเคส) while preserving
+ * the previous assignee information ("เคยทำโดย: [Name]") and adding a clear return note.
+ * Uses preloaded active cases if provided to avoid extra Firestore reads.
  */
-export async function clockOutEmployee(
-  employeeId: string, 
-  employeeName?: string,
-  reason: string = 'พนักงานออกงาน/เลิกงาน',
-  isAuto: boolean = false
+export async function clockOutEmployeeAndReturnCases(
+  employeeId: string,
+  employeeName: string,
+  triggeredByName?: string,
+  knownCases?: Case[]
 ): Promise<ShiftActionResult> {
   if (!employeeId) {
-    return {
-      success: false,
-      returnedCasesCount: 0,
-      returnedCaseIds: [],
-      message: 'ไม่พบรหัสพนักงาน',
-    };
+    return { returnedCasesCount: 0, success: false, error: 'ไม่พบรหัสพนักงาน' };
   }
 
   try {
-    const now = Date.now();
-    const returnedCaseIds: string[] = [];
+    let activeCases: Case[] = [];
 
-    // 1. ค้นหาเคสที่พนักงานกำลังถือครองอยู่ (ทั้งด้วย uid และ name)
-    const casesRef = collection(db, 'cases');
-    const qByUid = query(
-      casesRef,
-      where('assigneeId', '==', employeeId)
-    );
-    const snapByUid = await getDocs(qByUid);
-
-    const activeDocs = new Map<string, Case>();
-
-    snapByUid.forEach((d) => {
-      const data = d.data() as Case;
-      if (data.status === 'processing' || data.status === 'credit_check') {
-        activeDocs.set(d.id, data);
-      }
-    });
-
-    // หากมีการระบุ employeeName ให้เช็คเผื่อเคสเก่าที่บันทึกด้วยชื่อ
-    if (employeeName && employeeName.trim()) {
-      const qByName = query(
-        casesRef,
-        where('assigneeName', '==', employeeName.trim())
+    if (Array.isArray(knownCases) && knownCases.length > 0) {
+      activeCases = knownCases.filter(
+        (c) =>
+          (c.status === 'credit_check' || c.status === 'processing') &&
+          (c.assigneeId === employeeId || (employeeName && c.assigneeName === employeeName))
       );
-      const snapByName = await getDocs(qByName);
-      snapByName.forEach((d) => {
-        const data = d.data() as Case;
-        if (data.status === 'processing' || data.status === 'credit_check') {
-          activeDocs.set(d.id, data);
+    } else {
+      const qById = query(
+        collection(db, 'cases'),
+        where('status', 'in', ['credit_check', 'processing'])
+      );
+      const snapById = await getDocs(qById);
+      const activeCasesMap = new Map<string, Case>();
+      snapById.forEach((docSnap) => {
+        const data = { id: docSnap.id, ...docSnap.data() } as Case;
+        if (data.assigneeId === employeeId || (employeeName && data.assigneeName === employeeName)) {
+          activeCasesMap.set(docSnap.id, data);
         }
       });
+      activeCases = Array.from(activeCasesMap.values());
     }
 
-    // 2. คืนเคสทั้งหมดกลับไปเป็น "รอรับเคส" (status: 'pending')
-    const caseEntries = Array.from(activeDocs.entries());
-    const CHUNK_SIZE = 400;
-    const actorLabel = isAuto 
-      ? 'ระบบออกงานอัตโนมัติ (ไม่มีการเคลื่อนไหวเกิน 2 ชม.)'
-      : (employeeName || 'พนักงานเลิกงาน');
+    const batch = writeBatch(db);
+    const now = Date.now();
 
-    for (let i = 0; i < caseEntries.length; i += CHUNK_SIZE) {
-      const chunk = caseEntries.slice(i, i + CHUNK_SIZE);
-      const chunkBatch = writeBatch(db);
-
-      chunk.forEach(([caseId, caseData]) => {
-        const caseDocRef = doc(db, 'cases', caseId);
-        returnedCaseIds.push(caseId);
-        
-        const currentRemarks = caseData.remarks ? `${caseData.remarks} | ` : '';
-        const remarkTag = isAuto
-          ? '[ระบบออกงานอัตโนมัติ (ไม่มีการเคลื่อนไหวเกิน 2 ชม.): ส่งกลับไปรอรับเคส]'
-          : '[พนักงานเลิกงาน: ส่งกลับไปรอรับเคส]';
-        const rawRemarks = `${currentRemarks}${remarkTag}`;
-        const safeRemarks = rawRemarks.length > 4500 ? rawRemarks.slice(-4500) : rawRemarks;
-        
-        const updatePayload: Record<string, unknown> = {
-          status: 'pending',
-          isStuck: true,
-          assigneeId: '',
-          assigneeName: '',
-          acceptedAt: null,
-          previousAssigneeName: caseData.assigneeName || employeeName || '',
-          previousAssigneeId: caseData.assigneeId || employeeId || '',
-          stuckAt: now,
-          stuckBy: actorLabel,
-          stuckReason: isAuto ? 'ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง' : reason,
-          returnedAt: now,
-          returnedBy: actorLabel,
-          returnedReason: isAuto ? 'ระบบออกงานอัตโนมัติ (ไม่มีการเคลื่อนไหวเกิน 2 ชม.)' : reason,
-          updatedAt: now,
-          remarks: safeRemarks,
-          remarksUpdatedAt: now,
-          remarksUpdatedBy: isAuto ? 'ระบบออกงานอัตโนมัติ' : 'ระบบจัดการกะ',
-        };
-        
-        chunkBatch.update(caseDocRef, updatePayload);
-      });
-
-      await chunkBatch.commit();
-    }
-
-    // 3. ปรับสถานะพนักงานในคอลเลกชัน users เป็น 'off_work'
-    let userDocRef = doc(db, 'users', employeeId);
-    const userDocSnap = await getDoc(userDocRef);
-    if (!userDocSnap.exists() && employeeName) {
-      const qUser = query(collection(db, 'users'), where('username', '==', employeeName.toLowerCase()));
-      const snapUser = await getDocs(qUser);
-      if (!snapUser.empty) {
-        userDocRef = doc(db, 'users', snapUser.docs[0].id);
-      }
-    }
-    
-    await updateDoc(userDocRef, {
+    // Update user's workStatus to 'off_work'
+    const userRef = doc(db, 'users', employeeId);
+    batch.update(userRef, {
       workStatus: 'off_work',
       offWorkAt: now,
-      autoClockOutReason: isAuto ? (reason || 'ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง') : null,
-      updatedAt: now,
     });
 
-    // 4. ปลดออกจากเวรเช็คเครดิต (ถ้ามี)
-    try {
-      const dutyDocRef = doc(db, 'system_duties', 'credit_check');
-      const dutySnap = await getDoc(dutyDocRef);
-      if (dutySnap.exists()) {
-        const dutyData = dutySnap.data() as CreditCheckDuty;
-        const currentWorkers = dutyData.workers || [];
-        const isWorkerInDuty = currentWorkers.some(
-          (w) => w.uid === employeeId || (employeeName && w.name === employeeName)
-        );
-        if (isWorkerInDuty) {
-          const updatedWorkers = currentWorkers.filter(
-            (w) => w.uid !== employeeId && (!employeeName || w.name !== employeeName)
-          );
-          await updateDoc(dutyDocRef, {
-            workers: updatedWorkers,
-            updatedAt: now,
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('Could not remove worker from credit check duty on clock out', e);
-    }
+    const actorDisplay =
+      triggeredByName && triggeredByName !== employeeName
+        ? `${employeeName} (บันทึกเลิกงานโดย ${triggeredByName})`
+        : `${employeeName} (เลิกงาน)`;
 
-    // 5. บันทึกกิจกรรมลง Activity Log
-    try {
-      await addDoc(collection(db, 'activities'), {
-        type: isAuto ? 'auto_clock_out' : 'clock_out',
-        actorId: employeeId,
-        actorName: employeeName || 'พนักงาน',
-        description: isAuto
-          ? `ระบบออกงานอัตโนมัติให้ ${employeeName || 'พนักงาน'} (ไม่มีการเคลื่อนไหวเกิน 2 ชม.)${returnedCaseIds.length > 0 ? ` ส่งคืนเคส ${returnedCaseIds.length} เคส` : ''}`
-          : `ลงเวลาเลิกงาน${returnedCaseIds.length > 0 ? ` ส่งคืนเคสกลับไปรอรับใหม่ ${returnedCaseIds.length} เคส` : ''}`,
-        timestamp: now,
+    activeCases.forEach((c) => {
+      const caseRef = doc(db, 'cases', c.id);
+      const returnReason = 'พนักงานเลิกงาน — คืนเคสกลับคิวเพื่อให้ทีมทำต่อ';
+
+      batch.update(caseRef, {
+        status: 'pending',
+        assigneeId: null,
+        assigneeName: null,
+        previousAssigneeId: c.assigneeId || employeeId,
+        previousAssigneeName: c.assigneeName || employeeName,
+        returnedBy: actorDisplay,
+        returnedById: employeeId,
+        returnedAt: now,
+        returnedReason: returnReason,
+        updatedAt: now,
       });
-    } catch (e) {
-      console.warn('Could not record activity log for shift action', e);
-    }
+    });
+
+    await batch.commit();
+
+    logActivity({
+      type: 'clock_out',
+      actorId: employeeId,
+      actorName: employeeName,
+      description:
+        activeCases.length > 0
+          ? `ออกกะ/เลิกงาน และคืนเคสกลับเข้าคิว ${activeCases.length} เคส`
+          : `ออกกะ/เลิกงานเรียบร้อยแล้ว`,
+    }).catch(() => {});
 
     return {
+      returnedCasesCount: activeCases.length,
       success: true,
-      returnedCasesCount: returnedCaseIds.length,
-      returnedCaseIds,
-      message: returnedCaseIds.length > 0
-        ? `บันทึกเลิกงานสำเร็จ ส่งเคสคืนกลับไปรอรับใหม่จำนวน ${returnedCaseIds.length} เคส`
-        : 'บันทึกเลิกงานสำเร็จ ไม่มีเคสค้างที่ต้องส่งคืน',
     };
-  } catch (error) {
-    console.error('Clock out error:', error);
-    handleFirestoreError(error, OperationType.UPDATE, `users/${employeeId}`);
+  } catch (error: any) {
+    console.error('Error clocking out and returning cases:', error);
     return {
-      success: false,
       returnedCasesCount: 0,
-      returnedCaseIds: [],
-      message: 'เกิดข้อผิดพลาดในการบันทึกเลิกงาน: ' + (error as Error).message,
-    };
-  }
-}
-
-/**
- * บันทึก "เข้างาน" (เริ่มกะใหม่) สำหรับพนักงาน
- */
-export async function clockInEmployee(employeeId: string, employeeName?: string): Promise<{ success: boolean; message: string }> {
-  if (!employeeId) {
-    return { success: false, message: 'ไม่พบรหัสพนักงาน' };
-  }
-
-  try {
-    let userDocRef = doc(db, 'users', employeeId);
-    const snap = await getDoc(userDocRef);
-    if (!snap.exists()) {
-      const qUser = query(collection(db, 'users'), where('username', '==', employeeId.toLowerCase()));
-      const snapUser = await getDocs(qUser);
-      if (!snapUser.empty) {
-        userDocRef = doc(db, 'users', snapUser.docs[0].id);
-      }
-    }
-
-    const now = Date.now();
-    await updateDoc(userDocRef, {
-      workStatus: 'working',
-      offWorkAt: null,
-      clockedInAt: now,
-      lastActionAt: now,
-      lastActiveAt: now,
-      autoClockOutReason: null,
-      updatedAt: now,
-    });
-
-    try {
-      await addDoc(collection(db, 'activities'), {
-        type: 'clock_in',
-        actorId: employeeId,
-        actorName: employeeName || (snap.exists() ? (snap.data() as UserProfile).name : 'พนักงาน'),
-        description: `ลงเวลาเข้างาน พร้อมรับเคสแล้ว`,
-        timestamp: now,
-      });
-    } catch (_) {}
-
-    return {
-      success: true,
-      message: 'บันทึกเข้างานสำเร็จ พร้อมรับเคสแล้ว',
-    };
-  } catch (error) {
-    console.error('Clock in error:', error);
-    handleFirestoreError(error, OperationType.UPDATE, `users/${employeeId}`);
-    return {
       success: false,
-      message: 'เกิดข้อผิดพลาดในการบันทึกเข้างาน: ' + (error as Error).message,
+      error: error?.message || 'เกิดข้อผิดพลาดในการบันทึกเลิกงาน',
     };
   }
 }
 
 /**
- * อัปเดต Heartbeat ความเคลื่อนไหวล่าสุดของพนักงานลงใน Firestore
+ * Clocks in an employee ("เข้างาน" / "พร้อมรับเคส")
  */
-export async function updateEmployeeHeartbeat(employeeId: string): Promise<void> {
-  if (!employeeId) return;
+export async function clockInEmployee(employeeId: string): Promise<boolean> {
+  if (!employeeId) return false;
   try {
-    const userDocRef = doc(db, 'users', employeeId);
-    await updateDoc(userDocRef, {
-      lastActiveAt: Date.now(),
-      updatedAt: Date.now(),
+    const now = Date.now();
+    const userRef = doc(db, 'users', employeeId);
+    await updateDoc(userRef, {
+      workStatus: 'working',
+      lastActiveAt: now,
+      lastActionAt: now,
+      clockedInAt: now,
+      autoClockOutReason: '',
     });
-  } catch (e) {
-    // Silently ignore transient errors for heartbeats
+    lastHeartbeatWriteByUser[employeeId] = now;
+    return true;
+  } catch (error) {
+    console.error('Error clocking in employee:', error);
+    return false;
   }
 }
 
 /**
- * ตรวจสอบและออกงานอัตโนมัติให้พนักงานที่ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง
+ * Updates the employee's lastActiveAt heartbeat in Firestore.
+ * Throttled to write no more frequently than once every 30 minutes while tab is visible,
+ * unless force = true (e.g. when confirming active status or performing core case actions).
+ */
+export async function updateEmployeeHeartbeat(employeeId: string, force = false): Promise<void> {
+  if (!employeeId) return;
+  if (!force && typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+    return;
+  }
+  const now = Date.now();
+  const lastWrite = lastHeartbeatWriteByUser[employeeId] || 0;
+  if (!force && now - lastWrite < HEARTBEAT_MIN_INTERVAL_MS) {
+    return;
+  }
+  lastHeartbeatWriteByUser[employeeId] = now;
+  try {
+    await updateDoc(doc(db, 'users', employeeId), {
+      lastActiveAt: now,
+      ...(force ? { lastActionAt: now } : {}),
+    });
+  } catch {
+    // Ignore transient heartbeat errors
+  }
+}
+
+/**
+ * Automatically clocks out an inactive employee ("ว่างงานอัตโนมัติ") after inactivity timeout (3 hours)
+ * and returns all of their active cases ('credit_check' or 'processing') back to 'pending'
+ * using in-memory store cases without querying Firestore again.
  */
 export async function autoClockOutInactiveEmployee(
-  employeeId: string, 
+  employeeId: string,
   employeeName: string,
-  reason: string = 'ไม่มีการสร้างเคส รับเคส ใส่หมายเหตุ หรือแอคชั่นในระบบเกิน 2 ชั่วโมง'
-): Promise<ShiftActionResult> {
-  // ยกเว้น Admin / Super Admin จากการออกงานอัตโนมัติ
-  const nameClean = (employeeName || '').toLowerCase().trim();
-  const idClean = (employeeId || '').toLowerCase().trim();
-  const isAdminTarget = 
-    idClean === 'admin_gametpl' ||
-    idClean === 'admin_napawan' ||
-    idClean.startsWith('admin_') ||
-    nameClean === 'game' ||
-    nameClean === 'gametpl' ||
-    nameClean === 'คุณเกม' ||
-    nameClean.includes('napawan') ||
-    nameClean.includes('นภวรรณ');
-
-  if (isAdminTarget) {
-    return {
-      success: false,
-      returnedCasesCount: 0,
-      returnedCaseIds: [],
-      message: 'ยกเว้นผู้ดูแลระบบ (Admin) จากการเปลี่ยนเป็นว่างงานอัตโนมัติ',
-    };
+  reason = 'ไม่มีการเคลื่อนไหวในระบบเกิน 3 ชั่วโมง',
+  knownCases?: Case[]
+): Promise<{ returnedCasesCount: number; success: boolean; alreadyOffWork?: boolean }> {
+  if (!employeeId) {
+    return { returnedCasesCount: 0, success: false };
   }
 
-  return await clockOutEmployee(
-    employeeId,
-    employeeName,
-    reason,
-    true
-  );
+  try {
+    const userRef = doc(db, 'users', employeeId);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      if (userData.workStatus === 'off_work') {
+        return { returnedCasesCount: 0, success: true, alreadyOffWork: true };
+      }
+    }
+
+    let activeCases: Case[] = [];
+    if (Array.isArray(knownCases)) {
+      activeCases = knownCases.filter(
+        (c) =>
+          (c.status === 'credit_check' || c.status === 'processing') &&
+          (c.assigneeId === employeeId || (employeeName && c.assigneeName === employeeName))
+      );
+    } else {
+      const qActive = query(
+        collection(db, 'cases'),
+        where('status', 'in', ['credit_check', 'processing'])
+      );
+      const snapActive = await getDocs(qActive);
+      const activeCasesMap = new Map<string, Case>();
+      snapActive.forEach((docSnap) => {
+        const data = { id: docSnap.id, ...docSnap.data() } as Case;
+        if (data.assigneeId === employeeId || (employeeName && data.assigneeName === employeeName)) {
+          activeCasesMap.set(docSnap.id, data);
+        }
+      });
+      activeCases = Array.from(activeCasesMap.values());
+    }
+
+    const batch = writeBatch(db);
+    const now = Date.now();
+
+    batch.update(userRef, {
+      workStatus: 'off_work',
+      offWorkAt: now,
+      autoClockOutReason: reason,
+    });
+
+    activeCases.forEach((c) => {
+      const caseRef = doc(db, 'cases', c.id);
+      batch.update(caseRef, {
+        status: 'pending',
+        assigneeId: null,
+        assigneeName: null,
+        previousAssigneeId: c.assigneeId || employeeId,
+        previousAssigneeName: c.assigneeName || employeeName,
+        returnedBy: `${employeeName} (ระบบพักงานอัตโนมัติ)`,
+        returnedById: employeeId,
+        returnedAt: now,
+        returnedReason: `คืนเคสอัตโนมัติ: ${reason}`,
+        updatedAt: now,
+      });
+    });
+
+    await batch.commit();
+
+    logActivity({
+      type: 'auto_clock_out',
+      actorId: employeeId,
+      actorName: employeeName,
+      description:
+        activeCases.length > 0
+          ? `เปลี่ยนเป็นว่างงานอัตโนมัติ (${reason}) และคืนเคสกลับเข้าคิว ${activeCases.length} เคส`
+          : `เปลี่ยนเป็นว่างงานอัตโนมัติ (${reason})`,
+    }).catch(() => {});
+
+    return {
+      returnedCasesCount: activeCases.length,
+      success: true,
+    };
+  } catch (error) {
+    console.error('Error in autoClockOutInactiveEmployee:', error);
+    return { returnedCasesCount: 0, success: false };
+  }
 }
+
+export const clockOutEmployee = clockOutEmployeeAndReturnCases;

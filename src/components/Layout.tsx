@@ -8,7 +8,7 @@ import { AvatarSelectorModal } from './AvatarSelectorModal';
 import { TeamChatBubble } from './TeamChatBubble';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { NotificationCenter, TechNotificationItem } from './NotificationCenter';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { playNotificationChime } from '../lib/sound';
 import { 
@@ -174,10 +174,29 @@ export function Layout() {
     setTechNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
-  // Listen to technical_issues for pending badge and employee status update notifications
+  // Listen to technical_issues, overtime_requests, and advance_requests using filtered queries
+  // (Admins listen only to pending/in_progress items; Employees listen only to their own items)
   useEffect(() => {
-    const q = query(collection(db, 'technical_issues'));
-    const unsub = onSnapshot(q, (snap) => {
+    if (!user?.uid) {
+      setPendingTechCount(0);
+      setPendingOTCount(0);
+      setPendingAdvanceCount(0);
+      setTechNotifications([]);
+      return;
+    }
+    const isAdmin = isUserAdmin(user);
+
+    const qTech = isAdmin
+      ? query(
+          collection(db, 'technical_issues'),
+          where('status', 'in', ['pending', 'in_progress'])
+        )
+      : query(
+          collection(db, 'technical_issues'),
+          where('reporterId', '==', user.uid)
+        );
+
+    const unsub = onSnapshot(qTech, (snap) => {
       let count = 0;
       const notifsList: TechNotificationItem[] = [];
 
@@ -211,11 +230,9 @@ export function Layout() {
 
           // If not initial load and status has changed to in_progress or resolved
           if (!initialTechLoadRef.current && oldStatus && oldStatus !== newStatus && (newStatus === 'in_progress' || newStatus === 'resolved')) {
-            // Play notification chime
             playNotificationChime();
 
             const notifKey = `${doc.id}_${newStatus}_${d.updatedAt || Date.now()}`;
-            // Set floating in-app toast
             const toastData: TechStatusToast = {
               id: `${doc.id}-${Date.now()}`,
               issueId: doc.id,
@@ -228,13 +245,11 @@ export function Layout() {
             };
             setActiveTechToast(toastData);
 
-            // Auto dismiss after 9 seconds
             if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
             toastTimeoutRef.current = setTimeout(() => {
               setActiveTechToast(null);
             }, 9000);
 
-            // Trigger system browser notification if granted
             if ('Notification' in window && Notification.permission === 'granted') {
               try {
                 const notifTitle = newStatus === 'in_progress' ? '🛠️ แอดมินรับเรื่องแล้ว!' : '✅ ปัญหาได้รับการแก้ไขเสร็จสิ้น!';
@@ -249,7 +264,6 @@ export function Layout() {
             }
           }
 
-          // Save current status for tracking next change
           knownTechStatusRef.current.set(doc.id, newStatus);
         }
       });
@@ -260,43 +274,31 @@ export function Layout() {
       setPendingTechCount(count);
     }, () => {});
 
-    // Listen to overtime_requests for pending badge (for admins: all, for employees: only own pending)
-    const otQuery = query(collection(db, 'overtime_requests'));
+    // Listen to overtime_requests for pending badge (for admins: status=='pending', for employees: employeeId==user.uid)
+    const otQuery = isAdmin
+      ? query(collection(db, 'overtime_requests'), where('status', '==', 'pending'))
+      : query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid));
     const unsubOT = onSnapshot(otQuery, (snap) => {
       let pendingCount = 0;
-      const isAdmin = isUserAdmin(user);
       snap.forEach((doc) => {
         const d = doc.data();
         if (d.status === 'pending') {
-          if (isAdmin) {
-            pendingCount++;
-          } else if (
-            user &&
-            (d.employeeId === user.uid || (user.username && d.employeeUsername === user.username))
-          ) {
-            pendingCount++;
-          }
+          pendingCount++;
         }
       });
       setPendingOTCount(pendingCount);
     }, () => {});
 
-    // Listen to advance_requests for pending badge (for admins: all, for employees: only own pending)
-    const advanceQuery = query(collection(db, 'advance_requests'));
+    // Listen to advance_requests for pending badge (for admins: status=='pending', for employees: employeeId==user.uid)
+    const advanceQuery = isAdmin
+      ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
+      : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
     const unsubAdvance = onSnapshot(advanceQuery, (snap) => {
       let pendingCount = 0;
-      const isAdmin = isUserAdmin(user);
       snap.forEach((doc) => {
         const d = doc.data();
         if (d.status === 'pending') {
-          if (isAdmin) {
-            pendingCount++;
-          } else if (
-            user &&
-            (d.employeeId === user.uid || (user.username && d.employeeUsername === user.username))
-          ) {
-            pendingCount++;
-          }
+          pendingCount++;
         }
       });
       setPendingAdvanceCount(pendingCount);
@@ -308,7 +310,7 @@ export function Layout() {
       unsubAdvance();
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     };
-  }, [user]);
+  }, [user?.uid, user?.username, user?.role]);
 
   useEffect(() => {
     if ('Notification' in window) {

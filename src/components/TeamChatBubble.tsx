@@ -38,46 +38,97 @@ export const TeamChatBubble: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
+  const [hasNewMention, setHasNewMention] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastSeenTimeRef = useRef<number>(Date.now());
+  const lastNotifiedMsgIdRef = useRef<string | null>(null);
 
-  // Subscribe to real-time chat messages
+  // Subscribe to real-time chat messages:
+  // - When chat window is OPEN (isOpen === true): listen to newest 50 messages (reversed for chronological display), and unsubscribe immediately when closed.
+  // - When chat window is CLOSED (!isOpen): listen ONLY to limit(1) newest message to detect new messages or @mentions with minimal reads (1 read).
   useEffect(() => {
-    const q = query(
-      collection(db, 'team_chats'),
-      orderBy('createdAt', 'asc'),
-      limit(100)
-    );
+    if (!user?.uid) {
+      setMessages([]);
+      setUnreadCount(0);
+      setHasNewMention(false);
+      return;
+    }
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const msgs: ChatMessage[] = [];
-        snapshot.forEach((doc) => {
-          msgs.push({ id: doc.id, ...doc.data() } as ChatMessage);
-        });
-        setMessages(msgs);
+    if (isOpen) {
+      const qOpen = query(
+        collection(db, 'team_chats'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
 
-        // Calculate unread count if chat is closed
-        if (!isOpen && msgs.length > 0) {
-          const newMsgs = msgs.filter((m) => m.createdAt > lastSeenTimeRef.current && m.senderId !== user?.uid);
-          setUnreadCount(newMsgs.length);
+      const unsubscribeOpen = onSnapshot(
+        qOpen,
+        (snapshot) => {
+          const msgs: ChatMessage[] = [];
+          snapshot.forEach((doc) => {
+            msgs.push({ id: doc.id, ...doc.data() } as ChatMessage);
+          });
+          // Reverse in memory so messages display chronologically (oldest -> newest among the latest 50)
+          const chronologicalMsgs = msgs.reverse();
+          setMessages(chronologicalMsgs);
+          if (chronologicalMsgs.length > 0) {
+            lastNotifiedMsgIdRef.current = chronologicalMsgs[chronologicalMsgs.length - 1].id;
+          }
+          lastSeenTimeRef.current = Date.now();
+        },
+        (error) => {
+          console.warn('Realtime team chat (open) listener error:', error);
         }
-      },
-      (error) => {
-        console.warn('Realtime team chat listener error:', error);
-      }
-    );
+      );
 
-    return () => unsubscribe();
-  }, [isOpen, user?.uid]);
+      return () => unsubscribeOpen();
+    } else {
+      // Closed state: only listen to the single latest message (limit 1)
+      const qClosed = query(
+        collection(db, 'team_chats'),
+        orderBy('createdAt', 'desc'),
+        limit(1)
+      );
+
+      const unsubscribeClosed = onSnapshot(
+        qClosed,
+        (snapshot) => {
+          if (snapshot.empty) return;
+          const docSnap = snapshot.docs[0];
+          const latestMsg = { id: docSnap.id, ...docSnap.data() } as ChatMessage;
+
+          if (
+            latestMsg.createdAt > lastSeenTimeRef.current &&
+            latestMsg.senderId !== user.uid &&
+            lastNotifiedMsgIdRef.current !== latestMsg.id
+          ) {
+            lastNotifiedMsgIdRef.current = latestMsg.id;
+            setUnreadCount((prev) => prev + 1);
+            const mentionedMe =
+              (latestMsg.mentions && user.username && latestMsg.mentions.includes(user.username)) ||
+              (user.name && latestMsg.text?.includes(`@${user.name}`)) ||
+              (user.username && latestMsg.text?.includes(`@${user.username}`));
+            if (mentionedMe) {
+              setHasNewMention(true);
+            }
+          }
+        },
+        (error) => {
+          console.warn('Realtime team chat (closed limit 1) listener error:', error);
+        }
+      );
+
+      return () => unsubscribeClosed();
+    }
+  }, [isOpen, user?.uid, user?.username, user?.name]);
 
   // Scroll to bottom when new message arrives and chat is open
   useEffect(() => {
     if (isOpen) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       setUnreadCount(0);
+      setHasNewMention(false);
       lastSeenTimeRef.current = Date.now();
     }
   }, [messages, isOpen]);
@@ -273,6 +324,7 @@ export const TeamChatBubble: React.FC = () => {
             onClick={() => {
               setIsOpen(true);
               setUnreadCount(0);
+              setHasNewMention(false);
               lastSeenTimeRef.current = Date.now();
             }}
             className="relative flex items-center gap-2 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white rounded-full shadow-lg shadow-indigo-600/30 active:scale-95 transition-all duration-200 cursor-pointer group"
@@ -280,8 +332,11 @@ export const TeamChatBubble: React.FC = () => {
             <div className="relative">
               <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-white group-hover:scale-110 transition-transform" />
               {unreadCount > 0 && (
-                <span className="absolute -top-2 -right-2 px-1.5 py-0.5 bg-rose-500 text-white text-[10px] font-bold rounded-full animate-bounce shadow-xs">
-                  {unreadCount > 99 ? '99+' : unreadCount}
+                <span className={clsx(
+                  "absolute -top-2 -right-2 px-1.5 py-0.5 text-white text-[10px] font-bold rounded-full animate-bounce shadow-xs",
+                  hasNewMention ? "bg-amber-500" : "bg-rose-500"
+                )}>
+                  {hasNewMention ? '@' : (unreadCount > 99 ? '99+' : unreadCount)}
                 </span>
               )}
             </div>

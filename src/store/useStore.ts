@@ -1,946 +1,1429 @@
 import { create } from 'zustand';
-import { auth, db } from '../lib/firebase';
-import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, onSnapshot, updateDoc } from 'firebase/firestore';
-import { signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
-import { UserProfile, Role, WorkStatus, AccountStatus } from '../types';
-import { clockOutEmployee, clockInEmployee, ShiftActionResult } from '../lib/shiftService';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  deleteDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  onSnapshot,
+  updateDoc,
+  orderBy,
+  limit,
+} from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, ensureFirebaseAnonymousAuth } from '../lib/firebase';
+import { UserProfile, Role, WorkStatus, AccountStatus, Case, Agent } from '../types';
+import { ANIMAL_LIST } from '../components/AnimalAvatar';
+import { clockOutEmployeeAndReturnCases, ShiftActionResult } from '../lib/shiftService';
 
 export type { Role, WorkStatus, AccountStatus, UserProfile };
 
-export const SUPER_ADMIN_USERNAME = 'gametpl';
-export const SUPER_ADMIN_PIN = 'gametpl';
-export const SUPER_ADMIN_NAME = 'Game';
+function getDeterministicAnimalEmoji(identifier: string): string {
+  const clean = (identifier || 'default').trim().toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  return ANIMAL_LIST[hash % ANIMAL_LIST.length].emoji;
+}
 
-export const isUserAdmin = (user?: { role?: string; username?: string; email?: string; name?: string; uid?: string } | null): boolean => {
+// ============================================================================
+// Web Crypto PIN Hashing Helpers (SHA-256 + Salt in Browser)
+// ============================================================================
+export function generatePinSalt(): string {
+  const bytes = new Uint8Array(16);
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export async function computePinHash(pin: string, salt: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`${salt}:${pin}`);
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function verifyPinBrowser(pin: string, pinHash: string, pinSalt: string): Promise<boolean> {
+  if (!pinHash || !pinSalt) return false;
+  const computed = await computePinHash(pin, pinSalt);
+  return computed === pinHash;
+}
+
+const USER_STORAGE_KEY = 'thaiplus_current_user_v1';
+const USERS_CACHE_KEY = 'thaiplus_cached_employees';
+const USERS_CACHE_TS_KEY = 'thaiplus_cached_employees_ts';
+const USERS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes cache for Login page
+
+const AGENTS_CACHE_KEY = 'thaiplus_agents_cache_v1';
+const AGENTS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours cache for Agents
+
+// Helper to check if a user has Admin privileges (Super Admin Game or Admin Napawan)
+export function isUserAdmin(user?: UserProfile | null): boolean {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  const u = (user.username || '').trim().toLowerCase();
-  const e = (user.email || '').trim().toLowerCase();
-  const n = (user.name || '').trim().toLowerCase();
-  const id = (user.uid || '').trim().toLowerCase();
-  return (
-    u === 'gametpl' ||
-    u === 'game' ||
-    u === 'napawan' ||
-    id === 'admin_gametpl' ||
-    id === 'admin_napawan' ||
-    n === 'gametpl' ||
-    n === 'game' ||
-    n === 'คุณเกม' ||
-    n === 'napawan' ||
-    n.includes('napawan') ||
-    n.includes('นภวรรณ') ||
-    e.includes('napawan') ||
-    e.includes('gametpl')
-  );
-};
+  const uname = (user.username || '').toLowerCase().trim();
+  const name = (user.name || '').toLowerCase().trim();
+  if (
+    uname === 'gametpl' ||
+    user.uid === 'admin_gametpl' ||
+    uname === 'napawan' ||
+    name.includes('napawan') ||
+    user.uid === 'admin_napawan'
+  ) {
+    return true;
+  }
+  return false;
+}
 
-let userDocUnsubscribe: (() => void) | null = null;
-let usersCollectionUnsubscribe: (() => void) | null = null;
+function sanitizeUserProfile(raw: any, docId: string): UserProfile {
+  const hasPin = Boolean(
+    raw?.hasPin ||
+    (typeof raw?.pinHash === 'string' && raw.pinHash.length > 0) ||
+    (typeof raw?.pin === 'string' && raw.pin.length > 0)
+  );
+  const copy = { ...raw, uid: docId, hasPin };
+  delete copy.pin;
+  delete copy.pinHash;
+  delete copy.pinSalt;
+  return copy as UserProfile;
+}
+
+export interface HistoricalFetchOptions {
+  status?: 'closed' | 'cancelled';
+  minCreatedAt?: number;
+  maxCreatedAt?: number;
+  limitCount?: number;
+  forceRefresh?: boolean;
+}
+
+interface AgentsCachePayload {
+  agents: Agent[];
+  deletedAgentNames: string[];
+  timestamp: number;
+}
+
+function loadInitialAgentsCache(): AgentsCachePayload {
+  try {
+    const raw = localStorage.getItem(AGENTS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.agents)) {
+        return {
+          agents: parsed.agents,
+          deletedAgentNames: Array.isArray(parsed.deletedAgentNames) ? parsed.deletedAgentNames : [],
+          timestamp: Number(parsed.timestamp) || 0,
+        };
+      }
+    }
+  } catch {}
+  return { agents: [], deletedAgentNames: [], timestamp: 0 };
+}
+
+function saveAgentsCache(agents: Agent[], deletedAgentNames: string[], timestamp = Date.now()) {
+  try {
+    const payload: AgentsCachePayload = {
+      agents,
+      deletedAgentNames,
+      timestamp,
+    };
+    localStorage.setItem(AGENTS_CACHE_KEY, JSON.stringify(payload));
+  } catch {}
+}
 
 interface AppState {
   user: UserProfile | null;
   loading: boolean;
-  isDarkMode: boolean;
   registeredUsers: UserProfile[];
   userAvatars: Record<string, string>;
+  isDarkMode: boolean;
+
+  // Centralized Real-time Data (Single Listener Set across entire app)
+  cases: Case[]; // Active cases (pending, credit_check, processing) + Today's cases
+  historicalCases: Case[]; // Loaded on-demand via getDocs with limit when viewing history
+  casesLoading: boolean;
+  historicalLoading: boolean;
+
+  // Agents loaded on-demand via getDocs + 6h localStorage cache
+  agents: Agent[];
+  deletedAgentNames: string[];
+  agentsLastFetchedAt: number;
+  agentsLoading: boolean;
+
+  initAuth: () => void;
+  startRealtimeListeners: () => void;
+  stopRealtimeListeners: () => void;
+  fetchHistoricalCases: (options: HistoricalFetchOptions) => Promise<Case[]>;
+
+  // On-demand Agent actions with 6h cache
+  fetchAgents: (forceRefresh?: boolean) => Promise<void>;
+  upsertAgentInCache: (agent: Agent) => void;
+  removeAgentFromCache: (agentName: string, agentId?: string) => void;
+
   toggleDarkMode: () => void;
-  fetchRegisteredUsers: () => Promise<void>;
-  updateAvatar: (emoji: string) => Promise<{ success: boolean; message?: string }>;
-  loginWithUsername: (username: string, pin: string) => Promise<{ success: boolean; message?: string }>;
-  registerEmployee: (name: string, username: string, pin?: string) => Promise<{ success: boolean; pendingApproval?: boolean; message?: string }>;
+  fetchRegisteredUsers: (forceRefresh?: boolean) => Promise<void>;
+  loginWithUsername: (username: string, pin?: string) => Promise<{ success: boolean; message?: string }>;
+  registerEmployee: (name: string, username: string, pin?: string) => Promise<{ success: boolean; message?: string; pendingApproval?: boolean }>;
   approveUser: (uid: string) => Promise<{ success: boolean; message?: string }>;
   rejectUser: (uid: string) => Promise<{ success: boolean; message?: string }>;
   deleteUserAccount: (uid: string) => Promise<{ success: boolean; message?: string }>;
-  updateUserPin: (uid: string, newPin: string | null) => Promise<{ success: boolean; message: string }>;
-  verifyAndResetForgottenPin: (username: string, registeredName: string, newPin: string | null) => Promise<{ success: boolean; message: string }>;
-  requestAdminPasswordReset: (usernameOrName: string) => Promise<{ success: boolean; message: string }>;
-  setUserDirectly: (profile: UserProfile) => void;
-  clockOut: (reason?: string, isAuto?: boolean) => Promise<ShiftActionResult>;
-  clockIn: () => Promise<{ success: boolean; message: string }>;
+  setUserDirectly: (user: UserProfile) => Promise<void>;
+  clockIn: () => Promise<void>;
+  clockOut: () => Promise<ShiftActionResult>;
+  updateAvatar: (emoji: string) => Promise<{ success: boolean; message?: string }>;
+  changeUserPassword: (
+    targetUid: string,
+    newPin: string,
+    currentPin?: string,
+    isAdminOverride?: boolean
+  ) => Promise<{ success: boolean; message?: string }>;
+  resetPasswordWithIdentity: (
+    username: string,
+    registeredName: string,
+    newPin: string
+  ) => Promise<{ success: boolean; message?: string }>;
+  requestAdminPasswordReset: (username: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => Promise<void>;
-  initAuth: () => Promise<void>;
 }
 
-const STORAGE_KEY = 'qmanage_current_user_v2';
-const THEME_KEY = 'qmanage_theme_mode';
-
-const initialDark = (() => {
-  if (typeof window === 'undefined') return false;
-  const saved = localStorage.getItem(THEME_KEY);
-  if (saved !== null) {
-    return saved === 'dark';
-  }
-  // Default to Light Mode on first visit as requested by user
-  return false;
-})();
-
-if (typeof document !== 'undefined') {
-  if (initialDark) {
-    document.documentElement.classList.add('dark');
-  } else {
-    document.documentElement.classList.remove('dark');
-  }
-}
-
-function setupUserSync(
-  uid: string, 
-  get: () => AppState, 
-  set: (val: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
-) {
-  if (userDocUnsubscribe) {
-    userDocUnsubscribe();
-    userDocUnsubscribe = null;
-  }
-  userDocUnsubscribe = onSnapshot(doc(db, 'users', uid), (snap) => {
-    if (snap.exists()) {
-      const freshData = snap.data() as Partial<UserProfile>;
-      const currentUser = get().user;
-      if (currentUser && currentUser.uid === uid) {
-        let changed = false;
-        let nextWorkStatus = currentUser.workStatus;
-        let nextOffWorkAt = currentUser.offWorkAt;
-        let nextName = currentUser.name;
-        let nextAvatarEmoji = currentUser.avatarEmoji;
-        let nextLastActiveAt = currentUser.lastActiveAt;
-        let nextLastActionAt = currentUser.lastActionAt;
-        let nextClockedInAt = currentUser.clockedInAt;
-        let nextAutoClockOutReason = currentUser.autoClockOutReason;
-
-        if (freshData.workStatus !== undefined && freshData.workStatus !== currentUser.workStatus) {
-          nextWorkStatus = freshData.workStatus;
-          nextOffWorkAt = freshData.offWorkAt;
-          changed = true;
-        }
-        if (freshData.lastActionAt !== undefined && freshData.lastActionAt !== currentUser.lastActionAt) {
-          nextLastActionAt = freshData.lastActionAt;
-          changed = true;
-        }
-        if (freshData.lastActiveAt !== undefined && freshData.lastActiveAt !== currentUser.lastActiveAt) {
-          nextLastActiveAt = freshData.lastActiveAt;
-          changed = true;
-        }
-        if (freshData.clockedInAt !== undefined && freshData.clockedInAt !== currentUser.clockedInAt) {
-          nextClockedInAt = freshData.clockedInAt;
-          changed = true;
-        }
-        if (freshData.autoClockOutReason !== undefined && freshData.autoClockOutReason !== currentUser.autoClockOutReason) {
-          nextAutoClockOutReason = freshData.autoClockOutReason;
-          changed = true;
-        }
-        if (freshData.name && freshData.name !== currentUser.name && currentUser.username?.toLowerCase() !== SUPER_ADMIN_USERNAME) {
-          nextName = freshData.name;
-          changed = true;
-        }
-        if (freshData.avatarEmoji !== undefined && freshData.avatarEmoji !== currentUser.avatarEmoji) {
-          nextAvatarEmoji = freshData.avatarEmoji;
-          changed = true;
-        }
-
-        if (changed) {
-          const updatedProfile: UserProfile = {
-            ...currentUser,
-            name: nextName,
-            workStatus: nextWorkStatus,
-            offWorkAt: nextOffWorkAt,
-            lastActiveAt: nextLastActiveAt,
-            lastActionAt: nextLastActionAt,
-            clockedInAt: nextClockedInAt,
-            autoClockOutReason: nextAutoClockOutReason,
-            avatarEmoji: nextAvatarEmoji,
-          };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProfile));
-          set({ user: updatedProfile });
-        }
-      }
+const getInitialDarkMode = (): boolean => {
+  try {
+    const saved = localStorage.getItem('theme_mode');
+    const isDark = saved === 'dark';
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
     }
-  }, (err) => {
-    console.warn('Realtime user sync error:', err);
-  });
+    return isDark;
+  } catch {
+    return false;
+  }
+};
+
+const getInitialCachedCases = (): Case[] => {
+  try {
+    const cached = localStorage.getItem('thaiplus_cached_cases');
+    if (cached) return JSON.parse(cached);
+  } catch {}
+  return [];
+};
+
+const getInitialCachedUsers = (): { users: UserProfile[]; avatars: Record<string, string> } => {
+  try {
+    const cached = localStorage.getItem(USERS_CACHE_KEY);
+    if (cached) {
+      const users = JSON.parse(cached) as UserProfile[];
+      const avatars: Record<string, string> = {};
+      users.forEach((u) => {
+        const emoji = u.avatarEmoji || getDeterministicAnimalEmoji(u.username || u.uid);
+        avatars[u.uid] = emoji;
+        avatars[u.uid.toLowerCase()] = emoji;
+        if (u.username) avatars[u.username.toLowerCase()] = emoji;
+        if (u.name) {
+          avatars[u.name] = emoji;
+          avatars[u.name.toLowerCase()] = emoji;
+        }
+      });
+      return { users, avatars };
+    }
+  } catch {}
+  return { users: [], avatars: {} };
+};
+
+// Module-level unsubscribe references to guarantee at most 1 listener per collection across the entire app
+let usersCollectionUnsubscribe: (() => void) | null = null;
+let activeCasesUnsubscribe: (() => void) | null = null;
+let todayCasesUnsubscribe: (() => void) | null = null;
+let midnightResetTimer: ReturnType<typeof setTimeout> | null = null;
+let midnightVisibilityHandler: (() => void) | null = null;
+let currentTodayStartMs = 0;
+let listenersActive = false;
+
+// In-memory maps for merging activeCases + todayCases without duplicates
+const activeCasesMap = new Map<string, Case>();
+const todayCasesMap = new Map<string, Case>();
+const historicalCasesMap = new Map<string, Case>();
+const fetchedHistoryKeys = new Set<string>();
+let initialActiveCasesLoaded = false;
+
+function getStartOfTodayMs(): number {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
 }
 
-export const useStore = create<AppState>((set, get) => ({
-  user: null,
-  loading: true,
-  isDarkMode: initialDark,
-  registeredUsers: [],
-  userAvatars: {},
+function getMsUntilNextMidnight(): number {
+  const now = new Date();
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 2, 0).getTime();
+  return Math.max(5000, nextMidnight - now.getTime());
+}
 
-  toggleDarkMode: () => {
-    const nextDark = !get().isDarkMode;
-    if (typeof document !== 'undefined') {
-      if (nextDark) {
+function mergeAndSortLiveCases(): Case[] {
+  const merged = new Map<string, Case>();
+  const startOfToday = getStartOfTodayMs();
+
+  todayCasesMap.forEach((c, id) => {
+    if (c.createdAt && c.createdAt >= startOfToday) {
+      merged.set(id, c);
+    } else {
+      todayCasesMap.delete(id);
+    }
+  });
+
+  activeCasesMap.forEach((c, id) => {
+    if (
+      c.status === 'pending' ||
+      c.status === 'credit_check' ||
+      c.status === 'processing' ||
+      (c.createdAt && c.createdAt >= startOfToday)
+    ) {
+      merged.set(id, c);
+    } else {
+      activeCasesMap.delete(id);
+    }
+  });
+
+  const arr = Array.from(merged.values());
+  arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  return arr;
+}
+
+const initialUsersState = getInitialCachedUsers();
+const initialAgentsState = loadInitialAgentsCache();
+
+export const useStore = create<AppState>((set, get) => {
+  // Helper to subscribe/reset todayCases listener (including when crossing midnight)
+  const attachTodayCasesListener = () => {
+    if (todayCasesUnsubscribe) {
+      todayCasesUnsubscribe();
+      todayCasesUnsubscribe = null;
+    }
+
+    const startOfToday = getStartOfTodayMs();
+    currentTodayStartMs = startOfToday;
+    todayCasesMap.clear();
+
+    const qToday = query(
+      collection(db, 'cases'),
+      where('createdAt', '>=', startOfToday)
+    );
+
+    todayCasesUnsubscribe = onSnapshot(
+      qToday,
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          const cData = { id: change.doc.id, ...change.doc.data() } as Case;
+          if (change.type === 'removed') {
+            todayCasesMap.delete(change.doc.id);
+          } else {
+            todayCasesMap.set(change.doc.id, cData);
+            if (cData.status === 'closed' || cData.status === 'cancelled') {
+              activeCasesMap.delete(change.doc.id);
+            }
+          }
+        });
+
+        const merged = mergeAndSortLiveCases();
+        if (merged.length > 0) {
+          try {
+            localStorage.setItem('thaiplus_cached_cases', JSON.stringify(merged));
+          } catch {}
+        }
+        set({ cases: merged, casesLoading: false });
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, 'cases');
+        set({ casesLoading: false });
+      }
+    );
+
+    // Schedule automatic listener reset at midnight (00:00:02)
+    if (midnightResetTimer) {
+      clearTimeout(midnightResetTimer);
+    }
+    midnightResetTimer = setTimeout(() => {
+      if (listenersActive) {
+        attachTodayCasesListener();
+        const merged = mergeAndSortLiveCases();
+        set({ cases: merged });
+      }
+    }, getMsUntilNextMidnight());
+  };
+
+  return {
+    user: null,
+    loading: true,
+    registeredUsers: initialUsersState.users,
+    userAvatars: initialUsersState.avatars,
+    isDarkMode: getInitialDarkMode(),
+
+    cases: getInitialCachedCases(),
+    historicalCases: [],
+    casesLoading: true,
+    historicalLoading: false,
+
+    agents: initialAgentsState.agents,
+    deletedAgentNames: initialAgentsState.deletedAgentNames,
+    agentsLastFetchedAt: initialAgentsState.timestamp,
+    agentsLoading: false,
+
+    toggleDarkMode: () => {
+      const nextMode = !get().isDarkMode;
+      try {
+        localStorage.setItem('theme_mode', nextMode ? 'dark' : 'light');
+      } catch {}
+      if (nextMode) {
         document.documentElement.classList.add('dark');
       } else {
         document.documentElement.classList.remove('dark');
       }
-    }
-    localStorage.setItem(THEME_KEY, nextDark ? 'dark' : 'light');
-    set({ isDarkMode: nextDark });
-  },
+      set({ isDarkMode: nextMode });
+    },
 
-  fetchRegisteredUsers: async () => {
-    const processDocs = (docs: Array<{ id: string; data: () => any }>) => {
-      const list: UserProfile[] = [];
-      const userAvatars: Record<string, string> = {};
-      let foundAdmin = false;
-
-      docs.forEach((d) => {
-        const data = d.data() as UserProfile;
-        const isAdmin = isUserAdmin({ ...data, uid: d.id });
-        let cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
-        const isGameAdmin = data.username?.toLowerCase() === SUPER_ADMIN_USERNAME || d.id === 'admin_gametpl' || cleanName === 'คุณเกม';
-        if (isGameAdmin) {
-          cleanName = SUPER_ADMIN_NAME;
-          if (data.name === 'คุณเกม' || (data.username?.toLowerCase() === SUPER_ADMIN_USERNAME && data.name !== SUPER_ADMIN_NAME)) {
-            setDoc(doc(db, 'users', d.id), { name: SUPER_ADMIN_NAME }, { merge: true }).catch(() => {});
-          }
-        }
-        const profile: UserProfile = {
-          ...data,
-          uid: d.id,
-          name: cleanName || data.name || (isAdmin ? (data.username || 'Admin') : 'Employee'),
-          role: isAdmin ? 'admin' : 'employee',
-          accountStatus: data.accountStatus || 'approved',
-          ...(isAdmin && data.username?.toLowerCase() === SUPER_ADMIN_USERNAME ? { pin: SUPER_ADMIN_PIN } : {}),
-        };
-
-        if (isAdmin && (data.username?.toLowerCase() === SUPER_ADMIN_USERNAME || d.id === 'admin_gametpl')) {
-          foundAdmin = true;
-        }
-        list.push(profile);
-
-        if (profile.avatarEmoji) {
-          if (profile.uid) userAvatars[profile.uid] = profile.avatarEmoji;
-          if (profile.username) userAvatars[profile.username.toLowerCase()] = profile.avatarEmoji;
-          if (profile.name) userAvatars[profile.name.toLowerCase()] = profile.avatarEmoji;
-        }
-      });
-
-      if (!foundAdmin) {
-        const adminProfile: UserProfile = {
-          uid: 'admin_gametpl',
-          username: SUPER_ADMIN_USERNAME,
-          name: SUPER_ADMIN_NAME,
-          pin: SUPER_ADMIN_PIN,
-          role: 'admin',
-          accountStatus: 'approved',
-          createdAt: 1710000000000,
-        };
-        list.unshift(adminProfile);
+    stopRealtimeListeners: () => {
+      if (usersCollectionUnsubscribe) {
+        usersCollectionUnsubscribe();
+        usersCollectionUnsubscribe = null;
       }
+      if (activeCasesUnsubscribe) {
+        activeCasesUnsubscribe();
+        activeCasesUnsubscribe = null;
+      }
+      if (todayCasesUnsubscribe) {
+        todayCasesUnsubscribe();
+        todayCasesUnsubscribe = null;
+      }
+      if (midnightResetTimer) {
+        clearTimeout(midnightResetTimer);
+        midnightResetTimer = null;
+      }
+      if (midnightVisibilityHandler && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', midnightVisibilityHandler);
+        midnightVisibilityHandler = null;
+      }
+      listenersActive = false;
+      initialActiveCasesLoaded = false;
+    },
 
-      set({ registeredUsers: list, userAvatars });
-    };
+    startRealtimeListeners: () => {
+      if (listenersActive) return;
+      listenersActive = true;
 
-    try {
+      // 1. Single 'users' listener across the entire application
       if (!usersCollectionUnsubscribe) {
         usersCollectionUnsubscribe = onSnapshot(
           collection(db, 'users'),
           (snap) => {
-            processDocs(snap.docs);
+            const usersList: UserProfile[] = [];
+            const avatarMap: Record<string, string> = {};
+
+            snap.forEach((d) => {
+              const rawData = d.data();
+              const data = sanitizeUserProfile(rawData, d.id);
+              const emoji = data.avatarEmoji || getDeterministicAnimalEmoji(data.username || d.id);
+
+              let displayName = data.name;
+              if (
+                displayName === 'คุณเกม' ||
+                data.username?.toLowerCase() === 'gametpl' ||
+                d.id === 'admin_gametpl'
+              ) {
+                displayName = 'Game';
+              }
+
+              const isNapawan =
+                data.username?.toLowerCase() === 'napawan' ||
+                (data.name && data.name.toLowerCase().includes('napawan')) ||
+                d.id === 'admin_napawan';
+              const resolvedRole: Role =
+                isNapawan || data.username?.toLowerCase() === 'gametpl' || d.id === 'admin_gametpl'
+                  ? 'admin'
+                  : data.role || 'employee';
+
+              const userObj: UserProfile = {
+                ...data,
+                name: displayName,
+                role: resolvedRole,
+                uid: d.id,
+                avatarEmoji: emoji,
+              };
+              usersList.push(userObj);
+
+              avatarMap[d.id] = emoji;
+              avatarMap[d.id.toLowerCase()] = emoji;
+              if (data.username) {
+                avatarMap[data.username.toLowerCase()] = emoji;
+              }
+              if (data.name) {
+                avatarMap[data.name] = emoji;
+                avatarMap[data.name.toLowerCase()] = emoji;
+              }
+              if (displayName) {
+                avatarMap[displayName] = emoji;
+                avatarMap[displayName.toLowerCase()] = emoji;
+              }
+            });
+
+            usersList.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
+
+            if (usersList.length > 0) {
+              try {
+                localStorage.setItem(USERS_CACHE_KEY, JSON.stringify(usersList));
+                localStorage.setItem(USERS_CACHE_TS_KEY, String(Date.now()));
+              } catch {}
+            }
+
+            // Keep current logged-in user synced from this single listener
+            const currentUser = get().user;
+            let updatedCurrentUser = currentUser;
+            if (currentUser) {
+              const matched = usersList.find(
+                (u) => u.uid === currentUser.uid || (currentUser.username && u.username === currentUser.username)
+              );
+              if (matched) {
+                if (matched.accountStatus === 'rejected') {
+                  try {
+                    localStorage.removeItem(USER_STORAGE_KEY);
+                  } catch {}
+                  updatedCurrentUser = null;
+                } else {
+                  updatedCurrentUser = matched;
+                  try {
+                    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(matched));
+                  } catch {}
+                }
+              }
+            }
+
+            set({
+              registeredUsers: usersList,
+              userAvatars: avatarMap,
+              ...(updatedCurrentUser !== currentUser ? { user: updatedCurrentUser } : {}),
+            });
           },
-          (err) => {
-            console.warn('Realtime users listener error:', err);
+          (error) => {
+            handleFirestoreError(error, OperationType.GET, 'users');
           }
         );
-      } else {
-        const snap = await getDocs(collection(db, 'users'));
-        processDocs(snap.docs);
-      }
-    } catch (e) {
-      console.warn('Failed to fetch registered users list', e);
-    }
-  },
-
-  loginWithUsername: async (username: string, pin: string) => {
-    const cleanUsername = username.trim().toLowerCase();
-    const cleanPin = pin.trim();
-
-    if (!cleanUsername) {
-      return { success: false, message: 'กรุณากรอกชื่อผู้ใช้หรือรหัสพนักงาน' };
-    }
-
-    // 1. Check for Super Admin gametpl / gametpl
-    if (cleanUsername === SUPER_ADMIN_USERNAME) {
-      if (cleanPin !== SUPER_ADMIN_PIN) {
-        return { success: false, message: 'รหัสผ่านไม่ถูกต้อง' };
       }
 
-      const adminProfile: UserProfile = {
-        uid: 'admin_gametpl',
-        username: SUPER_ADMIN_USERNAME,
-        name: SUPER_ADMIN_NAME,
-        pin: SUPER_ADMIN_PIN,
-        role: 'admin',
-        accountStatus: 'approved',
-        createdAt: 1710000000000,
-      };
+      // 2. Single 'cases' listener set: ONLY unfinished cases (pending, credit_check, processing) + cases created today (>= 00:00)
+      if (!activeCasesUnsubscribe) {
+        const qActive = query(
+          collection(db, 'cases'),
+          where('status', 'in', ['pending', 'credit_check', 'processing'])
+        );
+        activeCasesUnsubscribe = onSnapshot(
+          qActive,
+          (snapshot) => {
+            let hasNewPending = false;
+            snapshot.docChanges().forEach((change) => {
+              const cData = { id: change.doc.id, ...change.doc.data() } as Case;
+              if (change.type === 'removed') {
+                activeCasesMap.delete(change.doc.id);
+              } else {
+                if (change.type === 'added' && initialActiveCasesLoaded && cData.status === 'pending') {
+                  hasNewPending = true;
+                }
+                activeCasesMap.set(change.doc.id, cData);
+              }
+            });
+            initialActiveCasesLoaded = true;
 
-      try {
-        const docRef = doc(db, 'users', 'admin_gametpl');
-        await setDoc(docRef, adminProfile, { merge: true });
-      } catch (e) {
-        console.warn('Could not sync admin to firestore', e);
-      }
-
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(adminProfile));
-      set({ user: adminProfile });
-      setupUserSync(adminProfile.uid, get, set);
-      get().fetchRegisteredUsers();
-      return { success: true };
-    }
-
-    try {
-      // 2. Try finding in Firestore for regular employees
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('username', '==', cleanUsername));
-      const snap = await getDocs(q);
-
-      if (snap.empty) {
-        // Check by doc ID
-        const docRef = doc(db, 'users', cleanUsername);
-        const directDoc = await getDoc(docRef);
-        if (directDoc.exists()) {
-          const data = directDoc.data() as UserProfile;
-          if (data.pin && data.pin !== cleanPin) {
-            return { success: false, message: 'รหัสผ่านหรือ PIN ไม่ถูกต้อง' };
-          }
-          if (data.accountStatus === 'pending') {
-            return { success: false, message: 'บัญชีของคุณอยู่ระหว่างรอผู้ดูแลระบบ (แอดมิน) อนุมัติ กรุณาแจ้งแอดมินเพื่อเปิดใช้งาน' };
-          }
-          if (data.accountStatus === 'rejected') {
-            return { success: false, message: 'บัญชีนี้ไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
-          }
-          const now = Date.now();
-          const isAdmin = isUserAdmin({ ...data, uid: directDoc.id, username: cleanUsername });
-          const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
-          const profile: UserProfile = { 
-            ...data, 
-            uid: directDoc.id, 
-            name: cleanName || data.name,
-            role: isAdmin ? 'admin' : 'employee',
-            accountStatus: data.accountStatus || 'approved',
-            lastActionAt: now,
-            lastActiveAt: now,
-          };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-          localStorage.setItem(`qmanage_last_action_${profile.uid}`, String(now));
-          set({ user: profile });
-          setupUserSync(profile.uid, get, set);
-          try {
-            updateDoc(doc(db, 'users', profile.uid), {
-              lastActionAt: now,
-              lastActiveAt: now,
-              updatedAt: now,
-            }).catch(() => {});
-          } catch (_) {}
-          return { success: true };
-        }
-        return { success: false, message: 'ไม่พบบัญชีผู้ใช้นี้ กรุณาลงทะเบียนพนักงานก่อน' };
-      }
-
-      const userDoc = snap.docs[0];
-      const data = userDoc.data() as UserProfile;
-      if (data.pin && data.pin !== cleanPin) {
-        return { success: false, message: 'รหัสผ่านหรือ PIN ไม่ถูกต้อง' };
-      }
-      if (data.accountStatus === 'pending') {
-        return { success: false, message: 'บัญชีของคุณอยู่ระหว่างรอผู้ดูแลระบบ (แอดมิน) อนุมัติ กรุณาแจ้งแอดมินเพื่อเปิดใช้งาน' };
-      }
-      if (data.accountStatus === 'rejected') {
-        return { success: false, message: 'บัญชีนี้ไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ' };
-      }
-
-      const now = Date.now();
-      const isAdmin = isUserAdmin({ ...data, uid: userDoc.id, username: cleanUsername });
-      const cleanName = (data.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
-      const profile: UserProfile = {
-        ...data,
-        uid: userDoc.id,
-        name: cleanName || data.name,
-        role: isAdmin ? 'admin' : 'employee',
-        accountStatus: data.accountStatus || 'approved',
-        lastActionAt: now,
-        lastActiveAt: now,
-      };
-
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-      localStorage.setItem(`qmanage_last_action_${profile.uid}`, String(now));
-      set({ user: profile });
-      setupUserSync(profile.uid, get, set);
-      try {
-        updateDoc(doc(db, 'users', profile.uid), {
-          lastActionAt: now,
-          lastActiveAt: now,
-          updatedAt: now,
-        }).catch(() => {});
-      } catch (_) {}
-      return { success: true };
-    } catch (error) {
-      console.error('Login error', error);
-      return { success: false, message: 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ: ' + (error as Error).message };
-    }
-  },
-
-  registerEmployee: async (name: string, username: string, pin?: string) => {
-    const cleanName = name.trim().replace(/\(แอดมิน.*?\)/g, '').trim();
-    const cleanUsername = username.trim().toLowerCase();
-    const cleanPin = (pin || '').trim();
-
-    if (!cleanName || !cleanUsername) {
-      return { success: false, message: 'กรุณากรอกข้อมูลให้ครบถ้วน' };
-    }
-
-    if (cleanUsername === SUPER_ADMIN_USERNAME) {
-      return { success: false, message: `ชื่อผู้ใช้ ${SUPER_ADMIN_USERNAME} สงวนสิทธิ์สำหรับ ${SUPER_ADMIN_NAME} กรุณาเข้าสู่ระบบ` };
-    }
-
-    try {
-      const docId = `emp_${cleanUsername.replace(/[^a-z0-9_]/gi, '') || Date.now()}`;
-      const docRef = doc(db, 'users', docId);
-
-      // Check if already exists
-      const existing = await getDoc(docRef);
-      if (existing.exists()) {
-        return { success: false, message: 'ชื่อผู้ใช้/รหัสนี้มีอยู่ในระบบแล้ว กรุณาเข้าสู่ระบบ' };
-      }
-
-      const isAdmin = isUserAdmin({ name: cleanName, username: cleanUsername });
-      const profile: UserProfile = {
-        uid: docId,
-        name: cleanName,
-        username: cleanUsername,
-        pin: cleanPin,
-        role: isAdmin ? 'admin' : 'employee',
-        accountStatus: isAdmin ? 'approved' : 'pending',
-        workStatus: 'off_work',
-        createdAt: Date.now(),
-      };
-
-      await setDoc(docRef, profile);
-
-      if (isAdmin) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-        set({ user: profile });
-        setupUserSync(profile.uid, get, set);
-        await get().fetchRegisteredUsers();
-        return { success: true, pendingApproval: false };
-      }
-
-      // Normal employee registration: Requires admin approval
-      await get().fetchRegisteredUsers();
-
-      return { 
-        success: true, 
-        pendingApproval: true, 
-        message: 'ลงทะเบียนสำเร็จ! กรุณารอแอดมินตรวจสอบและอนุมัติการเข้าใช้งาน' 
-      };
-    } catch (error) {
-      console.error('Registration error', error);
-      return { success: false, message: 'ไม่สามารถลงทะเบียนได้: ' + (error as Error).message };
-    }
-  },
-
-  approveUser: async (uid: string) => {
-    try {
-      const currentUser = get().user;
-      const adminName = currentUser?.name || 'แอดมิน';
-      const userRef = doc(db, 'users', uid);
-      await setDoc(
-        userRef, 
-        { 
-          accountStatus: 'approved', 
-          approvedAt: Date.now(), 
-          approvedBy: adminName 
-        }, 
-        { merge: true }
-      );
-      await get().fetchRegisteredUsers();
-      return { success: true };
-    } catch (error) {
-      console.error('Approve user error', error);
-      return { success: false, message: 'ไม่สามารถอนุมัติได้: ' + (error as Error).message };
-    }
-  },
-
-  rejectUser: async (uid: string) => {
-    try {
-      const userRef = doc(db, 'users', uid);
-      await setDoc(
-        userRef, 
-        { 
-          accountStatus: 'rejected',
-          rejectedAt: Date.now() 
-        }, 
-        { merge: true }
-      );
-      await get().fetchRegisteredUsers();
-      return { success: true };
-    } catch (error) {
-      console.error('Reject user error', error);
-      return { success: false, message: 'ไม่สามารถปฏิเสธได้: ' + (error as Error).message };
-    }
-  },
-
-  deleteUserAccount: async (uid: string) => {
-    try {
-      if (uid === 'admin_gametpl') {
-        return { success: false, message: 'ไม่สามารถลบบัญชี Super Admin ได้' };
-      }
-      const userRef = doc(db, 'users', uid);
-      await deleteDoc(userRef);
-
-      const nextUsers = get().registeredUsers.filter(u => u.uid !== uid);
-      set({ registeredUsers: nextUsers });
-      await get().fetchRegisteredUsers();
-      return { success: true };
-    } catch (error) {
-      console.error('Delete user account error', error);
-      return { success: false, message: 'ไม่สามารถลบบัญชีได้: ' + (error as Error).message };
-    }
-  },
-
-  updateUserPin: async (uid: string, newPin: string | null) => {
-    try {
-      const cleanPin = newPin ? newPin.trim() : null;
-      const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, {
-        pin: cleanPin,
-        passwordResetRequested: false,
-        passwordResetRequestedAt: null,
-        updatedAt: Date.now(),
-      });
-
-      // Update current user if changing own PIN
-      const currentUser = get().user;
-      if (currentUser && currentUser.uid === uid) {
-        const updated: UserProfile = {
-          ...currentUser,
-          pin: cleanPin || undefined,
-        };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-        set({ user: updated });
-      }
-
-      // Update in registeredUsers
-      const nextUsers = get().registeredUsers.map((u) => {
-        if (u.uid === uid) {
-          return { ...u, pin: cleanPin || undefined, passwordResetRequested: false };
-        }
-        return u;
-      });
-      set({ registeredUsers: nextUsers });
-      return { success: true, message: 'บันทึกรหัสผ่านเรียบร้อยแล้ว' };
-    } catch (error) {
-      console.error('Update pin error', error);
-      return { success: false, message: 'เกิดข้อผิดพลาดในการบันทึกรหัสผ่าน: ' + (error as Error).message };
-    }
-  },
-
-  verifyAndResetForgottenPin: async (username: string, registeredName: string, newPin: string | null) => {
-    try {
-      const cleanU = username.trim().toLowerCase();
-      const cleanN = registeredName.trim().toLowerCase();
-
-      // Find user
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('username', '==', cleanU));
-      const snap = await getDocs(q);
-
-      let targetDocId: string | null = null;
-      let userData: UserProfile | null = null;
-
-      if (!snap.empty) {
-        targetDocId = snap.docs[0].id;
-        userData = snap.docs[0].data() as UserProfile;
-      } else {
-        const directDoc = await getDoc(doc(db, 'users', cleanU));
-        if (directDoc.exists()) {
-          targetDocId = directDoc.id;
-          userData = directDoc.data() as UserProfile;
-        }
-      }
-
-      if (!targetDocId || !userData) {
-        return { success: false, message: 'ไม่พบชื่อผู้ใช้ / รหัสพนักงานนี้ในระบบ' };
-      }
-
-      // Compare registered name
-      const actualName = (userData.name || '').trim().toLowerCase();
-      const actualCleanName = actualName.replace(/\(แอดมิน.*?\)/g, '').trim();
-
-      const isMatch = actualName.includes(cleanN) || actualCleanName.includes(cleanN) || cleanN.includes(actualCleanName);
-      if (!isMatch) {
-        return { success: false, message: 'ชื่อที่ระบุไม่ตรงกับชื่อที่ลงทะเบียนไว้ของบัญชีนี้' };
-      }
-
-      // If dry run verification
-      if (newPin === '__CHECK_ONLY__') {
-        return { success: true, message: 'ยืนยันตัวตนสำเร็จ' };
-      }
-
-      // Proceed to update PIN
-      const cleanPin = newPin ? newPin.trim() : null;
-      await updateDoc(doc(db, 'users', targetDocId), {
-        pin: cleanPin,
-        passwordResetRequested: false,
-        passwordResetRequestedAt: null,
-        updatedAt: Date.now(),
-      });
-
-      await get().fetchRegisteredUsers();
-      return { success: true, message: 'รีเซ็ตรหัสผ่านสำเร็จเรียบร้อยแล้ว' };
-    } catch (error) {
-      console.error('Verify and reset error', error);
-      return { success: false, message: 'เกิดข้อผิดพลาดในการรีเซ็ตรหัสผ่าน: ' + (error as Error).message };
-    }
-  },
-
-  requestAdminPasswordReset: async (usernameOrName: string) => {
-    try {
-      const cleanQuery = usernameOrName.trim().toLowerCase();
-      const usersRef = collection(db, 'users');
-      
-      // Try finding by username
-      const q = query(usersRef, where('username', '==', cleanQuery));
-      const snap = await getDocs(q);
-
-      let targetDocId: string | null = null;
-      let targetName: string = usernameOrName.trim();
-
-      if (!snap.empty) {
-        targetDocId = snap.docs[0].id;
-        targetName = snap.docs[0].data().name || targetName;
-      } else {
-        // Try finding by document id
-        const directDoc = await getDoc(doc(db, 'users', cleanQuery));
-        if (directDoc.exists()) {
-          targetDocId = directDoc.id;
-          targetName = directDoc.data().name || targetName;
-        } else {
-          // Look in all registered users
-          const matched = get().registeredUsers.find(
-            (u) =>
-              (u.username && u.username.toLowerCase() === cleanQuery) ||
-              (u.name && u.name.toLowerCase().includes(cleanQuery))
-          );
-          if (matched) {
-            targetDocId = matched.uid;
-            targetName = matched.name;
-          }
-        }
-      }
-
-      if (targetDocId) {
-        await updateDoc(doc(db, 'users', targetDocId), {
-          passwordResetRequested: true,
-          passwordResetRequestedAt: Date.now(),
-          updatedAt: Date.now(),
-        });
-        await get().fetchRegisteredUsers();
-      }
-
-      return {
-        success: true,
-        message: `ส่งคำขอรีเซ็ตรหัสผ่านสำหรับ "${targetName}" ถึงแอดมินเรียบร้อยแล้ว แอดมินสามารถกำหนดรหัสผ่านใหม่ให้ได้ทันทีค่ะ`,
-      };
-    } catch (error) {
-      console.error('Request admin reset error', error);
-      return { success: false, message: 'เกิดข้อผิดพลาดในการส่งคำขอ: ' + (error as Error).message };
-    }
-  },
-
-  loginWithDemo: async (role: Role) => {
-    const isEmp = role === 'employee';
-    const demoProfile: UserProfile = {
-      uid: isEmp ? 'demo_employee_1' : 'demo_admin_1',
-      name: isEmp ? 'สมชาย ใจบริการ' : 'ผู้ดูแลระบบ',
-      username: isEmp ? 'somchai' : 'admin',
-      role: role,
-      accountStatus: 'approved',
-      createdAt: Date.now(),
-    };
-
-    try {
-      const docRef = doc(db, 'users', demoProfile.uid);
-      await setDoc(docRef, demoProfile, { merge: true });
-    } catch (e) {
-      console.warn('Could not sync demo to firestore, continuing locally', e);
-    }
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(demoProfile));
-    set({ user: demoProfile });
-  },
-
-  setUserDirectly: (profile: UserProfile) => {
-    if (profile.accountStatus === 'pending' || profile.accountStatus === 'rejected') {
-      return;
-    }
-    const now = Date.now();
-    const isAdmin = isUserAdmin(profile);
-    const cleanName = (profile.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
-    const enforcedProfile: UserProfile = {
-      ...profile,
-      name: cleanName || profile.name,
-      role: isAdmin ? 'admin' : 'employee',
-      accountStatus: profile.accountStatus || 'approved',
-      lastActionAt: now,
-      lastActiveAt: now,
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(enforcedProfile));
-    localStorage.setItem(`qmanage_last_action_${enforcedProfile.uid}`, String(now));
-    set({ user: enforcedProfile });
-    setupUserSync(enforcedProfile.uid, get, set);
-    try {
-      updateDoc(doc(db, 'users', enforcedProfile.uid), {
-        lastActionAt: now,
-        lastActiveAt: now,
-        updatedAt: now,
-      }).catch(() => {});
-    } catch (_) {}
-  },
-
-  loginWithGoogle: async (role: Role = 'employee') => {
-    try {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const googleUser = result.user;
-
-      const userDocRef = doc(db, 'users', googleUser.uid);
-      const userDoc = await getDoc(userDocRef);
-
-      const isAdmin = isUserAdmin({
-        email: googleUser.email || '',
-        name: googleUser.displayName || '',
-        uid: googleUser.uid,
-      });
-
-      let userProfile: UserProfile;
-
-      if (!userDoc.exists()) {
-        userProfile = {
-          uid: googleUser.uid,
-          email: googleUser.email || '',
-          username: (googleUser.email || '').split('@')[0] || 'user_' + googleUser.uid.substring(0, 5),
-          name: (googleUser.displayName || 'พนักงาน Google').replace(/\(แอดมิน.*?\)/g, '').trim(),
-          role: isAdmin ? 'admin' : role,
-          createdAt: Date.now(),
-        };
-        await setDoc(userDocRef, userProfile);
-      } else {
-        const data = userDoc.data() as UserProfile;
-        userProfile = {
-          uid: googleUser.uid,
-          ...data,
-          role: isAdmin ? 'admin' : (data.role || role),
-          name: (data.name || googleUser.displayName || 'พนักงาน Google').replace(/\(แอดมิน.*?\)/g, '').trim(),
-        };
-      }
-
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(userProfile));
-      set({ user: userProfile });
-    } catch (error) {
-      console.error('Google login failed', error);
-      alert('เข้าสู่ระบบด้วย Google ไม่สำเร็จ: ' + (error as Error).message);
-    }
-  },
-
-  clockOut: async (reason?: string, isAuto?: boolean) => {
-    const currentUser = get().user;
-    if (!currentUser) {
-      return {
-        success: false,
-        returnedCasesCount: 0,
-        returnedCaseIds: [],
-        message: 'ไม่ได้เข้าสู่ระบบ',
-      };
-    }
-    const res = await clockOutEmployee(currentUser.uid, currentUser.name, reason, isAuto);
-    if (res.success) {
-      const now = Date.now();
-      const updated: UserProfile = {
-        ...currentUser,
-        workStatus: 'off_work',
-        offWorkAt: now,
-        autoClockOutReason: isAuto ? (reason || 'ไม่มีการเคลื่อนไหวเกิน 2 ชั่วโมง') : undefined,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      set({ user: updated });
-      get().fetchRegisteredUsers();
-    }
-    return res;
-  },
-
-  clockIn: async () => {
-    const currentUser = get().user;
-    if (!currentUser) {
-      return {
-        success: false,
-        message: 'ไม่ได้เข้าสู่ระบบ',
-      };
-    }
-    const res = await clockInEmployee(currentUser.uid, currentUser.name);
-    if (res.success) {
-      const now = Date.now();
-      const updated: UserProfile = {
-        ...currentUser,
-        workStatus: 'working',
-        offWorkAt: undefined,
-        clockedInAt: now,
-        lastActiveAt: now,
-        lastActionAt: now,
-        autoClockOutReason: undefined,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      localStorage.setItem(`qmanage_last_action_${currentUser.uid}`, String(now));
-      set({ user: updated });
-      get().fetchRegisteredUsers();
-    }
-    return res;
-  },
-
-  updateAvatar: async (emoji: string) => {
-    const currentUser = get().user;
-    if (!currentUser) {
-      return { success: false, message: 'กรุณาเข้าสู่ระบบก่อน' };
-    }
-
-    const cleanEmoji = emoji.trim();
-    try {
-      let userDocRef = doc(db, 'users', currentUser.uid);
-      const snap = await getDoc(userDocRef);
-      if (!snap.exists() && currentUser.username) {
-        const qUser = query(collection(db, 'users'), where('username', '==', currentUser.username.toLowerCase()));
-        const snapUser = await getDocs(qUser);
-        if (!snapUser.empty) {
-          userDocRef = doc(db, 'users', snapUser.docs[0].id);
-        }
-      }
-
-      await setDoc(
-        userDocRef,
-        {
-          avatarEmoji: cleanEmoji,
-          updatedAt: Date.now(),
-        },
-        { merge: true }
-      );
-
-      const updated: UserProfile = {
-        ...currentUser,
-        avatarEmoji: cleanEmoji || undefined,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-
-      const nextAvatars = { ...get().userAvatars };
-      if (cleanEmoji) {
-        if (currentUser.uid) nextAvatars[currentUser.uid] = cleanEmoji;
-        if (currentUser.username) nextAvatars[currentUser.username.toLowerCase()] = cleanEmoji;
-        if (currentUser.name) nextAvatars[currentUser.name.toLowerCase()] = cleanEmoji;
-      } else {
-        if (currentUser.uid) delete nextAvatars[currentUser.uid];
-        if (currentUser.username) delete nextAvatars[currentUser.username.toLowerCase()];
-        if (currentUser.name) delete nextAvatars[currentUser.name.toLowerCase()];
-      }
-
-      set({ user: updated, userAvatars: nextAvatars });
-      get().fetchRegisteredUsers();
-      return { success: true };
-    } catch (error) {
-      console.error('Update avatar error', error);
-      return { success: false, message: 'เกิดข้อผิดพลาดในการบันทึกรูปตัวการ์ตูน: ' + (error as Error).message };
-    }
-  },
-
-  logout: async () => {
-    if (userDocUnsubscribe) {
-      userDocUnsubscribe();
-      userDocUnsubscribe = null;
-    }
-    try {
-      await signOut(auth);
-    } catch (_) {
-      // ignore
-    }
-    localStorage.removeItem(STORAGE_KEY);
-    set({ user: null });
-  },
-
-  initAuth: async () => {
-    try {
-      // 1. Check localStorage first
-      const savedUserStr = localStorage.getItem(STORAGE_KEY);
-      if (savedUserStr) {
-        try {
-          const parsed = JSON.parse(savedUserStr);
-          if (parsed && parsed.uid && parsed.name) {
-            const isAdmin = isUserAdmin(parsed);
-            let cleanName = (parsed.name || '').replace(/\(แอดมิน.*?\)/g, '').trim();
-            if (cleanName === 'คุณเกม' || parsed.username?.toLowerCase() === SUPER_ADMIN_USERNAME || parsed.uid === 'admin_gametpl') {
-              cleanName = SUPER_ADMIN_NAME;
+            if (hasNewPending && typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('thaiplus-new-pending-case'));
             }
-            const enforcedProfile: UserProfile = {
-              ...parsed,
-              role: isAdmin ? 'admin' : 'employee',
-              name: cleanName || (isAdmin ? SUPER_ADMIN_NAME : parsed.name),
-            };
-            const now = Date.now();
-            localStorage.setItem(`qmanage_last_action_${enforcedProfile.uid}`, String(now));
-            try {
-              updateDoc(doc(db, 'users', enforcedProfile.uid), {
-                lastActionAt: now,
-                lastActiveAt: now,
-              }).catch(() => {});
-            } catch (_) {}
-            set({ user: enforcedProfile, loading: false });
-            setupUserSync(enforcedProfile.uid, get, set);
-            get().fetchRegisteredUsers();
 
-            // Sync fresh workStatus and account validation from Firestore
-            try {
-              const freshDoc = await getDoc(doc(db, 'users', enforcedProfile.uid));
-              if (!freshDoc.exists() && enforcedProfile.uid !== 'admin_gametpl') {
-                // User account has been deleted by admin
-                localStorage.removeItem(STORAGE_KEY);
-                set({ user: null, loading: false });
-                get().fetchRegisteredUsers();
-                return;
-              }
-              if (freshDoc.exists()) {
-                const freshData = freshDoc.data() as Partial<UserProfile>;
-                if (freshData.accountStatus === 'pending' || freshData.accountStatus === 'rejected') {
-                  localStorage.removeItem(STORAGE_KEY);
-                  set({ user: null, loading: false });
-                  get().fetchRegisteredUsers();
-                  return;
-                }
+            const merged = mergeAndSortLiveCases();
+            if (merged.length > 0) {
+              try {
+                localStorage.setItem('thaiplus_cached_cases', JSON.stringify(merged));
+              } catch {}
+            }
+            set({ cases: merged, casesLoading: false });
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.GET, 'cases');
+            set({ casesLoading: false });
+          }
+        );
+      }
 
-                if (freshData.workStatus !== undefined && freshData.workStatus !== enforcedProfile.workStatus) {
-                  const updatedProfile: UserProfile = { 
-                    ...enforcedProfile, 
-                    workStatus: freshData.workStatus, 
-                    offWorkAt: freshData.offWorkAt,
-                    accountStatus: freshData.accountStatus || 'approved'
-                  };
-                  localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProfile));
-                  set({ user: updatedProfile });
-                }
-              }
-            } catch (_) {}
+      // Attach todayCases listener + automatic midnight rollover
+      attachTodayCasesListener();
+
+      if (!midnightVisibilityHandler && typeof document !== 'undefined') {
+        midnightVisibilityHandler = () => {
+          if (document.visibilityState === 'visible' && listenersActive) {
+            const newStart = getStartOfTodayMs();
+            if (newStart !== currentTodayStartMs) {
+              attachTodayCasesListener();
+            }
+          }
+        };
+        document.addEventListener('visibilitychange', midnightVisibilityHandler);
+      }
+    },
+
+    // Item 7: Load agents + deleted_agents on-demand via getDocs and cache for 6 hours in localStorage
+    fetchAgents: async (forceRefresh = false) => {
+      const now = Date.now();
+      const cached = loadInitialAgentsCache();
+      const cacheAge = now - (cached.timestamp || get().agentsLastFetchedAt || 0);
+
+      if (!forceRefresh && cached.agents.length > 0 && cacheAge < AGENTS_CACHE_TTL_MS) {
+        set({
+          agents: cached.agents,
+          deletedAgentNames: cached.deletedAgentNames,
+          agentsLastFetchedAt: cached.timestamp,
+          agentsLoading: false,
+        });
+        return;
+      }
+
+      set({ agentsLoading: true });
+      try {
+        const [agentsSnap, deletedSnap] = await Promise.all([
+          getDocs(query(collection(db, 'agents'), orderBy('name', 'asc'))),
+          getDoc(doc(db, 'system_duties', 'deleted_agents')),
+        ]);
+
+        const loadedAgents: Agent[] = [];
+        agentsSnap.forEach((d) => {
+          const data = d.data();
+          loadedAgents.push({
+            id: d.id,
+            name: data.name || '',
+            createdAt: data.createdAt || 0,
+            createdBy: data.createdBy,
+            createdById: data.createdById,
+            bankName: data.bankName,
+            bankAccountNumber: data.bankAccountNumber,
+            bankAccountName: data.bankAccountName,
+            promptpayType: data.promptpayType,
+            phone: data.phone,
+            province: data.province,
+            notes: data.notes,
+            qrImageUrl: data.qrImageUrl,
+            updatedAt: data.updatedAt,
+            updatedBy: data.updatedBy,
+          });
+        });
+
+        let deletedList: string[] = [];
+        if (deletedSnap.exists()) {
+          const dData = deletedSnap.data();
+          if (Array.isArray(dData?.names)) {
+            deletedList = dData.names;
+          }
+        }
+
+        const fetchedAt = Date.now();
+        saveAgentsCache(loadedAgents, deletedList, fetchedAt);
+        set({
+          agents: loadedAgents,
+          deletedAgentNames: deletedList,
+          agentsLastFetchedAt: fetchedAt,
+          agentsLoading: false,
+        });
+      } catch (err) {
+        console.warn('Error fetching agents on-demand:', err);
+        set({ agentsLoading: false });
+      }
+    },
+
+    upsertAgentInCache: (agent: Agent) => {
+      const currentAgents = [...get().agents];
+      const idx = currentAgents.findIndex(
+        (a) => a.id === agent.id || a.name.trim().toLowerCase() === agent.name.trim().toLowerCase()
+      );
+      if (idx >= 0) {
+        currentAgents[idx] = { ...currentAgents[idx], ...agent };
+      } else {
+        currentAgents.push(agent);
+      }
+      currentAgents.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+
+      // Also ensure it is removed from deletedAgentNames if re-added
+      const cleanLower = agent.name.trim().toLowerCase();
+      const updatedDeleted = get().deletedAgentNames.filter((n) => n.trim().toLowerCase() !== cleanLower);
+      const now = Date.now();
+      saveAgentsCache(currentAgents, updatedDeleted, now);
+      set({
+        agents: currentAgents,
+        deletedAgentNames: updatedDeleted,
+        agentsLastFetchedAt: now,
+      });
+    },
+
+    removeAgentFromCache: (agentName: string, agentId?: string) => {
+      const cleanLower = agentName.trim().toLowerCase();
+      const updatedAgents = get().agents.filter(
+        (a) => (agentId ? a.id !== agentId : true) && a.name.trim().toLowerCase() !== cleanLower
+      );
+      const currentDeleted = get().deletedAgentNames;
+      const updatedDeleted = currentDeleted.some((n) => n.trim().toLowerCase() === cleanLower)
+        ? currentDeleted
+        : [...currentDeleted, agentName.trim()];
+      const now = Date.now();
+      saveAgentsCache(updatedAgents, updatedDeleted, now);
+      set({
+        agents: updatedAgents,
+        deletedAgentNames: updatedDeleted,
+        agentsLastFetchedAt: now,
+      });
+    },
+
+    fetchHistoricalCases: async (options: HistoricalFetchOptions) => {
+      const { status, minCreatedAt, maxCreatedAt, limitCount = 200, forceRefresh = false } = options;
+      const cacheKey = `${status || 'all'}_${minCreatedAt || 0}_${maxCreatedAt || 0}_${limitCount}`;
+
+      if (!forceRefresh && fetchedHistoryKeys.has(cacheKey)) {
+        return get().historicalCases;
+      }
+
+      set({ historicalLoading: true });
+      try {
+        let qHist;
+        if (status && minCreatedAt) {
+          qHist = query(
+            collection(db, 'cases'),
+            where('createdAt', '>=', minCreatedAt),
+            orderBy('createdAt', 'desc'),
+            limit(limitCount)
+          );
+        } else if (status) {
+          qHist = query(
+            collection(db, 'cases'),
+            where('status', '==', status),
+            limit(limitCount)
+          );
+        } else if (minCreatedAt) {
+          qHist = query(
+            collection(db, 'cases'),
+            where('createdAt', '>=', minCreatedAt),
+            orderBy('createdAt', 'desc'),
+            limit(limitCount)
+          );
+        } else {
+          qHist = query(
+            collection(db, 'cases'),
+            orderBy('createdAt', 'desc'),
+            limit(limitCount)
+          );
+        }
+
+        const snap = await getDocs(qHist);
+        snap.forEach((d) => {
+          const data = d.data() as Record<string, unknown>;
+          const c = { id: d.id, ...data } as Case;
+          if (maxCreatedAt && c.createdAt > maxCreatedAt && (!c.completedAt || c.completedAt > maxCreatedAt)) {
             return;
           }
-        } catch (_) {
-          localStorage.removeItem(STORAGE_KEY);
+          historicalCasesMap.set(d.id, c);
+        });
+
+        fetchedHistoryKeys.add(cacheKey);
+        const allHistorical = Array.from(historicalCasesMap.values()).sort(
+          (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+        );
+        set({ historicalCases: allHistorical, historicalLoading: false });
+        return allHistorical;
+      } catch (error) {
+        handleFirestoreError(error, OperationType.GET, 'cases');
+        set({ historicalLoading: false });
+        return get().historicalCases;
+      }
+    },
+
+    initAuth: async () => {
+      await ensureFirebaseAnonymousAuth();
+
+      try {
+        const saved = localStorage.getItem(USER_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved) as UserProfile;
+          if (parsed && parsed.uid && parsed.name) {
+            const clean = sanitizeUserProfile(parsed, parsed.uid);
+            set({ user: clean, loading: false });
+            get().startRealtimeListeners();
+            return;
+          }
         }
+      } catch (e) {
+        console.error('Failed to parse saved user', e);
       }
 
-      // 2. Fetch registered users list in background for easy selection
-      get().fetchRegisteredUsers();
       set({ user: null, loading: false });
-    } catch (e) {
-      console.error('Init auth error', e);
-      set({ user: null, loading: false });
-    }
-  },
-}));
+    },
+
+    // Item 11: Use localStorage cache if age <= 30 minutes on Login page
+    fetchRegisteredUsers: async (forceRefresh = false) => {
+      if (usersCollectionUnsubscribe && get().registeredUsers.length > 0) {
+        return;
+      }
+
+      if (!forceRefresh) {
+        try {
+          const cachedTs = Number(localStorage.getItem(USERS_CACHE_TS_KEY) || 0);
+          const cachedRaw = localStorage.getItem(USERS_CACHE_KEY);
+          if (cachedRaw && cachedTs > 0 && Date.now() - cachedTs < USERS_CACHE_TTL_MS) {
+            const parsed = JSON.parse(cachedRaw) as UserProfile[];
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const avatarMap: Record<string, string> = {};
+              parsed.forEach((u) => {
+                const emoji = u.avatarEmoji || getDeterministicAnimalEmoji(u.username || u.uid);
+                avatarMap[u.uid] = emoji;
+                if (u.username) avatarMap[u.username.toLowerCase()] = emoji;
+                if (u.name) avatarMap[u.name.toLowerCase()] = emoji;
+              });
+              set({ registeredUsers: parsed, userAvatars: avatarMap });
+              return;
+            }
+          }
+        } catch {}
+      }
+
+      try {
+        const snap = await getDocs(collection(db, 'users'));
+        const usersList: UserProfile[] = [];
+        const avatarMap: Record<string, string> = {};
+
+        snap.forEach((d) => {
+          const data = sanitizeUserProfile(d.data(), d.id);
+          const emoji = data.avatarEmoji || getDeterministicAnimalEmoji(data.username || d.id);
+          let displayName = data.name;
+          if (displayName === 'คุณเกม' || data.username?.toLowerCase() === 'gametpl' || d.id === 'admin_gametpl') {
+            displayName = 'Game';
+          }
+          const userObj: UserProfile = { ...data, name: displayName, uid: d.id, avatarEmoji: emoji };
+          usersList.push(userObj);
+          avatarMap[d.id] = emoji;
+          if (data.username) avatarMap[data.username.toLowerCase()] = emoji;
+          if (data.name) avatarMap[data.name.toLowerCase()] = emoji;
+        });
+
+        usersList.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'th'));
+        try {
+          localStorage.setItem(USERS_CACHE_KEY, JSON.stringify(usersList));
+          localStorage.setItem(USERS_CACHE_TS_KEY, String(Date.now()));
+        } catch {}
+        set({ registeredUsers: usersList, userAvatars: avatarMap });
+      } catch (e) {
+        console.warn('Error fetching registered users:', e);
+      }
+    },
+
+    // Item 1: Browser-based PIN verification via Web Crypto (SHA-256 + salt) with automatic migration.
+    // Never bypasses PIN check on connection failure.
+    loginWithUsername: async (username: string, pin?: string) => {
+      const cleanUsername = username.trim().toLowerCase();
+      const inputPin = (pin || '').trim();
+      if (!cleanUsername) {
+        return { success: false, message: 'กรุณากรอกชื่อผู้ใช้' };
+      }
+
+      await ensureFirebaseAnonymousAuth();
+
+      // Super Admin "gametpl"
+      if (cleanUsername === 'gametpl') {
+        if (inputPin !== 'gametpl') {
+          return {
+            success: false,
+            message: 'รหัสผ่านสำหรับบัญชีผู้ดูแลระบบ (gametpl) ไม่ถูกต้อง',
+          };
+        }
+
+        const adminUid = 'admin_gametpl';
+        const now = Date.now();
+        const pinSalt = generatePinSalt();
+        const pinHash = await computePinHash('gametpl', pinSalt);
+        const adminProfile: Record<string, any> = {
+          uid: adminUid,
+          username: 'gametpl',
+          name: 'คุณเกม',
+          role: 'admin',
+          pin: '',
+          pinHash,
+          pinSalt,
+          hasPin: true,
+          workStatus: 'working',
+          lastActiveAt: now,
+          lastActionAt: now,
+          clockedInAt: now,
+          autoClockOutReason: '',
+          avatarEmoji: getDeterministicAnimalEmoji('gametpl'),
+          createdAt: now,
+          accountStatus: 'approved',
+        };
+
+        try {
+          const existingSnap = await getDoc(doc(db, 'users', adminUid));
+          if (existingSnap.exists()) {
+            const existingData = existingSnap.data();
+            adminProfile.avatarEmoji = existingData.avatarEmoji || adminProfile.avatarEmoji;
+            adminProfile.createdAt = existingData.createdAt || now;
+          }
+          await setDoc(doc(db, 'users', adminUid), adminProfile, { merge: true });
+        } catch (err) {
+          console.error('Error reading/writing admin_gametpl:', err);
+          return {
+            success: false,
+            message: 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
+          };
+        }
+
+        const sanitizedAdmin = sanitizeUserProfile(adminProfile, adminUid);
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(sanitizedAdmin));
+        set({ user: sanitizedAdmin });
+        get().startRealtimeListeners();
+        return { success: true };
+      }
+
+      // Standard Employee / Admin Login: Read user doc directly from Firestore
+      try {
+        let foundDocId: string | null = null;
+        let foundData: Record<string, any> | null = null;
+
+        const directId = `emp_${cleanUsername}`;
+        const directSnap = await getDoc(doc(db, 'users', directId));
+        if (directSnap.exists()) {
+          foundDocId = directSnap.id;
+          foundData = directSnap.data();
+        } else {
+          const q = query(collection(db, 'users'), where('username', '==', cleanUsername));
+          const qSnap = await getDocs(q);
+          if (!qSnap.empty) {
+            foundDocId = qSnap.docs[0].id;
+            foundData = qSnap.docs[0].data();
+          }
+        }
+
+        if (!foundDocId || !foundData) {
+          return {
+            success: false,
+            message: 'ไม่พบชื่อผู้ใช้นี้ในระบบ กรุณาลงทะเบียนพนักงานใหม่ก่อนเข้าใช้งาน',
+          };
+        }
+
+        // Strict PIN check via Web Crypto (SHA-256 + salt) or legacy plaintext PIN with automatic migration
+        const hasHashedPin =
+          typeof foundData.pinHash === 'string' &&
+          foundData.pinHash.length > 0 &&
+          typeof foundData.pinSalt === 'string' &&
+          foundData.pinSalt.length > 0;
+        const legacyPin = typeof foundData.pin === 'string' ? foundData.pin : '';
+
+        let needsMigration = false;
+        let migratedHash = '';
+        let migratedSalt = '';
+
+        if (hasHashedPin) {
+          const isValid = await verifyPinBrowser(inputPin, foundData.pinHash, foundData.pinSalt);
+          if (!isValid) {
+            return {
+              success: false,
+              message: 'รหัส PIN ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง',
+            };
+          }
+          if (legacyPin) {
+            needsMigration = true;
+            migratedHash = foundData.pinHash;
+            migratedSalt = foundData.pinSalt;
+          }
+        } else if (legacyPin) {
+          if (legacyPin !== inputPin) {
+            return {
+              success: false,
+              message: 'รหัส PIN ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง',
+            };
+          }
+          // Automatically migrate legacy plaintext PIN to SHA-256 + salt
+          migratedSalt = generatePinSalt();
+          migratedHash = await computePinHash(legacyPin, migratedSalt);
+          needsMigration = true;
+        }
+
+        if (foundData.accountStatus === 'pending') {
+          return {
+            success: false,
+            message: 'บัญชีของคุณอยู่ระหว่างรอแอดมินอนุมัติ กรุณาแจ้งผู้ดูแลระบบเพื่อเปิดใช้งาน',
+          };
+        }
+
+        if (foundData.accountStatus === 'rejected') {
+          return {
+            success: false,
+            message: 'บัญชีของคุณไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ',
+          };
+        }
+
+        const now = Date.now();
+        const assignedEmoji = foundData.avatarEmoji || getDeterministicAnimalEmoji(cleanUsername || foundDocId);
+        const isNapawanAdmin =
+          cleanUsername === 'napawan' ||
+          (foundData.name && String(foundData.name).toLowerCase().includes('napawan'));
+        const resolvedRole: Role = isNapawanAdmin ? 'admin' : (foundData.role || 'employee');
+
+        const updates: Record<string, any> = {
+          role: resolvedRole,
+          workStatus: 'working',
+          lastActiveAt: now,
+          lastActionAt: now,
+          clockedInAt: now,
+          autoClockOutReason: '',
+          avatarEmoji: assignedEmoji,
+        };
+
+        if (needsMigration) {
+          updates.pinHash = migratedHash;
+          updates.pinSalt = migratedSalt;
+          updates.hasPin = true;
+          updates.pin = '';
+        } else if (hasHashedPin) {
+          updates.hasPin = true;
+        } else {
+          updates.hasPin = false;
+        }
+
+        await updateDoc(doc(db, 'users', foundDocId), updates);
+
+        const loggedInUser = sanitizeUserProfile(
+          {
+            ...foundData,
+            ...updates,
+          },
+          foundDocId
+        );
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(loggedInUser));
+        set({ user: loggedInUser });
+        get().startRealtimeListeners();
+        return { success: true };
+      } catch (error) {
+        console.error('Login error:', error);
+        return {
+          success: false,
+          message: 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
+        };
+      }
+    },
+
+    // Item 2: Register new employee directly in browser with SHA-256 + salt
+    registerEmployee: async (name: string, username: string, pin?: string) => {
+      const cleanName = name.trim();
+      const cleanUsername = username.trim().toLowerCase();
+      const cleanPin = pin?.trim() || '';
+
+      if (!cleanName || !cleanUsername) {
+        return { success: false, message: 'กรุณากรอกชื่อและรหัสพนักงาน/ชื่อผู้ใช้ให้ครบถ้วน' };
+      }
+
+      if (cleanUsername === 'gametpl') {
+        return {
+          success: false,
+          message: 'ชื่อผู้ใช้นี้ถูกสงวนไว้สำหรับผู้ดูแลระบบหลัก (Super Admin)',
+        };
+      }
+
+      await ensureFirebaseAnonymousAuth();
+
+      try {
+        const uid = `emp_${cleanUsername}`;
+        const existingSnap = await getDoc(doc(db, 'users', uid));
+        if (existingSnap.exists()) {
+          const existingData = existingSnap.data();
+          if (existingData.accountStatus === 'pending') {
+            return {
+              success: false,
+              message: 'รหัสพนักงาน/ชื่อผู้ใช้นี้ได้ลงทะเบียนแล้ว และกำลังรอแอดมินอนุมัติ',
+            };
+          }
+          return {
+            success: false,
+            message: 'รหัสพนักงาน/ชื่อผู้ใช้นี้มีในระบบแล้ว กรุณาใช้หน้าเข้าสู่ระบบ',
+          };
+        }
+
+        const now = Date.now();
+        const newProfile: Record<string, any> = {
+          uid,
+          username: cleanUsername,
+          name: cleanName,
+          role: 'employee',
+          pin: '',
+          hasPin: Boolean(cleanPin),
+          workStatus: 'off_work',
+          avatarEmoji: getDeterministicAnimalEmoji(cleanUsername),
+          createdAt: now,
+          accountStatus: 'pending',
+        };
+
+        if (cleanPin) {
+          const pinSalt = generatePinSalt();
+          const pinHash = await computePinHash(cleanPin, pinSalt);
+          newProfile.pinHash = pinHash;
+          newProfile.pinSalt = pinSalt;
+        }
+
+        await setDoc(doc(db, 'users', uid), newProfile);
+        return { success: true, pendingApproval: true };
+      } catch (error) {
+        console.error('Register error:', error);
+        return {
+          success: false,
+          message: 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลเพื่อลงทะเบียนได้ กรุณาลองใหม่อีกครั้ง',
+        };
+      }
+    },
+
+    approveUser: async (uid: string) => {
+      const currentUser = get().user;
+      if (!isUserAdmin(currentUser)) {
+        return { success: false, message: 'เฉพาะผู้ดูแลระบบเท่านั้นที่สามารถอนุมัติผู้ใช้งานได้' };
+      }
+      try {
+        const userRef = doc(db, 'users', uid);
+        await updateDoc(userRef, {
+          accountStatus: 'approved',
+          approvedAt: Date.now(),
+          approvedBy: currentUser?.name || 'Admin',
+          workStatus: 'working',
+        });
+        return { success: true };
+      } catch (error) {
+        console.error('Approve user error:', error);
+        return { success: false, message: 'ไม่สามารถอนุมัติผู้ใช้งานได้' };
+      }
+    },
+
+    rejectUser: async (uid: string) => {
+      const currentUser = get().user;
+      if (!isUserAdmin(currentUser)) {
+        return { success: false, message: 'เฉพาะผู้ดูแลระบบเท่านั้นที่สามารถปฏิเสธผู้ใช้งานได้' };
+      }
+      try {
+        const userRef = doc(db, 'users', uid);
+        await updateDoc(userRef, {
+          accountStatus: 'rejected',
+        });
+        return { success: true };
+      } catch (error) {
+        console.error('Reject user error:', error);
+        return { success: false, message: 'ไม่สามารถปฏิเสธผู้ใช้งานได้' };
+      }
+    },
+
+    deleteUserAccount: async (uid: string) => {
+      const currentUser = get().user;
+      if (!isUserAdmin(currentUser)) {
+        return { success: false, message: 'เฉพาะผู้ดูแลระบบเท่านั้นที่สามารถลบบัญชีผู้ใช้งานได้' };
+      }
+      if (uid === 'admin_gametpl') {
+        return { success: false, message: 'ไม่สามารถลบบัญชี Super Admin หลักได้' };
+      }
+      try {
+        await deleteDoc(doc(db, 'users', uid));
+        return { success: true };
+      } catch (error) {
+        console.error('Delete user account error:', error);
+        return { success: false, message: 'ไม่สามารถลบบัญชีผู้ใช้งานได้' };
+      }
+    },
+
+    setUserDirectly: async (selectedUser: UserProfile) => {
+      if (selectedUser.username?.toLowerCase() === 'gametpl' || selectedUser.uid === 'admin_gametpl') {
+        return;
+      }
+      if (selectedUser.accountStatus === 'pending' || selectedUser.accountStatus === 'rejected') {
+        return;
+      }
+
+      const assignedEmoji =
+        selectedUser.avatarEmoji || getDeterministicAnimalEmoji(selectedUser.username || selectedUser.uid);
+      const now = Date.now();
+      const updatedUser: UserProfile = sanitizeUserProfile(
+        {
+          ...selectedUser,
+          workStatus: 'working',
+          lastActiveAt: now,
+          lastActionAt: now,
+          clockedInAt: now,
+          autoClockOutReason: '',
+          avatarEmoji: assignedEmoji,
+        },
+        selectedUser.uid
+      );
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+      set({ user: updatedUser });
+      get().startRealtimeListeners();
+
+      try {
+        await setDoc(
+          doc(db, 'users', selectedUser.uid),
+          {
+            workStatus: 'working',
+            lastActiveAt: now,
+            lastActionAt: now,
+            clockedInAt: now,
+            autoClockOutReason: '',
+            avatarEmoji: assignedEmoji,
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn('Could not sync direct user select to Firestore:', e);
+      }
+    },
+
+    clockIn: async () => {
+      const current = get().user;
+      if (!current) return;
+      const now = Date.now();
+      const updatedUser: UserProfile = {
+        ...current,
+        workStatus: 'working',
+        lastActiveAt: now,
+        lastActionAt: now,
+        clockedInAt: now,
+        autoClockOutReason: '',
+      };
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+      set({ user: updatedUser });
+
+      try {
+        await setDoc(
+          doc(db, 'users', current.uid),
+          {
+            workStatus: 'working',
+            lastActiveAt: now,
+            lastActionAt: now,
+            clockedInAt: now,
+            autoClockOutReason: '',
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.error('Error clocking in:', e);
+      }
+    },
+
+    clockOut: async () => {
+      const current = get().user;
+      if (!current) {
+        return { returnedCasesCount: 0, success: false, error: 'ไม่ได้เข้าสู่ระบบ' };
+      }
+      const res = await clockOutEmployeeAndReturnCases(current.uid, current.name, current.name);
+      if (res.success) {
+        const updatedUser: UserProfile = {
+          ...current,
+          workStatus: 'off_work',
+          offWorkAt: Date.now(),
+        };
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+        set({ user: updatedUser });
+      }
+      return res;
+    },
+
+    updateAvatar: async (emoji: string) => {
+      const current = get().user;
+      if (!current) return { success: false, message: 'ไม่ได้เข้าสู่ระบบ' };
+
+      const updatedUser: UserProfile = {
+        ...current,
+        avatarEmoji: emoji,
+      };
+
+      const currentAvatars = { ...get().userAvatars };
+      currentAvatars[current.uid] = emoji;
+      if (current.username) currentAvatars[current.username.toLowerCase()] = emoji;
+      if (current.name) {
+        currentAvatars[current.name] = emoji;
+        currentAvatars[current.name.toLowerCase()] = emoji;
+      }
+
+      const updatedRegistered = get().registeredUsers.map((u) =>
+        u.uid === current.uid ? { ...u, avatarEmoji: emoji } : u
+      );
+
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+      set({
+        user: updatedUser,
+        userAvatars: currentAvatars,
+        registeredUsers: updatedRegistered,
+      });
+
+      try {
+        await updateDoc(doc(db, 'users', current.uid), {
+          avatarEmoji: emoji,
+        });
+        return { success: true };
+      } catch (e) {
+        console.error('Error updating avatar in Firestore:', e);
+        return { success: false, message: 'ไม่สามารถบันทึกรูปตัวการ์ตูนได้' };
+      }
+    },
+
+    // Item 3: Browser-based PIN change / Admin reset / PIN removal using Web Crypto (SHA-256 + salt)
+    changeUserPassword: async (
+      targetUid: string,
+      newPin: string,
+      currentPin?: string,
+      isAdminOverride?: boolean
+    ) => {
+      const cleanNewPin = newPin.trim();
+      const inputCurrentPin = (currentPin || '').trim();
+      const currentUser = get().user;
+
+      if (!targetUid) {
+        return { success: false, message: 'ไม่พบรหัสพนักงานที่ต้องการเปลี่ยนรหัสผ่าน' };
+      }
+
+      if (targetUid === 'admin_gametpl' && currentUser?.uid !== 'admin_gametpl') {
+        return { success: false, message: 'ไม่สามารถเปลี่ยนรหัสผ่านของบัญชี Super Admin หลักได้' };
+      }
+
+      try {
+        const userRef = doc(db, 'users', targetUid);
+        const snap = await getDoc(userRef);
+        if (!snap.exists()) {
+          return { success: false, message: 'ไม่พบข้อมูลผู้ใช้งานในระบบ' };
+        }
+
+        const data = snap.data();
+
+        // Verify current PIN if not admin override
+        if (!isAdminOverride) {
+          const hasHashedPin =
+            typeof data.pinHash === 'string' &&
+            data.pinHash.length > 0 &&
+            typeof data.pinSalt === 'string' &&
+            data.pinSalt.length > 0;
+          const legacyPin = typeof data.pin === 'string' ? data.pin : '';
+
+          if (hasHashedPin) {
+            const isValid = await verifyPinBrowser(inputCurrentPin, data.pinHash, data.pinSalt);
+            if (!isValid) {
+              return {
+                success: false,
+                message: 'รหัสผ่าน/PIN เดิมไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง',
+              };
+            }
+          } else if (legacyPin) {
+            if (legacyPin !== inputCurrentPin) {
+              return {
+                success: false,
+                message: 'รหัสผ่าน/PIN เดิมไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง',
+              };
+            }
+          }
+        }
+
+        const updates: Record<string, any> = {
+          pin: '',
+          passwordResetRequested: false,
+        };
+
+        if (cleanNewPin) {
+          const pinSalt = generatePinSalt();
+          const pinHash = await computePinHash(cleanNewPin, pinSalt);
+          updates.pinHash = pinHash;
+          updates.pinSalt = pinSalt;
+          updates.hasPin = true;
+        } else {
+          updates.pinHash = '';
+          updates.pinSalt = '';
+          updates.hasPin = false;
+        }
+
+        await updateDoc(userRef, updates);
+
+        if (currentUser && currentUser.uid === targetUid) {
+          const updatedSelf: UserProfile = {
+            ...currentUser,
+            hasPin: Boolean(cleanNewPin),
+            passwordResetRequested: false,
+          };
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedSelf));
+          set({ user: updatedSelf });
+        }
+
+        return {
+          success: true,
+          message: cleanNewPin
+            ? 'เปลี่ยนรหัสผ่าน/PIN สำเร็จเรียบร้อยแล้ว'
+            : 'ยกเลิกการตั้งรหัสผ่าน/PIN เรียบร้อยแล้ว',
+        };
+      } catch (error) {
+        console.error('Error changing password in browser:', error);
+        return {
+          success: false,
+          message: 'เกิดข้อผิดพลาดในการเปลี่ยนรหัสผ่าน กรุณาลองใหม่อีกครั้ง',
+        };
+      }
+    },
+
+    resetPasswordWithIdentity: async () => {
+      return {
+        success: false,
+        message: 'ระบบรีเซ็ตรหัสผ่านด้วยตนเองถูกปิดใช้งานเพื่อความปลอดภัย กรุณาส่งคำขอให้แอดมินรีเซ็ตรหัสผ่านให้แทน',
+      };
+    },
+
+    requestAdminPasswordReset: async (username: string) => {
+      const cleanUsername = username.trim().toLowerCase();
+      if (!cleanUsername) {
+        return { success: false, message: 'กรุณาระบุรหัสพนักงาน / Username ของคุณ' };
+      }
+      if (cleanUsername === 'gametpl') {
+        return { success: false, message: 'บัญชี Super Admin ไม่สามารถส่งคำขอรีเซ็ตผ่านช่องทางนี้ได้' };
+      }
+
+      try {
+        let foundId: string | null = null;
+        const directId = `emp_${cleanUsername}`;
+        const directSnap = await getDoc(doc(db, 'users', directId));
+        if (directSnap.exists()) {
+          foundId = directSnap.id;
+        } else {
+          const q = query(collection(db, 'users'), where('username', '==', cleanUsername));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            foundId = snap.docs[0].id;
+          }
+        }
+
+        if (!foundId) {
+          return { success: false, message: 'ไม่พบรหัสพนักงาน / Username นี้ในระบบ' };
+        }
+
+        await updateDoc(doc(db, 'users', foundId), {
+          passwordResetRequested: true,
+          passwordResetRequestedAt: Date.now(),
+        });
+
+        return {
+          success: true,
+          message: 'ส่งคำขอรีเซ็ตรหัสผ่านไปยังแอดมินเรียบร้อยแล้ว กรุณาแจ้งแอดมินเพื่อตั้งรหัสใหม่ให้คุณ',
+        };
+      } catch (error) {
+        console.error('Error requesting admin password reset:', error);
+        return { success: false, message: 'ไม่สามารถส่งคำขอได้ในขณะนี้ กรุณาติดต่อแอดมินโดยตรง' };
+      }
+    },
+
+    logout: async () => {
+      get().stopRealtimeListeners();
+      localStorage.removeItem(USER_STORAGE_KEY);
+      set({ user: null });
+    },
+  };
+});

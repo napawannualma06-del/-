@@ -23,6 +23,8 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { getActiveApiConfig, saveApiConfig, generateRandomApiKey, ApiConfig } from '../lib/apiKeyService';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Case } from './Queue';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -108,20 +110,98 @@ export function AdminApiIntegration({ currentAdminName, cases }: AdminApiIntegra
     }
   };
 
+  // Browser-direct verification for static hosting (GitHub Pages) where server.ts is not running
+  const runBrowserDirectVerify = async (cleanKey: string, providedApiKey: string, startTime: number) => {
+    const expectedKey = apiConfig?.apiKey || 'sk_live_qcase_2026';
+    if (!providedApiKey || providedApiKey !== expectedKey) {
+      return {
+        status: 401,
+        timeMs: Math.round(performance.now() - startTime),
+        data: {
+          success: false,
+          error: 'UNAUTHORIZED',
+          message: 'Invalid or missing x-api-key header',
+        },
+      };
+    }
+
+    const normalizedKey = cleanKey.toUpperCase();
+    // Check in-memory cases first (0 Firestore reads if found), otherwise query Firestore with limit(1)
+    let matchedCase: any = cases.find(
+      (c) => (c.caseKey || '').replace(/^#/, '').toUpperCase() === normalizedKey
+    );
+
+    if (!matchedCase) {
+      const qSnap = await getDocs(
+        query(collection(db, 'cases'), where('caseKey', '==', normalizedKey), limit(1))
+      );
+      if (!qSnap.empty) {
+        const d = qSnap.docs[0];
+        matchedCase = { id: d.id, ...d.data() };
+      }
+    }
+
+    if (!matchedCase) {
+      return {
+        status: 404,
+        timeMs: Math.round(performance.now() - startTime),
+        data: {
+          success: true,
+          exists: false,
+          caseKey: normalizedKey,
+          message: `ไม่พบเคสรหัส #${normalizedKey} ในระบบ`,
+        },
+      };
+    }
+
+    const statusLabelMap: Record<string, string> = {
+      pending: 'รอรับเคส',
+      credit_check: 'กำลังเช็คเครดิต',
+      processing: 'กำลังทำสัญญา',
+      closed: 'ปิดเคสสำเร็จ',
+      cancelled: 'ยกเลิกเคส',
+    };
+
+    return {
+      status: 200,
+      timeMs: Math.round(performance.now() - startTime),
+      data: {
+        success: true,
+        exists: true,
+        mode: 'browser_firestore_direct',
+        case: {
+          id: matchedCase.id,
+          caseKey: matchedCase.caseKey || normalizedKey,
+          status: matchedCase.status,
+          statusLabel: statusLabelMap[matchedCase.status] || matchedCase.status,
+          agentName: matchedCase.agentName || '',
+          iphoneModel: matchedCase.iphoneModel || '',
+          province: matchedCase.province || '',
+          assigneeName: matchedCase.assigneeName || null,
+          contractNumber: matchedCase.contractNumber || null,
+          createdAt: matchedCase.createdAt || null,
+          updatedAt: matchedCase.updatedAt || null,
+          completedAt: matchedCase.completedAt || null,
+        },
+      },
+    };
+  };
+
   const handleRunTest = async () => {
     if (!testKeyInput.trim()) return;
     setTestLoading(true);
     setTestResult(null);
 
     const startTime = performance.now();
+    const cleanKey = testKeyInput.trim().replace(/^#/, '');
+    const providedApiKey = testApiKeyInput.trim();
+
     try {
       let res: Response;
-      const cleanKey = testKeyInput.trim().replace(/^#/, '');
-
       if (testMethod === 'GET') {
         res = await fetch(`/api/cases/verify?key=${encodeURIComponent(cleanKey)}`, {
           headers: {
-            'x-api-key': testApiKeyInput.trim(),
+            'x-api-key': providedApiKey,
           },
         });
       } else {
@@ -129,10 +209,18 @@ export function AdminApiIntegration({ currentAdminName, cases }: AdminApiIntegra
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': testApiKeyInput.trim(),
+            'x-api-key': providedApiKey,
           },
           body: JSON.stringify({ key: cleanKey }),
         });
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (res.status === 404 && !contentType.includes('application/json')) {
+        // Static hosting (GitHub Pages) fallback: verify directly against Firestore in browser
+        const fallbackResult = await runBrowserDirectVerify(cleanKey, providedApiKey, startTime);
+        setTestResult(fallbackResult);
+        return;
       }
 
       const duration = Math.round(performance.now() - startTime);
@@ -142,13 +230,19 @@ export function AdminApiIntegration({ currentAdminName, cases }: AdminApiIntegra
         timeMs: duration,
         data: json,
       });
-    } catch (err: any) {
-      const duration = Math.round(performance.now() - startTime);
-      setTestResult({
-        status: 500,
-        timeMs: duration,
-        data: { error: 'NETWORK_ERROR', message: err.message },
-      });
+    } catch {
+      // Static hosting (GitHub Pages) fallback when /api is unreachable
+      try {
+        const fallbackResult = await runBrowserDirectVerify(cleanKey, providedApiKey, startTime);
+        setTestResult(fallbackResult);
+      } catch (innerErr: any) {
+        const duration = Math.round(performance.now() - startTime);
+        setTestResult({
+          status: 500,
+          timeMs: duration,
+          data: { error: 'NETWORK_ERROR', message: innerErr?.message || 'เกิดข้อผิดพลาด' },
+        });
+      }
     } finally {
       setTestLoading(false);
     }

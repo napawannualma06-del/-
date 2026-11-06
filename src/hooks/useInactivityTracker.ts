@@ -1,19 +1,22 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { doc, runTransaction } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
-import { 
-  autoClockOutInactiveEmployee, 
+import {
+  autoClockOutInactiveEmployee,
+  updateEmployeeHeartbeat,
 } from '../lib/shiftService';
-import { recordSystemAction } from '../lib/activityService';
-import { playNotificationChime } from '../lib/sound';
+import {
+  getExpiredCases,
+  autoCancelExpiredCases,
+} from '../lib/autoCancelService';
 
-// 1. ครบ 2 ชั่วโมง (7,200,000 ms): เด้งแจ้งเตือนให้พนักงาน
-export const ACTION_ALERT_THRESHOLD_MS = 2 * 60 * 60 * 1000;
-
-// 2. รออีก 1 ชั่วโมง (3,600,000 ms) สำหรับให้พนักงานกดยืนยันว่ากำลังทำงานอยู่
-export const GRACE_PERIOD_MS = 1 * 60 * 60 * 1000;
-
-// 3. รวมทั้งสิ้น 3 ชั่วโมง (10,800,000 ms): หากไม่มีการยืนยัน ให้เด้งออก / เปลี่ยนเป็นว่างงานทันที
-export const TOTAL_INACTIVITY_TIMEOUT_MS = ACTION_ALERT_THRESHOLD_MS + GRACE_PERIOD_MS;
+// Configuration for Auto-Clock-Out on Inactivity (Strictly 3 Hours)
+export const INACTIVITY_TIMEOUT_MS = 3 * 60 * 60 * 1000; // 3 hours without any activity before auto clock-out
+export const WARNING_BEFORE_MS = 5 * 60 * 1000;          // Show warning 5 minutes before timeout (at 2 hours 55 mins)
+const HEARTBEAT_WRITE_INTERVAL_MS = 30 * 60 * 1000;      // Sync lastActiveAt to Firestore at most every 30 minutes
+const CHECK_INTERVAL_MS = 10 * 1000;                     // Check local idle timer every 10 seconds
+const MAINTENANCE_LOCK_INTERVAL_MS = 10 * 60 * 1000;     // Distributed maintenance lock interval: 10 minutes
 
 export interface InactivityState {
   isWarning: boolean;
@@ -25,225 +28,259 @@ export interface InactivityState {
 }
 
 /**
- * Hook ตรวจสอบความเคลื่อนไหวจาก "แอคชั่นทางธุรกิจในระบบเท่านั้น"
- * (สร้างเคส, รับเคส, ใส่หมายเหตุ, เลขสัญญา, จบเคส, ส่งแชท ฯลฯ)
- * 
- * Flow:
- * 1. ถ้าไม่มีการสร้างเคส รับเคส ใส่หมายเหตุ หรือแอคชั่นในระบบครบ 2 ชั่วโมง:
- *    - เด้ง Modal แจ้งเตือนพนักงานทันที พร้อมส่งเสียง chime และ Notification
- * 2. รออีก 1 ชั่วโมง (นับถอยหลัง 60 นาที):
- *    - ถ้าพนักงานกด "ฉันกำลังทำงานอยู่": รีเซ็ตเวลาและทำงานต่อตามปกติ
- * 3. ถ้าครบ 1 ชั่วโมงแล้วยังไม่ได้ยืนยันว่าทำงานอยู่:
- *    - เปลี่ยนสถานะเป็น "ว่างงาน" อัตโนมัติ และดึงเคสค้างคืนกองกลาง
- * 
- * * ยกเว้น Admin: ไม่มีการแจ้งเตือนและไม่มีการเปลี่ยนเป็นว่างงานอัตโนมัติ
+ * Item 4: Distributed browser-based maintenance task running every 10 minutes.
+ * Uses Firestore transaction on `system_duties/maintenance_lock` so only ONE client across all open tabs/machines
+ * executes per 10-minute window. Uses data already in `useStore` (`cases` and `registeredUsers`) without extra queries.
  */
+async function tryRunDistributedBrowserMaintenance(currentUserUid: string, currentUserName: string) {
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+    return;
+  }
+
+  const now = Date.now();
+  const lockRef = doc(db, 'system_duties', 'maintenance_lock');
+
+  let lockAcquired = false;
+  try {
+    lockAcquired = await runTransaction(db, async (transaction) => {
+      const lockSnap = await transaction.get(lockRef);
+      if (lockSnap.exists()) {
+        const data = lockSnap.data();
+        const lastRunAt = Number(data?.lastRunAt || 0);
+        if (now - lastRunAt < MAINTENANCE_LOCK_INTERVAL_MS) {
+          return false; // Another client already ran maintenance within the last 10 minutes
+        }
+      }
+      transaction.set(
+        lockRef,
+        {
+          lastRunAt: now,
+          runBy: currentUserUid,
+          runByName: currentUserName,
+        },
+        { merge: true }
+      );
+      return true;
+    });
+  } catch (err) {
+    // Transaction contention or offline; skip quietly
+    return;
+  }
+
+  if (!lockAcquired) return;
+
+  // We won the 10-minute lock! Execute both tasks using already-loaded store data (no new queries):
+  const { cases: storeCases, registeredUsers: storeUsers } = useStore.getState();
+
+  // Task (ก): Auto-cancel pending/stuck cases older than 3 days (never cancels closed cases)
+  try {
+    const expiredCases = getExpiredCases(storeCases, now, storeUsers);
+    if (expiredCases.length > 0) {
+      await autoCancelExpiredCases(expiredCases, 'auto', storeUsers);
+    }
+  } catch (err) {
+    console.warn('[Maintenance] Auto-cancel expired cases error:', err);
+  }
+
+  // Task (ข): Auto clock-out working employees with no activity > 3 hours + return their active cases (excluding admins)
+  try {
+    for (const emp of storeUsers) {
+      if (!emp.uid || emp.workStatus !== 'working') continue;
+      if (isUserAdmin(emp)) continue;
+
+      const lastActive = Math.max(
+        emp.lastActiveAt || 0,
+        emp.lastActionAt || 0,
+        emp.clockedInAt || 0,
+        emp.createdAt || 0
+      );
+
+      if (lastActive > 0 && now - lastActive >= INACTIVITY_TIMEOUT_MS) {
+        await autoClockOutInactiveEmployee(
+          emp.uid,
+          emp.name || emp.username,
+          'ไม่มีการเคลื่อนไหวในระบบเกิน 3 ชั่วโมง',
+          storeCases
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[Maintenance] Inactive employee sweep error:', err);
+  }
+}
+
 export function useInactivityTracker(): InactivityState {
-  const { user, clockOut, registeredUsers, fetchRegisteredUsers } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { user } = useStore();
   const [isWarning, setIsWarning] = useState(false);
-  const [remainingMs, setRemainingMs] = useState(0);
+  const [remainingMs, setRemainingMs] = useState(INACTIVITY_TIMEOUT_MS);
   const [isAutoClockedOut, setIsAutoClockedOut] = useState(false);
   const [returnedCasesCount, setReturnedCasesCount] = useState(0);
 
+  const lastActivityRef = useRef<number>(Date.now());
+  const lastFirestoreWriteRef = useRef<number>(Date.now());
   const isClockingOutRef = useRef<boolean>(false);
-  const sweepLockRef = useRef<boolean>(false);
-  const hasAlertedRef = useRef<boolean>(false);
-  const sessionMountedAtRef = useRef<number>(Date.now());
-  const lastLocalActionTimeRef = useRef<number>(Date.now());
-  const hasAnnouncedArrivalRef = useRef<boolean>(false);
 
-  const storageKey = user?.uid ? `qmanage_last_action_${user.uid}` : 'qmanage_last_action_guest';
+  const getActivityStorageKey = (uid: string) => `thaiplus_last_activity_${uid}`;
 
-  // เมื่อผู้ใช้เข้าสู่ระบบหรือเปิดหน้านี้ ให้รีเซ็ตเวลาเรื่มต้นของเซสชันนี้ทันที
-  useEffect(() => {
-    if (!user?.uid || isAdmin || user.workStatus !== 'working') return;
-    if (!hasAnnouncedArrivalRef.current) {
-      hasAnnouncedArrivalRef.current = true;
-      const now = Date.now();
-      sessionMountedAtRef.current = now;
-      lastLocalActionTimeRef.current = now;
-      try {
-        localStorage.setItem(storageKey, String(now));
-      } catch (_) {}
-      recordSystemAction(user.uid, 'session_enter');
-    }
-  }, [user?.uid, user?.workStatus, isAdmin, storageKey]);
-
-  // อ่านเวลา action ล่าสุด (sync ข้ามแท็บ)
-  const getLatestActionTime = useCallback((): number => {
-    // สำคัญ: ห้ามนำ timestamp เก่าจากวันก่อนหน้าหรือก่อนเปิดเซสชันมาคิด
-    // ผู้ใช้ที่เพิ่งเปิดหน้าเว็บ/เพิ่งเข้าสู่ระบบ จะต้องมีเวลาแอคชั่นเริ่มต้นอย่างน้อยเท่ากับเวลาที่เปิดหน้าเว็บนี้ (sessionMountedAtRef.current)
-    let latest = Math.max(
-      user?.lastActionAt || 0,
-      user?.clockedInAt || 0,
-      sessionMountedAtRef.current,
-      lastLocalActionTimeRef.current
-    );
-    try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored) {
-        const parsed = parseInt(stored, 10);
-        if (!isNaN(parsed) && parsed > latest) {
-          latest = parsed;
-        }
-      }
-    } catch (_) {}
-    return latest;
-  }, [user?.lastActionAt, user?.clockedInAt, storageKey]);
-
-  // ฟัง Custom Event เมื่อมีการทำแอคชั่นในระบบ (สร้างเคส, รับเคส, หมายเหตุ, แชท ฯลฯ)
-  useEffect(() => {
-    // ยกเว้น Admin: ไม่ต้องจับเวลา idle
-    if (!user || user.workStatus !== 'working' || isAdmin) {
-      setIsWarning(false);
-      return;
-    }
-
-    const handleSystemAction = () => {
-      const now = Date.now();
-      lastLocalActionTimeRef.current = now;
-      hasAlertedRef.current = false;
-      try {
-        localStorage.setItem(storageKey, String(now));
-      } catch (_) {}
-      setIsWarning(false);
-    };
-
-    window.addEventListener('system-action', handleSystemAction);
-    return () => {
-      window.removeEventListener('system-action', handleSystemAction);
-    };
-  }, [user?.uid, user?.workStatus, isAdmin, storageKey]);
-
-  // ตรวจสอบระยะเวลาที่ไม่มีแอคชั่นในระบบ (รันทุก 5 วินาที)
-  useEffect(() => {
-    // ยกเว้น Admin: ไม่มีการแจ้งเตือนหรือเปลี่ยนเป็นว่างงานอัตโนมัติ
-    if (!user || user.workStatus !== 'working' || isAdmin) {
-      setIsWarning(false);
-      return;
-    }
-
-    const interval = setInterval(async () => {
-      if (isClockingOutRef.current) return;
-
-      const latestActionTime = getLatestActionTime();
-      const now = Date.now();
-      const idleMs = now - latestActionTime;
-
-      // กรณีที่ 1: เกิน 3 ชั่วโมง (ครบ 2 ชม. + รออีก 1 ชม. แล้วไม่ได้ยืนยันว่าทำงานอยู่) -> เด้งออก / เปลี่ยนเป็นว่างงาน
-      if (idleMs >= TOTAL_INACTIVITY_TIMEOUT_MS) {
-        isClockingOutRef.current = true;
-        setIsWarning(false);
-        try {
-          const res = await clockOut(
-            'ไม่มีการสร้างเคส รับเคส ใส่หมายเหตุ เกิน 2 ชม. และไม่มีการยืนยันภายใน 1 ชม. (ระบบเปลี่ยนเป็นว่างงาน)',
-            true
-          );
-          setReturnedCasesCount(res.returnedCasesCount || 0);
-          setIsAutoClockedOut(true);
-        } catch (err) {
-          console.error('Auto clock-out error:', err);
-        } finally {
-          isClockingOutRef.current = false;
-        }
-        return;
-      }
-
-      // กรณีที่ 2: ครบ 2 ชั่วโมงแล้ว -> เด้งหน้าต่างแจ้งเตือนทันที และเริ่มนับถอยหลัง 1 ชั่วโมง
-      if (idleMs >= ACTION_ALERT_THRESHOLD_MS) {
-        const timeLeft = Math.max(0, TOTAL_INACTIVITY_TIMEOUT_MS - idleMs);
-        setRemainingMs(timeLeft);
-        setIsWarning(true);
-
-        // ส่งเสียงเตือนและ notification ในครั้งแรกที่เด้งเตือน
-        if (!hasAlertedRef.current) {
-          hasAlertedRef.current = true;
-          playNotificationChime();
-
-          if ('Notification' in window && Notification.permission === 'granted') {
-            try {
-              new Notification('⚠️ เตือนความเคลื่อนไหว: ไม่มีการทำเคสเกิน 2 ชั่วโมง', {
-                body: 'กรุณากดยืนยันว่ากำลังทำงานอยู่ ระบบจะรออีก 1 ชั่วโมงก่อนเปลี่ยนสถานะเป็นว่างงานอัตโนมัติ',
-              });
-            } catch (_) {}
-          }
-        }
-      } else {
-        // หากยังไม่ถึง 2 ชม. ให้ปิดการแจ้งเตือน
-        setIsWarning(false);
-        hasAlertedRef.current = false;
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [user, isAdmin, clockOut, getLatestActionTime]);
-
-  // ระบบตรวจสอบพนักงานคนอื่นที่ปิดเครื่องหรือทิ้งไว้โดยไม่มีแอคชั่นเกิน 3 ชม. (รันทุก 1 นาที)
-  useEffect(() => {
-    if (!user) return;
-
-    const sweepInterval = setInterval(async () => {
-      if (sweepLockRef.current) return;
-      sweepLockRef.current = true;
-
-      try {
-        const now = Date.now();
-        const staleWorkers = registeredUsers.filter((u) => {
-          if (u.uid === user.uid) return false;
-          if (u.workStatus !== 'working') return false;
-          // ยกเว้น Admin จากการถูกสวีป
-          if (isUserAdmin(u)) return false;
-          const lastAction = Math.max(
-            u.lastActionAt || 0,
-            u.lastActiveAt || 0,
-            u.clockedInAt || 0,
-            u.createdAt || 0
-          );
-          return lastAction > 0 && (now - lastAction > TOTAL_INACTIVITY_TIMEOUT_MS);
-        });
-
-        if (staleWorkers.length > 0) {
-          for (const worker of staleWorkers) {
-            try {
-              await autoClockOutInactiveEmployee(
-                worker.uid, 
-                worker.name, 
-                'ไม่มีการสร้างเคส รับเคส ใส่หมายเหตุ เกิน 2 ชม. และไม่มีการยืนยันภายใน 1 ชม.'
-              );
-            } catch (err) {
-              console.warn('Failed to sweep stale worker', worker.name, err);
-            }
-          }
-          await fetchRegisteredUsers();
-        }
-      } catch (e) {
-        console.warn('Inactivity sweeper error:', e);
-      } finally {
-        sweepLockRef.current = false;
-      }
-    }, 60000);
-
-    return () => clearInterval(sweepInterval);
-  }, [user, registeredUsers, fetchRegisteredUsers]);
-
-  // พนักงานกดยืนยันว่า "ฉันกำลังทำงานอยู่"
+  // Item 9: When employee clicks "ยืนยันว่ายังทำงานอยู่" (resetActivity), immediately update Firestore (force = true)
   const resetActivity = useCallback(() => {
-    if (user?.uid) {
-      recordSystemAction(user.uid, 'confirm_working');
-    }
     const now = Date.now();
-    lastLocalActionTimeRef.current = now;
-    hasAlertedRef.current = false;
-    try {
-      localStorage.setItem(storageKey, String(now));
-    } catch (_) {}
-    setIsWarning(false);
-  }, [user?.uid, storageKey]);
+    lastActivityRef.current = now;
+    if (isWarning) {
+      setIsWarning(false);
+    }
+
+    if (user && user.workStatus === 'working') {
+      try {
+        localStorage.setItem(getActivityStorageKey(user.uid), String(now));
+      } catch {
+        // Ignore storage error
+      }
+      lastFirestoreWriteRef.current = now;
+      updateEmployeeHeartbeat(user.uid, true);
+    }
+  }, [user, isWarning]);
 
   const dismissAutoClockOut = useCallback(() => {
     setIsAutoClockedOut(false);
+    setReturnedCasesCount(0);
   }, []);
+
+  // Track user DOM events (mouse, keyboard, touch, click, scroll) — throttled to write to Firestore at most every 30 mins
+  useEffect(() => {
+    if (!user || user.workStatus === 'off_work') {
+      setIsWarning(false);
+      return;
+    }
+
+    const storageKey = `thaiplus_last_activity_${user.uid}`;
+    const now = Date.now();
+    let baseline = now;
+    try {
+      const savedLocal = Number(localStorage.getItem(storageKey) || 0);
+      const savedRemote = Math.max(
+        user.lastActiveAt || 0,
+        user.lastActionAt || 0,
+        user.clockedInAt || 0
+      );
+      const latestKnown = Math.max(savedLocal, savedRemote);
+      if (latestKnown > 0 && now - latestKnown < INACTIVITY_TIMEOUT_MS) {
+        baseline = latestKnown;
+      } else {
+        localStorage.setItem(storageKey, String(now));
+      }
+    } catch {
+      baseline = now;
+    }
+
+    lastActivityRef.current = baseline;
+    lastFirestoreWriteRef.current = now;
+
+    let throttleTimer: number | null = null;
+    const handleUserActivity = () => {
+      if (throttleTimer) return;
+      throttleTimer = window.setTimeout(() => {
+        throttleTimer = null;
+        const currentTime = Date.now();
+        lastActivityRef.current = currentTime;
+        try {
+          localStorage.setItem(storageKey, String(currentTime));
+        } catch {
+          // Ignore storage error
+        }
+
+        // Write heartbeat to Firestore no more than once every 30 minutes and only when tab is visible
+        if (
+          typeof document !== 'undefined' &&
+          document.visibilityState === 'visible' &&
+          currentTime - lastFirestoreWriteRef.current >= HEARTBEAT_WRITE_INTERVAL_MS
+        ) {
+          lastFirestoreWriteRef.current = currentTime;
+          updateEmployeeHeartbeat(user.uid, false);
+        }
+      }, 1500);
+    };
+
+    const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach((evt) => window.addEventListener(evt, handleUserActivity, { passive: true }));
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, handleUserActivity));
+      if (throttleTimer) clearTimeout(throttleTimer);
+    };
+  }, [user?.uid, user?.workStatus]);
+
+  // Check local idle timer for current logged-in employee (3 hours)
+  useEffect(() => {
+    if (!user || user.workStatus === 'off_work') return;
+    if (isUserAdmin(user)) return;
+
+    const timer = setInterval(async () => {
+      if (isClockingOutRef.current) return;
+
+      const now = Date.now();
+      const idleDuration = now - lastActivityRef.current;
+      const timeLeft = Math.max(0, INACTIVITY_TIMEOUT_MS - idleDuration);
+      setRemainingMs(timeLeft);
+
+      if (idleDuration >= INACTIVITY_TIMEOUT_MS) {
+        isClockingOutRef.current = true;
+        setIsWarning(false);
+
+        const storeCases = useStore.getState().cases;
+        const res = await autoClockOutInactiveEmployee(
+          user.uid,
+          user.name,
+          'ไม่มีการเคลื่อนไหวในระบบเกิน 3 ชั่วโมง',
+          storeCases
+        );
+
+        if (res.success && !res.alreadyOffWork) {
+          setReturnedCasesCount(res.returnedCasesCount);
+          setIsAutoClockedOut(true);
+
+          const updatedUser = {
+            ...user,
+            workStatus: 'off_work' as const,
+            offWorkAt: Date.now(),
+            autoClockOutReason: 'ไม่มีการเคลื่อนไหวในระบบเกิน 3 ชั่วโมง',
+          };
+          localStorage.setItem('thaiplus_current_user_v1', JSON.stringify(updatedUser));
+          useStore.setState({ user: updatedUser });
+        }
+        isClockingOutRef.current = false;
+      } else if (idleDuration >= INACTIVITY_TIMEOUT_MS - WARNING_BEFORE_MS) {
+        setIsWarning(true);
+      } else {
+        if (isWarning) setIsWarning(false);
+      }
+    }, CHECK_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+  }, [user, isWarning]);
+
+  // Item 4: Run distributed maintenance sweep every 10 minutes across any active browser client
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const uid = user.uid;
+    const uname = user.name || user.username || uid;
+
+    // Initial check 20s after mount (once store listeners have populated cases & registeredUsers)
+    const initialTimeout = setTimeout(() => {
+      tryRunDistributedBrowserMaintenance(uid, uname);
+    }, 20 * 1000);
+
+    // Every 10 minutes
+    const sweepInterval = setInterval(() => {
+      tryRunDistributedBrowserMaintenance(uid, uname);
+    }, MAINTENANCE_LOCK_INTERVAL_MS);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(sweepInterval);
+    };
+  }, [user?.uid, user?.name, user?.username]);
 
   return {
     isWarning,

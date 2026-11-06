@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
-import { collection, query, onSnapshot, orderBy, doc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { collection, query, onSnapshot, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Case, statusMap } from './Queue';
 import { Logo } from './Logo';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -92,14 +92,46 @@ interface EmployeeProfile {
 export type TimeframeMode = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'custom' | 'all';
 
 export function AdminDashboard() {
-  const { user, registeredUsers } = useStore();
+  const {
+    user,
+    registeredUsers,
+    cases: liveCases,
+    historicalCases,
+    casesLoading: loading,
+    fetchHistoricalCases,
+  } = useStore();
   const isAdmin = isUserAdmin(user);
   const [showUserModal, setShowUserModal] = useState(false);
 
-  const [cases, setCases] = useState<Case[]>([]);
-  const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  
+  // Merge active + today's cases with on-demand historical cases
+  const cases = useMemo(() => {
+    const map = new Map<string, Case>();
+    historicalCases.forEach((c) => map.set(c.id, c));
+    liveCases.forEach((c) => map.set(c.id, c));
+    return Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [liveCases, historicalCases]);
+
+  const employees: EmployeeProfile[] = useMemo(() => {
+    return registeredUsers.map((u) => {
+      let name = u.name || 'พนักงาน';
+      if (name === 'คุณเกม' || u.username?.toLowerCase() === 'gametpl' || u.uid === 'admin_gametpl') {
+        name = 'Game';
+      }
+      return {
+        uid: u.uid,
+        name,
+        username: u.username || u.uid,
+        role: u.role || 'employee',
+        createdAt: u.createdAt,
+        workStatus: u.workStatus || 'working',
+        offWorkAt: u.offWorkAt,
+        accountStatus: u.accountStatus || 'approved',
+        approvedAt: u.approvedAt,
+        approvedBy: u.approvedBy,
+      };
+    });
+  }, [registeredUsers]);
+
   // Date Granularity (Cutoff at Midnight: 00:00:00 - 23:59:59.999)
   const [timeFilter, setTimeFilter] = useState<TimeframeMode>('today');
   const [customStartDate, setCustomStartDate] = useState(() => {
@@ -130,104 +162,96 @@ export function AdminDashboard() {
     }
   }, [isAdmin, mainTab]);
 
-  // Subscribe to technical_issues count
+  // Load historical cases on-demand via getDocs with limit ONLY when user selects a historical date range
   useEffect(() => {
-    const q = query(collection(db, 'technical_issues'));
-    const unsub = onSnapshot(q, (snap) => {
-      let count = 0;
-      snap.forEach((doc) => {
-        const d = doc.data();
-        if (d.status === 'pending' || d.status === 'in_progress') {
-          count++;
+    if (timeFilter === 'today') return;
+
+    const now = new Date();
+    let minCreatedAt: number | undefined;
+    let maxCreatedAt: number | undefined;
+
+    if (timeFilter === 'yesterday') {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      minCreatedAt = new Date(y.getFullYear(), y.getMonth(), y.getDate(), 0, 0, 0, 0).getTime();
+      maxCreatedAt = new Date(y.getFullYear(), y.getMonth(), y.getDate(), 23, 59, 59, 999).getTime();
+    } else if (timeFilter === 'last7days') {
+      const d7 = new Date(now);
+      d7.setDate(d7.getDate() - 6);
+      minCreatedAt = new Date(d7.getFullYear(), d7.getMonth(), d7.getDate(), 0, 0, 0, 0).getTime();
+    } else if (timeFilter === 'thisMonth') {
+      minCreatedAt = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
+    } else if (timeFilter === 'custom') {
+      if (customStartDate) {
+        const parts = customStartDate.split('-').map(Number);
+        if (parts.length === 3) {
+          minCreatedAt = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0).getTime();
         }
+      }
+      if (customEndDate) {
+        const parts = customEndDate.split('-').map(Number);
+        if (parts.length === 3) {
+          maxCreatedAt = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59, 999).getTime();
+        }
+      }
+    }
+
+    fetchHistoricalCases({
+      minCreatedAt,
+      maxCreatedAt,
+      limitCount: 300,
+    });
+  }, [timeFilter, customStartDate, customEndDate, fetchHistoricalCases]);
+
+  // Subscribe to badge counts only when user is logged in (using filtered queries to minimize reads)
+  useEffect(() => {
+    if (!user?.uid) return;
+    const qTech = isAdmin
+      ? query(
+          collection(db, 'technical_issues'),
+          where('status', 'in', ['pending', 'in_progress'])
+        )
+      : query(
+          collection(db, 'technical_issues'),
+          where('reporterId', '==', user.uid)
+        );
+    const unsubTech = onSnapshot(qTech, (snap) => {
+      let count = 0;
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data.status === 'pending' || data.status === 'in_progress') count++;
       });
       setPendingTechCount(count);
     }, () => {});
-    return () => unsub();
-  }, []);
 
-  useEffect(() => {
-    // 1. Subscribe to cases collection
-    const qCases = query(collection(db, 'cases'), orderBy('createdAt', 'desc'));
-    const unsubCases = onSnapshot(qCases, (snapshot) => {
-      const casesData: Case[] = [];
-      snapshot.forEach((doc) => {
-        casesData.push({ id: doc.id, ...doc.data() } as Case);
-      });
-      setCases(casesData);
-      setLoading(false);
-
-      // Auto-cancel cases older than 3 days
-      const expired = getExpiredCases(casesData);
-      if (expired.length > 0) {
-        autoCancelExpiredCases(expired, 'auto').catch(() => {});
-      }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'cases');
-      setLoading(false);
-    });
-
-    // 2. Subscribe to users collection
-    const qUsers = query(collection(db, 'users'));
-    const unsubUsers = onSnapshot(qUsers, (snapshot) => {
-      const usersData: EmployeeProfile[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data();
-        let name = d.name || 'พนักงาน';
-        if (name === 'คุณเกม' || d.username?.toLowerCase() === 'gametpl' || doc.id === 'admin_gametpl') {
-          name = 'Game';
-        }
-        usersData.push({
-          uid: doc.id,
-          name: name,
-          username: d.username || doc.id,
-          role: d.role || 'employee',
-          createdAt: d.createdAt,
-          workStatus: d.workStatus || 'working',
-          offWorkAt: d.offWorkAt,
-          accountStatus: d.accountStatus || 'approved',
-          approvedAt: d.approvedAt,
-          approvedBy: d.approvedBy,
-        });
-      });
-      setEmployees(usersData);
-    }, (error) => {
-      console.warn('Could not read users collection, using fallback from cases:', error);
-    });
-
-    // 3. Subscribe to overtime_requests count
-    const qOT = query(collection(db, 'overtime_requests'));
+    const qOT = isAdmin
+      ? query(collection(db, 'overtime_requests'), where('status', '==', 'pending'))
+      : query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid));
     const unsubOT = onSnapshot(qOT, (snap) => {
       let count = 0;
-      snap.forEach((doc) => {
-        const d = doc.data();
-        if (d.status === 'pending') {
-          count++;
-        }
+      snap.forEach((d) => {
+        if (d.data().status === 'pending') count++;
       });
       setPendingOTCount(count);
     }, () => {});
 
-    // 4. Subscribe to advance_requests count
-    const qAdv = query(collection(db, 'advance_requests'));
+    const qAdv = isAdmin
+      ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
+      : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
     const unsubAdv = onSnapshot(qAdv, (snap) => {
       let count = 0;
-      snap.forEach((doc) => {
-        const d = doc.data();
-        if (d.status === 'pending') {
-          count++;
-        }
+      snap.forEach((d) => {
+        if (d.data().status === 'pending') count++;
       });
       setPendingAdvanceCount(count);
     }, () => {});
 
     return () => {
-      unsubCases();
-      unsubUsers();
+      unsubTech();
       unsubOT();
       unsubAdv();
     };
-  }, []);
+  }, [user?.uid, isAdmin]);
 
   if (loading) {
     return (

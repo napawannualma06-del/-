@@ -8,6 +8,7 @@ export interface UserProfile {
   name: string;
   role: Role;
   pin?: string;
+  hasPin?: boolean;
   email?: string;
   fcmToken?: string;
   workStatus?: WorkStatus;

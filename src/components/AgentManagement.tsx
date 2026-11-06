@@ -3,19 +3,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   collection,
   query,
-  onSnapshot,
   addDoc,
   updateDoc,
   deleteDoc,
   doc,
-  orderBy,
   setDoc,
   getDocs,
   where,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useStore } from '../store/useStore';
-import { Agent, Case } from '../types';
+import { Agent } from '../types';
 import { THAI_BANKS, getBankInfo } from '../lib/promptpay';
 import {
   Building2,
@@ -46,12 +44,20 @@ import { clsx } from 'clsx';
 
 export function AgentManagement() {
   const navigate = useNavigate();
-  const { user } = useStore();
+  const {
+    user,
+    agents,
+    deletedAgentNames: deletedNames,
+    agentsLoading: loading,
+    cases,
+    fetchAgents,
+    upsertAgentInCache,
+    removeAgentFromCache,
+  } = useStore();
 
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [cases, setCases] = useState<Case[]>([]);
-  const [deletedNames, setDeletedNames] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetchAgents(false);
+  }, [fetchAgents]);
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
@@ -79,85 +85,6 @@ export function AgentManagement() {
   // Copy Feedback State
   const [copiedAccountKey, setCopiedAccountKey] = useState<string | null>(null);
   const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // 1. Subscribe to deleted agents blacklist
-  useEffect(() => {
-    const unsubDeleted = onSnapshot(
-      doc(db, 'system_duties', 'deleted_agents'),
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setDeletedNames(Array.isArray(data?.names) ? data.names : []);
-        } else {
-          setDeletedNames([]);
-        }
-      },
-      (err) => {
-        console.warn('deleted_agents listen notice:', err);
-      }
-    );
-
-    return () => unsubDeleted();
-  }, []);
-
-  // 2. Subscribe to agents collection
-  useEffect(() => {
-    const q = query(collection(db, 'agents'), orderBy('name', 'asc'));
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        const loaded: Agent[] = [];
-        snapshot.forEach((d) => {
-          const data = d.data();
-          loaded.push({
-            id: d.id,
-            name: data.name || '',
-            createdAt: data.createdAt || 0,
-            createdBy: data.createdBy,
-            createdById: data.createdById,
-            bankName: data.bankName,
-            bankAccountNumber: data.bankAccountNumber,
-            bankAccountName: data.bankAccountName,
-            promptpayType: data.promptpayType,
-            phone: data.phone,
-            province: data.province,
-            notes: data.notes,
-            qrImageUrl: data.qrImageUrl,
-            updatedAt: data.updatedAt,
-            updatedBy: data.updatedBy,
-          });
-        });
-        setAgents(loaded);
-        setLoading(false);
-      },
-      (err) => {
-        console.warn('agents listen notice:', err);
-        setLoading(false);
-      }
-    );
-
-    return () => unsub();
-  }, []);
-
-  // 3. Subscribe to cases to compute linked cases count and legacy agents
-  useEffect(() => {
-    const q = query(collection(db, 'cases'), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        const loadedCases: Case[] = [];
-        snapshot.forEach((d) => {
-          loadedCases.push({ id: d.id, ...d.data() } as Case);
-        });
-        setCases(loadedCases);
-      },
-      (err) => {
-        console.warn('cases listen notice:', err);
-      }
-    );
-
-    return () => unsub();
-  }, []);
 
   // Combine Firestore agents and historical agents from cases (excluding deleted blacklist)
   const allAgents = useMemo(() => {
@@ -331,13 +258,22 @@ export function AgentManagement() {
       if (editingAgent && !editingAgent.id.startsWith('legacy-')) {
         // Update existing Firestore agent doc
         await updateDoc(doc(db, 'agents', editingAgent.id), agentData);
+        upsertAgentInCache({
+          ...editingAgent,
+          ...agentData,
+        });
       } else {
         // Add new doc in agents collection (or upgrade legacy agent)
-        await addDoc(collection(db, 'agents'), {
+        const createdPayload = {
           ...agentData,
           createdAt: editingAgent ? editingAgent.createdAt : Date.now(),
           createdBy: editingAgent?.createdBy || user?.name || user?.username || 'พนักงาน',
           createdById: user?.uid || '',
+        };
+        const docRef = await addDoc(collection(db, 'agents'), createdPayload);
+        upsertAgentInCache({
+          id: docRef.id,
+          ...createdPayload,
         });
       }
 
@@ -376,6 +312,8 @@ export function AgentManagement() {
         { names: nextDeleted },
         { merge: true }
       );
+
+      removeAgentFromCache(targetName, 'id' in deleteTarget ? deleteTarget.id : undefined);
 
       setDeleteTarget(null);
     } catch (err) {
@@ -438,6 +376,17 @@ export function AgentManagement() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5 self-start md:self-auto shrink-0 flex-wrap">
+          <button
+            type="button"
+            onClick={() => fetchAgents(true)}
+            disabled={loading}
+            className="inline-flex items-center px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm transition shadow-2xs cursor-pointer disabled:opacity-50"
+            title="ดึงรายชื่อ Agent ล่าสุดจากฐานข้อมูล"
+          >
+            <RefreshCw className={clsx("w-4 h-4 mr-1.5 text-indigo-500", loading && "animate-spin")} />
+            รีเฟรชข้อมูล
+          </button>
+
           <button
             type="button"
             onClick={handleOpenAdd}

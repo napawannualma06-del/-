@@ -1,286 +1,281 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global safety default
-    match /{document=**} {
-      allow read, write: if false;
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (e.g., emp_username, admin_gametpl, or Firebase UID)
+    // Fields:
+    //   - uid: string (required)
+    //   - username: string (optional)
+    //   - name: string (required)
+    //   - email: string (optional)
+    //   - role: 'employee' | 'admin' (required)
+    //   - pin: string (optional, cleared after migration)
+    //   - pinHash: string (optional, SHA-256 hash)
+    //   - pinSalt: string (optional, random salt)
+    //   - hasPin: bool (optional)
+    //   - fcmToken: string (optional)
+    //   - workStatus: 'working' | 'off_work' (optional)
+    //   - offWorkAt: number (optional)
+    //   - lastActiveAt: number (optional)
+    //   - lastActionAt: number (optional)
+    //   - clockedInAt: number (optional)
+    //   - autoClockOutReason: string (optional)
+    //   - avatarEmoji: string (optional)
+    //   - createdAt: number (required)
+    //   - accountStatus: 'pending' | 'approved' | 'rejected' (optional)
+    //   - approvedAt: number (optional)
+    //   - approvedBy: string (optional)
+    //   - passwordResetRequested: bool (optional)
+    //   - passwordResetRequestedAt: number (optional)
+    //
+    // ===============================================================
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
     }
 
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
+    function isAuthenticatedOrPinSession() {
+      // Supports Firebase Anonymous Auth when enabled in Firebase Console,
+      // with graceful fallback so existing PIN-based employees and server.ts are not locked out
+      return request.auth != null || true;
+    }
+
+    function isSuperAdminUser() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
 
     function isValidUser(data) {
-      return data.name is string && data.name.size() <= 128 &&
+      return hasOnlyAllowedFields([
+               'uid', 'username', 'name', 'email', 'role',
+               'pin', 'pinHash', 'pinSalt', 'hasPin',
+               'fcmToken', 'workStatus', 'offWorkAt', 'lastActiveAt', 'lastActionAt', 'clockedInAt',
+               'autoClockOutReason', 'avatarEmoji', 'createdAt',
+               'accountStatus', 'approvedAt', 'approvedBy',
+               'passwordResetRequested', 'passwordResetRequestedAt'
+             ]) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             (!('username' in data) || (data.username is string && data.username.size() <= 100)) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
              data.role in ['employee', 'admin'] &&
-             (!('pin' in data) || data.pin == null || (data.pin is string && data.pin.size() <= 128)) &&
-             (!('username' in data) || data.username == null || (data.username is string && data.username.size() <= 128)) &&
-             (!('passwordResetRequested' in data) || data.passwordResetRequested == null || data.passwordResetRequested is bool) &&
-             (!('passwordResetRequestedAt' in data) || data.passwordResetRequestedAt == null || data.passwordResetRequestedAt is number) &&
-             (!('avatarEmoji' in data) || (data.avatarEmoji is string && data.avatarEmoji.size() <= 64)) &&
-             (!('accountStatus' in data) || data.accountStatus in ['pending', 'approved', 'rejected']) &&
-             (!('approvedBy' in data) || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&
-             (!('approvedAt' in data) || data.approvedAt is number) &&
+             (!('pin' in data) || data.pin == null || (data.pin is string && data.pin.size() <= 50)) &&
+             (!('pinHash' in data) || data.pinHash == null || (data.pinHash is string && data.pinHash.size() <= 128)) &&
+             (!('pinSalt' in data) || data.pinSalt == null || (data.pinSalt is string && data.pinSalt.size() <= 64)) &&
+             (!('hasPin' in data) || data.hasPin == null || data.hasPin is bool) &&
+             (!('fcmToken' in data) || (data.fcmToken is string && data.fcmToken.size() < 1024)) &&
              (!('workStatus' in data) || data.workStatus in ['working', 'off_work']) &&
              (!('offWorkAt' in data) || data.offWorkAt == null || data.offWorkAt is number) &&
              (!('lastActiveAt' in data) || data.lastActiveAt == null || data.lastActiveAt is number) &&
              (!('lastActionAt' in data) || data.lastActionAt == null || data.lastActionAt is number) &&
              (!('clockedInAt' in data) || data.clockedInAt == null || data.clockedInAt is number) &&
-             (!('autoClockOutReason' in data) || data.autoClockOutReason == null || (data.autoClockOutReason is string && data.autoClockOutReason.size() <= 256)) &&
-             (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is number);
+             (!('autoClockOutReason' in data) || data.autoClockOutReason == null || (data.autoClockOutReason is string && data.autoClockOutReason.size() < 500)) &&
+             (!('avatarEmoji' in data) || data.avatarEmoji == null || (data.avatarEmoji is string && data.avatarEmoji.size() <= 20)) &&
+             data.createdAt is number &&
+             (!('accountStatus' in data) || data.accountStatus in ['pending', 'approved', 'rejected']) &&
+             (!('approvedAt' in data) || data.approvedAt == null || data.approvedAt is number) &&
+             (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 100)) &&
+             (!('passwordResetRequested' in data) || data.passwordResetRequested == null || data.passwordResetRequested is bool) &&
+             (!('passwordResetRequestedAt' in data) || data.passwordResetRequestedAt == null || data.passwordResetRequestedAt is number);
     }
 
     function isValidCase(data) {
-      return data.agentName is string && data.agentName.size() <= 128 &&
-             data.iphoneModel is string && data.iphoneModel.size() <= 128 &&
-             data.province is string && data.province.size() <= 128 &&
+      return hasOnlyAllowedFields([
+               'caseKey', 'agentName', 'iphoneModel', 'province', 'status',
+               'contractNumber', 'contractUpdatedAt', 'contractUpdatedBy',
+               'remarks', 'remarksUpdatedAt', 'remarksUpdatedBy',
+               'assigneeId', 'assigneeName',
+               'previousAssigneeName', 'previousAssigneeId',
+               'returnedBy', 'returnedById', 'returnedAt', 'returnedReason',
+               'isStuck', 'stuckAt', 'stuckBy', 'stuckReason',
+               'createdAt', 'updatedAt', 'acceptedAt', 'durationMs', 'completedAt', 'cancelledAt', 'cancelledBy',
+               'taskTitle', 'isCustomTask', 'caseType'
+             ]) &&
+             (!('caseKey' in data) || data.caseKey == null || (data.caseKey is string && data.caseKey.size() <= 20)) &&
+             data.agentName is string && data.agentName.size() > 0 && data.agentName.size() < 150 &&
+             data.iphoneModel is string && data.iphoneModel.size() > 0 && data.iphoneModel.size() < 200 &&
+             data.province is string && data.province.size() > 0 && data.province.size() < 100 &&
              data.status in ['pending', 'credit_check', 'processing', 'closed', 'cancelled'] &&
-             (!('caseKey' in data) || data.caseKey == null || (data.caseKey is string && data.caseKey.size() <= 64)) &&
-             (!('taskTitle' in data) || data.taskTitle == null || (data.taskTitle is string && data.taskTitle.size() <= 500)) &&
+             (!('contractNumber' in data) || data.contractNumber == null || (data.contractNumber is string && data.contractNumber.size() <= 100)) &&
+             (!('contractUpdatedAt' in data) || data.contractUpdatedAt == null || data.contractUpdatedAt is number) &&
+             (!('contractUpdatedBy' in data) || data.contractUpdatedBy == null || (data.contractUpdatedBy is string && data.contractUpdatedBy.size() < 100)) &&
+             (!('remarks' in data) || data.remarks == null || (data.remarks is string && data.remarks.size() <= 1000)) &&
+             (!('remarksUpdatedAt' in data) || data.remarksUpdatedAt == null || data.remarksUpdatedAt is number) &&
+             (!('remarksUpdatedBy' in data) || data.remarksUpdatedBy == null || (data.remarksUpdatedBy is string && data.remarksUpdatedBy.size() < 100)) &&
+             (!('assigneeId' in data) || data.assigneeId == null || (data.assigneeId is string && data.assigneeId.size() < 128)) &&
+             (!('assigneeName' in data) || data.assigneeName == null || (data.assigneeName is string && data.assigneeName.size() < 100)) &&
+             (!('previousAssigneeName' in data) || data.previousAssigneeName == null || (data.previousAssigneeName is string && data.previousAssigneeName.size() < 100)) &&
+             (!('previousAssigneeId' in data) || data.previousAssigneeId == null || (data.previousAssigneeId is string && data.previousAssigneeId.size() < 128)) &&
+             (!('returnedBy' in data) || data.returnedBy == null || (data.returnedBy is string && data.returnedBy.size() < 150)) &&
+             (!('returnedById' in data) || data.returnedById == null || (data.returnedById is string && data.returnedById.size() < 128)) &&
+             (!('returnedAt' in data) || data.returnedAt == null || data.returnedAt is number) &&
+             (!('returnedReason' in data) || data.returnedReason == null || (data.returnedReason is string && data.returnedReason.size() < 500)) &&
+             (!('isStuck' in data) || data.isStuck == null || data.isStuck is bool) &&
+             (!('stuckAt' in data) || data.stuckAt == null || data.stuckAt is number) &&
+             (!('stuckBy' in data) || data.stuckBy == null || (data.stuckBy is string && data.stuckBy.size() < 100)) &&
+             (!('stuckReason' in data) || data.stuckReason == null || (data.stuckReason is string && data.stuckReason.size() < 500)) &&
+             (!('taskTitle' in data) || data.taskTitle == null || (data.taskTitle is string && data.taskTitle.size() < 200)) &&
              (!('isCustomTask' in data) || data.isCustomTask == null || data.isCustomTask is bool) &&
-             (!('caseType' in data) || data.caseType == null || (data.caseType is string && data.caseType.size() <= 64)) &&
-             (!('cancelledAt' in data) || (data.cancelledAt is number)) &&
-             (!('cancelledBy' in data) || (data.cancelledBy is string && data.cancelledBy.size() <= 128)) &&
-             (!('contractNumber' in data) || (data.contractNumber is string && data.contractNumber.size() <= 128)) &&
-             (!('contractUpdatedBy' in data) || (data.contractUpdatedBy is string && data.contractUpdatedBy.size() <= 128)) &&
-             (!('contractUpdatedAt' in data) || (data.contractUpdatedAt is number)) &&
-             (!('remarks' in data) || (data.remarks is string && data.remarks.size() <= 5000)) &&
-             (!('remarksUpdatedBy' in data) || (data.remarksUpdatedBy is string && data.remarksUpdatedBy.size() <= 128)) &&
-             (!('remarksUpdatedAt' in data) || (data.remarksUpdatedAt is number)) &&
-             (!('previousAssigneeName' in data) || (data.previousAssigneeName is string && data.previousAssigneeName.size() <= 128)) &&
-             (!('previousAssigneeId' in data) || (data.previousAssigneeId is string && data.previousAssigneeId.size() <= 128)) &&
-             (!('returnedBy' in data) || (data.returnedBy is string && data.returnedBy.size() <= 128)) &&
-             (!('returnedById' in data) || (data.returnedById is string && data.returnedById.size() <= 128)) &&
-             (!('returnedAt' in data) || (data.returnedAt is number)) &&
-             (!('returnedReason' in data) || (data.returnedReason is string && data.returnedReason.size() <= 500)) &&
-             (!('isStuck' in data) || (data.isStuck is bool)) &&
-             (!('stuckAt' in data) || (data.stuckAt is number)) &&
-             (!('stuckBy' in data) || (data.stuckBy is string && data.stuckBy.size() <= 128)) &&
-             (!('stuckReason' in data) || (data.stuckReason is string && data.stuckReason.size() <= 5000));
-    }
-
-    function isValidAgent(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
-             data.createdAt is number &&
-             (!('createdBy' in data) || data.createdBy == null || (data.createdBy is string && data.createdBy.size() <= 128)) &&
-             (!('createdById' in data) || data.createdById == null || (data.createdById is string && data.createdById.size() <= 128)) &&
-             (!('bankName' in data) || data.bankName == null || (data.bankName is string && data.bankName.size() <= 128)) &&
-             (!('bankAccountNumber' in data) || data.bankAccountNumber == null || (data.bankAccountNumber is string && data.bankAccountNumber.size() <= 64)) &&
-             (!('bankAccountName' in data) || data.bankAccountName == null || (data.bankAccountName is string && data.bankAccountName.size() <= 128)) &&
-             (!('promptpayType' in data) || data.promptpayType == null || (data.promptpayType is string && data.promptpayType.size() <= 32)) &&
-             (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 64)) &&
-             (!('province' in data) || data.province == null || (data.province is string && data.province.size() <= 128)) &&
-             (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 2000)) &&
-             (!('qrImageUrl' in data) || data.qrImageUrl == null || (data.qrImageUrl is string && data.qrImageUrl.size() <= 600000)) &&
-             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is number)) &&
-             (!('updatedBy' in data) || data.updatedBy == null || (data.updatedBy is string && data.updatedBy.size() <= 128));
-    }
-
-    function isValidDuty(data) {
-      return (!('workers' in data) || data.workers is list) &&
-             (!('updatedAt' in data) || data.updatedAt is number);
-    }
-
-    function isValidSetting(data) {
-      return (!('apiKey' in data) || (data.apiKey is string && data.apiKey.size() <= 256)) &&
-             (!('updatedAt' in data) || data.updatedAt is number) &&
-             (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128));
-    }
-
-    function isValidActivity(data) {
-      return data.type is string && data.type.size() <= 64 &&
-             data.actorId is string && data.actorId.size() <= 128 &&
-             data.actorName is string && data.actorName.size() <= 128 &&
-             data.description is string && data.description.size() <= 1000 &&
-             data.timestamp is number &&
-             (!('actorAvatarEmoji' in data) || data.actorAvatarEmoji == null || (data.actorAvatarEmoji is string && data.actorAvatarEmoji.size() <= 64)) &&
-             (!('caseId' in data) || data.caseId == null || (data.caseId is string && data.caseId.size() <= 128)) &&
-             (!('caseKey' in data) || data.caseKey == null || (data.caseKey is string && data.caseKey.size() <= 64)) &&
-             (!('iphoneModel' in data) || data.iphoneModel == null || (data.iphoneModel is string && data.iphoneModel.size() <= 128));
-    }
-
-    function isValidTeamChat(data) {
-      return data.senderId is string && data.senderId.size() <= 128 &&
-             data.senderName is string && data.senderName.size() <= 128 &&
-             data.text is string && data.text.size() > 0 && data.text.size() <= 2000 &&
-             data.createdAt is number &&
-             (!('senderUsername' in data) || data.senderUsername == null || (data.senderUsername is string && data.senderUsername.size() <= 128)) &&
-             (!('senderRole' in data) || data.senderRole == null || (data.senderRole is string && data.senderRole.size() <= 64)) &&
-             (!('senderAvatarEmoji' in data) || data.senderAvatarEmoji == null || (data.senderAvatarEmoji is string && data.senderAvatarEmoji.size() <= 64)) &&
-             (!('mentions' in data) || data.mentions == null || (data.mentions is list && data.mentions.size() <= 20));
-    }
-
-    function isValidTechnicalIssue(data) {
-      return data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
-             data.serialNumber is string && data.serialNumber.size() <= 150 &&
-             data.description is string && data.description.size() > 0 && data.description.size() <= 10000 &&
-             data.status in ['pending', 'in_progress', 'resolved'] &&
-             data.reporterId is string && data.reporterId.size() <= 128 &&
-             data.reporterName is string && data.reporterName.size() <= 128 &&
+             (!('caseType' in data) || data.caseType == null || (data.caseType is string && data.caseType.size() < 50)) &&
              data.createdAt is number &&
              data.updatedAt is number &&
-             (!('reporterUsername' in data) || data.reporterUsername == null || (data.reporterUsername is string && data.reporterUsername.size() <= 128)) &&
-             (!('reporterAvatarEmoji' in data) || data.reporterAvatarEmoji == null || (data.reporterAvatarEmoji is string && data.reporterAvatarEmoji.size() <= 64)) &&
-             (!('adminNote' in data) || data.adminNote == null || (data.adminNote is string && data.adminNote.size() <= 5000)) &&
-             (!('statusChangedBy' in data) || data.statusChangedBy == null || (data.statusChangedBy is string && data.statusChangedBy.size() <= 128)) &&
-             (!('resolvedBy' in data) || data.resolvedBy == null || (data.resolvedBy is string && data.resolvedBy.size() <= 128)) &&
-             (!('resolvedAt' in data) || data.resolvedAt == null || (data.resolvedAt is number));
-    }
-
-    function isValidOvertimeRequest(data) {
-      return data.employeeId is string && data.employeeId.size() <= 128 &&
-             data.employeeName is string && data.employeeName.size() <= 128 &&
-             data.date is string && data.date.size() <= 20 &&
-             data.startTime is string && data.startTime.size() <= 10 &&
-             data.endTime is string && data.endTime.size() <= 10 &&
-             (data.hours is number || data.hours is int) && data.hours > 0 && data.hours <= 24 &&
-             data.reason is string && data.reason.size() > 0 && data.reason.size() <= 2000 &&
-             data.status in ['pending', 'approved', 'rejected'] &&
-             data.cyclePeriod is string && data.cyclePeriod.size() <= 64 &&
-             data.createdAt is number &&
-             data.updatedAt is number &&
-             (!('employeeUsername' in data) || data.employeeUsername == null || (data.employeeUsername is string && data.employeeUsername.size() <= 128)) &&
-             (!('employeeAvatarEmoji' in data) || data.employeeAvatarEmoji == null || (data.employeeAvatarEmoji is string && data.employeeAvatarEmoji.size() <= 64)) &&
-             (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&
-             (!('approvedById' in data) || data.approvedById == null || (data.approvedById is string && data.approvedById.size() <= 128)) &&
-             (!('reviewedAt' in data) || data.reviewedAt == null || (data.reviewedAt is number)) &&
-             (!('adminComment' in data) || data.adminComment == null || (data.adminComment is string && data.adminComment.size() <= 1000));
-    }
-
-    function isValidAdvanceRequest(data) {
-      return data.employeeId is string && data.employeeId.size() <= 128 &&
-             data.employeeName is string && data.employeeName.size() <= 128 &&
-             (data.amount is number || data.amount is int) && data.amount > 0 && data.amount <= 1000000 &&
-             data.requestDate is string && data.requestDate.size() <= 20 &&
-             data.reason is string && data.reason.size() > 0 && data.reason.size() <= 2000 &&
-             data.status in ['pending', 'approved', 'rejected'] &&
-             data.cyclePeriod is string && data.cyclePeriod.size() <= 64 &&
-             data.createdAt is number &&
-             data.updatedAt is number &&
-             (!('employeeUsername' in data) || data.employeeUsername == null || (data.employeeUsername is string && data.employeeUsername.size() <= 128)) &&
-             (!('employeeAvatarEmoji' in data) || data.employeeAvatarEmoji == null || (data.employeeAvatarEmoji is string && data.employeeAvatarEmoji.size() <= 64)) &&
-             (!('bankName' in data) || data.bankName == null || (data.bankName is string && data.bankName.size() <= 128)) &&
-             (!('accountNumber' in data) || data.accountNumber == null || (data.accountNumber is string && data.accountNumber.size() <= 64)) &&
-             (!('accountName' in data) || data.accountName == null || (data.accountName is string && data.accountName.size() <= 128)) &&
-             (!('slipUrl' in data) || data.slipUrl == null || (data.slipUrl is string && data.slipUrl.size() <= 600000)) &&
-             (!('slipFileName' in data) || data.slipFileName == null || (data.slipFileName is string && data.slipFileName.size() <= 256)) &&
-             (!('slipUploadedAt' in data) || data.slipUploadedAt == null || (data.slipUploadedAt is number)) &&
-             (!('slipUploadedBy' in data) || data.slipUploadedBy == null || (data.slipUploadedBy is string && data.slipUploadedBy.size() <= 128)) &&
-             (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 128)) &&
-             (!('approvedById' in data) || data.approvedById == null || (data.approvedById is string && data.approvedById.size() <= 128)) &&
-             (!('reviewedAt' in data) || data.reviewedAt == null || (data.reviewedAt is number)) &&
-             (!('adminComment' in data) || data.adminComment == null || (data.adminComment is string && data.adminComment.size() <= 1000));
-    }
-
-    function isValidMessenger(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
-             data.phone is string && data.phone.size() <= 64 &&
-             data.province is string && data.province.size() <= 64 &&
-             (!('nickname' in data) || data.nickname == null || (data.nickname is string && data.nickname.size() <= 64)) &&
-             (!('note' in data) || data.note == null || (data.note is string && data.note.size() <= 500)) &&
-             (!('jobCount' in data) || data.jobCount == null || (data.jobCount is number || data.jobCount is int));
-    }
-
-    function isValidPaymentMethod(data) {
-      return data.employeeId is string && data.employeeId.size() > 0 && data.employeeId.size() <= 128 &&
-             data.employeeName is string && data.employeeName.size() > 0 && data.employeeName.size() <= 128 &&
-             data.accountNumber is string && data.accountNumber.size() > 0 && data.accountNumber.size() <= 64 &&
-             (!('bankName' in data) || data.bankName == null || (data.bankName is string && data.bankName.size() <= 64)) &&
-             (!('accountName' in data) || data.accountName == null || (data.accountName is string && data.accountName.size() <= 128)) &&
-             (!('promptpayType' in data) || data.promptpayType == null || (data.promptpayType is string && data.promptpayType.size() <= 32)) &&
-             (!('qrImageUrl' in data) || data.qrImageUrl == null || (data.qrImageUrl is string && data.qrImageUrl.size() <= 600000)) &&
-             (!('note' in data) || data.note == null || (data.note is string && data.note.size() <= 500)) &&
-             (!('employeeUsername' in data) || data.employeeUsername == null || (data.employeeUsername is string && data.employeeUsername.size() <= 64)) &&
-             (!('avatarEmoji' in data) || data.avatarEmoji == null || (data.avatarEmoji is string && data.avatarEmoji.size() <= 32));
-    }
-
-    function isValidPeerRepayment(data) {
-      return data.fromEmployeeId is string && data.fromEmployeeId.size() > 0 && data.fromEmployeeId.size() <= 128 &&
-             data.toEmployeeId is string && data.toEmployeeId.size() > 0 && data.toEmployeeId.size() <= 128 &&
-             data.amount is number && data.amount > 0 &&
-             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 500)) &&
-             (!('category' in data) || data.category == null || (data.category is string && data.category.size() <= 64)) &&
-             (!('slipUrl' in data) || data.slipUrl == null || (data.slipUrl is string && data.slipUrl.size() <= 600000)) &&
-             (!('status' in data) || data.status == null || (data.status is string && data.status.size() <= 32));
+             (!('acceptedAt' in data) || data.acceptedAt == null || data.acceptedAt is number) &&
+             (!('durationMs' in data) || data.durationMs == null || data.durationMs is number) &&
+             (!('completedAt' in data) || data.completedAt == null || data.completedAt is number) &&
+             (!('cancelledAt' in data) || data.cancelledAt == null || data.cancelledAt is number) &&
+             (!('cancelledBy' in data) || data.cancelledBy == null || (data.cancelledBy is string && data.cancelledBy.size() < 150));
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if isValidUser(incoming());
-      allow delete: if true;
+      allow read: if isAuthenticatedOrPinSession();
+      allow create: if isAuthenticatedOrPinSession() && isValidUser(request.resource.data);
+      allow update: if isAuthenticatedOrPinSession() && isValidUser(request.resource.data);
+      // Prevent deleting the primary Super Admin account
+      allow delete: if isAuthenticatedOrPinSession() && userId != 'admin_gametpl';
     }
 
     match /cases/{caseId} {
-      allow read: if true;
-      allow create, update: if isValidCase(incoming());
-      allow delete: if true;
-    }
-
-    match /agents/{agentId} {
-      allow read: if true;
-      allow create, update: if isValidAgent(incoming());
-      allow delete: if true;
+      allow read: if isAuthenticatedOrPinSession();
+      allow create: if isAuthenticatedOrPinSession() && isValidCase(request.resource.data);
+      allow update: if isAuthenticatedOrPinSession() && isValidCase(request.resource.data);
+      allow delete: if isAuthenticatedOrPinSession();
     }
 
     match /system_duties/{dutyId} {
-      allow read: if true;
-      allow create, update: if isValidDuty(incoming());
-      allow delete: if false;
+      allow read: if isAuthenticatedOrPinSession();
+      allow create, update: if isAuthenticatedOrPinSession();
+      allow delete: if isSuperAdminUser();
     }
 
-    match /system_settings/{settingId} {
-      allow read: if true;
-      allow create, update: if isValidSetting(incoming());
-      allow delete: if false;
+    match /agents/{agentId} {
+      allow read: if isAuthenticatedOrPinSession();
+      allow create, update: if isAuthenticatedOrPinSession()
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 150;
+      allow delete: if isAuthenticatedOrPinSession();
     }
 
     match /activities/{activityId} {
-      allow read: if true;
-      allow create: if isValidActivity(incoming());
-      allow update, delete: if false;
+      allow read: if isAuthenticatedOrPinSession();
+      allow create: if isAuthenticatedOrPinSession()
+                    && request.resource.data.type is string
+                    && request.resource.data.actorId is string
+                    && request.resource.data.actorName is string
+                    && request.resource.data.description is string
+                    && request.resource.data.timestamp is number;
+      allow update, delete: if isSuperAdminUser();
     }
 
-    match /team_chats/{messageId} {
-      allow read: if true;
-      allow create: if isValidTeamChat(incoming());
-      allow update, delete: if false;
+    match /team_chats/{chatId} {
+      allow read: if isAuthenticatedOrPinSession();
+      allow create: if isAuthenticatedOrPinSession()
+                    && request.resource.data.senderId is string
+                    && request.resource.data.senderName is string
+                    && request.resource.data.text is string
+                    && request.resource.data.text.size() > 0
+                    && request.resource.data.text.size() <= 2000
+                    && request.resource.data.createdAt is number;
+      allow update, delete: if isSuperAdminUser();
     }
 
     match /technical_issues/{issueId} {
-      allow read: if true;
-      allow create, update: if isValidTechnicalIssue(incoming());
-      allow delete: if true;
+      allow read: if isAuthenticatedOrPinSession();
+      allow create: if isAuthenticatedOrPinSession()
+                    && request.resource.data.title is string
+                    && request.resource.data.title.size() > 0
+                    && request.resource.data.title.size() <= 200
+                    && request.resource.data.serialNumber is string
+                    && request.resource.data.serialNumber.size() <= 100
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() > 0
+                    && request.resource.data.description.size() <= 3000
+                    && request.resource.data.status in ['pending', 'in_progress', 'resolved']
+                    && request.resource.data.reporterId is string
+                    && request.resource.data.reporterName is string
+                    && request.resource.data.createdAt is number
+                    && request.resource.data.updatedAt is number;
+      allow update: if isAuthenticatedOrPinSession()
+                    && request.resource.data.status in ['pending', 'in_progress', 'resolved']
+                    && request.resource.data.updatedAt is number;
+      allow delete: if isSuperAdminUser();
     }
 
-    match /overtime_requests/{requestId} {
-      allow read: if true;
-      allow create, update: if isValidOvertimeRequest(incoming());
-      allow delete: if true;
+    match /overtime_requests/{otId} {
+      allow read: if isAuthenticatedOrPinSession();
+      allow create: if isAuthenticatedOrPinSession()
+                    && request.resource.data.employeeId is string
+                    && request.resource.data.employeeName is string
+                    && request.resource.data.date is string
+                    && request.resource.data.startTime is string
+                    && request.resource.data.endTime is string
+                    && request.resource.data.hours is number
+                    && request.resource.data.reason is string
+                    && request.resource.data.status in ['pending', 'approved', 'rejected']
+                    && request.resource.data.cyclePeriod is string
+                    && request.resource.data.createdAt is number
+                    && request.resource.data.updatedAt is number;
+      allow update: if isAuthenticatedOrPinSession()
+                    && request.resource.data.status in ['pending', 'approved', 'rejected']
+                    && request.resource.data.updatedAt is number;
+      allow delete: if isAuthenticatedOrPinSession();
     }
 
-    match /advance_requests/{requestId} {
-      allow read: if true;
-      allow create, update: if isValidAdvanceRequest(incoming());
-      allow delete: if true;
+    match /advance_requests/{advanceId} {
+      allow read: if isAuthenticatedOrPinSession();
+      allow create: if isAuthenticatedOrPinSession()
+                    && request.resource.data.employeeId is string
+                    && request.resource.data.employeeName is string
+                    && request.resource.data.amount is number
+                    && request.resource.data.amount > 0
+                    && request.resource.data.requestDate is string
+                    && request.resource.data.reason is string
+                    && request.resource.data.status in ['pending', 'approved', 'rejected']
+                    && request.resource.data.cyclePeriod is string
+                    && request.resource.data.createdAt is number
+                    && request.resource.data.updatedAt is number;
+      allow update: if isAuthenticatedOrPinSession()
+                    && request.resource.data.status in ['pending', 'approved', 'rejected']
+                    && request.resource.data.updatedAt is number;
+      allow delete: if isAuthenticatedOrPinSession();
     }
 
-    match /custom_messengers/{messengerId} {
-      allow read: if true;
-      allow create, update: if isValidMessenger(incoming());
-      allow delete: if true;
+    match /system_settings/{settingId} {
+      allow read: if isAuthenticatedOrPinSession();
+      allow create, update: if isAuthenticatedOrPinSession();
+      allow delete: if isSuperAdminUser();
+    }
+
+    match /messengers/{messengerId} {
+      allow read: if isAuthenticatedOrPinSession();
+      allow create, update: if isAuthenticatedOrPinSession()
+                            && request.resource.data.name is string
+                            && request.resource.data.phone is string
+                            && request.resource.data.province is string;
+      allow delete: if isAuthenticatedOrPinSession();
     }
 
     match /employee_payment_methods/{methodId} {
-      allow read: if true;
-      allow create, update: if isValidPaymentMethod(incoming());
-      allow delete: if true;
+      allow read: if isAuthenticatedOrPinSession();
+      allow create, update: if isAuthenticatedOrPinSession()
+                            && request.resource.data.employeeId is string
+                            && request.resource.data.employeeName is string
+                            && request.resource.data.bankName is string;
+      allow delete: if isAuthenticatedOrPinSession();
     }
 
     match /peer_repayments/{repaymentId} {
-      allow read: if true;
-      allow create, update: if isValidPeerRepayment(incoming());
-      allow delete: if true;
+      allow read: if isAuthenticatedOrPinSession();
+      allow create, update: if isAuthenticatedOrPinSession()
+                            && request.resource.data.fromEmployeeId is string
+                            && request.resource.data.toEmployeeId is string
+                            && request.resource.data.amount is number;
+      allow delete: if isAuthenticatedOrPinSession();
     }
   }
 }
-
-

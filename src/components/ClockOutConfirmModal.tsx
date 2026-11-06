@@ -23,62 +23,16 @@ export const ClockOutConfirmModal: React.FC<ClockOutConfirmModalProps> = ({
   isSelf = true,
   onSuccess,
 }) => {
-  const { user: currentUser, clockOut, fetchRegisteredUsers } = useStore();
+  const { user: currentUser, cases: storeCases, clockOut, fetchRegisteredUsers } = useStore();
   const [loading, setLoading] = useState(false);
-  const [activeCases, setActiveCases] = useState<Case[]>([]);
-  const [fetchingCases, setFetchingCases] = useState(true);
 
-  // ดึงเคสที่กำลังดำเนินการของพนักงานท่านนี้
-  useEffect(() => {
-    if (!isOpen || !employeeId) return;
-
-    let isMounted = true;
-    setFetchingCases(true);
-
-    async function loadActiveCases() {
-      try {
-        const casesRef = collection(db, 'cases');
-        const q = query(casesRef, where('assigneeId', '==', employeeId));
-        const snap = await getDocs(q);
-        const list: Case[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as Case;
-          if (data.status === 'processing' || data.status === 'credit_check') {
-            list.push({ ...data, id: d.id });
-          }
-        });
-
-        // ตรวจสอบกรณีผูกด้วยชื่อ
-        if (employeeName) {
-          const qName = query(casesRef, where('assigneeName', '==', employeeName));
-          const snapName = await getDocs(qName);
-          snapName.forEach((d) => {
-            const data = d.data() as Case;
-            if (
-              (data.status === 'processing' || data.status === 'credit_check') &&
-              !list.some((c) => c.id === d.id)
-            ) {
-              list.push({ ...data, id: d.id });
-            }
-          });
-        }
-
-        if (isMounted) {
-          setActiveCases(list);
-          setFetchingCases(false);
-        }
-      } catch (e) {
-        console.error('Failed to load active cases for clock out modal', e);
-        if (isMounted) setFetchingCases(false);
-      }
-    }
-
-    loadActiveCases();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isOpen, employeeId, employeeName]);
+  // อ่านเคสที่กำลังดำเนินการของพนักงานท่านนี้จาก centralized store โดยไม่ต้องยิง getDocs ซ้ำ
+  const activeCases = storeCases.filter(
+    (c) =>
+      (c.status === 'processing' || c.status === 'credit_check') &&
+      (c.assigneeId === employeeId || (employeeName && c.assigneeName === employeeName))
+  );
+  const fetchingCases = false;
 
   if (!isOpen) return null;
 
