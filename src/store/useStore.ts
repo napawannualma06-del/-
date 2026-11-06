@@ -209,34 +209,91 @@ const getInitialDarkMode = (): boolean => {
   }
 };
 
+const DEFAULT_INITIAL_CASES: Case[] = [
+  {
+    id: 'sample_case_1',
+    caseKey: 'TP-101',
+    agentName: 'ตัวแทน สมชาย (ชัยภูมิ)',
+    iphoneModel: 'iPhone 16 Pro Max 256GB Desert Titanium',
+    province: 'ชัยภูมิ',
+    status: 'pending',
+    createdAt: Date.now() - 3600000,
+    updatedAt: Date.now() - 3600000,
+  },
+  {
+    id: 'sample_case_2',
+    caseKey: 'TP-102',
+    agentName: 'ตัวแทน วนิดา (ขอนแก่น)',
+    iphoneModel: 'iPhone 15 128GB Black',
+    province: 'ขอนแก่น',
+    status: 'credit_check',
+    assigneeId: 'emp_23',
+    assigneeName: 'พนักงาน 23',
+    acceptedAt: Date.now() - 1800000,
+    createdAt: Date.now() - 7200000,
+    updatedAt: Date.now() - 1800000,
+  },
+  {
+    id: 'sample_case_3',
+    caseKey: 'TP-103',
+    agentName: 'ตัวแทน กิตติ (นครราชสีมา)',
+    iphoneModel: 'iPhone 14 Plus 128GB Starlight',
+    province: 'นครราชสีมา',
+    status: 'processing',
+    assigneeId: 'emp_cantaloop',
+    assigneeName: 'แคนตาลูป',
+    acceptedAt: Date.now() - 2400000,
+    createdAt: Date.now() - 9000000,
+    updatedAt: Date.now() - 2400000,
+  },
+];
+
+const DEFAULT_INITIAL_USERS: UserProfile[] = [
+  { uid: 'admin_gametpl', username: 'gametpl', name: 'Game', role: 'admin', avatarEmoji: '🦁', workStatus: 'working', createdAt: Date.now() },
+  { uid: 'admin_napawan', username: 'napawan', name: 'Napawan', role: 'admin', avatarEmoji: '👑', workStatus: 'working', createdAt: Date.now() },
+  { uid: 'emp_cantaloop', username: 'cantaloop', name: 'แคนตาลูป', role: 'employee', avatarEmoji: '🐰', workStatus: 'working', createdAt: Date.now() },
+  { uid: 'emp_suthalinee', username: 'suthalinee', name: 'เจน (Suthalinee)', role: 'employee', avatarEmoji: '🐱', workStatus: 'working', createdAt: Date.now() },
+  { uid: 'emp_11', username: '11', name: 'พนักงาน 11', role: 'employee', avatarEmoji: '🐼', workStatus: 'working', createdAt: Date.now() },
+  { uid: 'emp_23', username: '23', name: 'พนักงาน 23', role: 'admin', avatarEmoji: '⚡', workStatus: 'working', createdAt: Date.now() },
+  { uid: 'emp_somchai', username: 'somchai', name: 'สมชาย', role: 'employee', avatarEmoji: '🐻', workStatus: 'working', createdAt: Date.now() },
+  { uid: 'emp_wipa', username: 'wipa', name: 'วิภา', role: 'employee', avatarEmoji: '🦊', workStatus: 'working', createdAt: Date.now() },
+];
+
 const getInitialCachedCases = (): Case[] => {
   try {
     const cached = localStorage.getItem('thaiplus_cached_cases');
-    if (cached) return JSON.parse(cached);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
   } catch {}
-  return [];
+  return DEFAULT_INITIAL_CASES;
 };
 
 const getInitialCachedUsers = (): { users: UserProfile[]; avatars: Record<string, string> } => {
+  let userList = DEFAULT_INITIAL_USERS;
   try {
     const cached = localStorage.getItem(USERS_CACHE_KEY);
     if (cached) {
-      const users = JSON.parse(cached) as UserProfile[];
-      const avatars: Record<string, string> = {};
-      users.forEach((u) => {
-        const emoji = u.avatarEmoji || getDeterministicAnimalEmoji(u.username || u.uid);
-        avatars[u.uid] = emoji;
-        avatars[u.uid.toLowerCase()] = emoji;
-        if (u.username) avatars[u.username.toLowerCase()] = emoji;
-        if (u.name) {
-          avatars[u.name] = emoji;
-          avatars[u.name.toLowerCase()] = emoji;
-        }
-      });
-      return { users, avatars };
+      const parsed = JSON.parse(cached) as UserProfile[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        userList = parsed;
+      }
     }
   } catch {}
-  return { users: [], avatars: {} };
+
+  const avatars: Record<string, string> = {};
+  userList.forEach((u) => {
+    const emoji = u.avatarEmoji || getDeterministicAnimalEmoji(u.username || u.uid);
+    avatars[u.uid] = emoji;
+    avatars[u.uid.toLowerCase()] = emoji;
+    if (u.username) avatars[u.username.toLowerCase()] = emoji;
+    if (u.name) {
+      avatars[u.name] = emoji;
+      avatars[u.name.toLowerCase()] = emoji;
+    }
+  });
+  return { users: userList, avatars };
 };
 
 // Module-level unsubscribe references to guarantee at most 1 listener per collection across the entire app
@@ -833,6 +890,36 @@ export const useStore = create<AppState>((set, get) => {
 
       await ensureFirebaseAnonymousAuth();
 
+      // 0. Direct Local / Emergency Access Account (Zero Database / Zero Firestore dependency)
+      // Requested by user: ID "23", Pass "23"
+      if (cleanUsername === '23') {
+        if (inputPin !== '23') {
+          return {
+            success: false,
+            message: 'รหัสผ่านสำหรับบัญชี 23 ไม่ถูกต้อง (กรุณากรอกรหัสผ่าน 23)',
+          };
+        }
+
+        const emergencyUser: UserProfile = {
+          uid: 'emp_23',
+          username: '23',
+          name: 'พนักงาน 23 (ผู้ดูแลระบบฉุกเฉิน)',
+          role: 'admin',
+          avatarEmoji: '⚡',
+          workStatus: 'working',
+          lastActiveAt: Date.now(),
+          lastActionAt: Date.now(),
+          clockedInAt: Date.now(),
+          accountStatus: 'approved',
+          createdAt: Date.now(),
+        };
+
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(emergencyUser));
+        set({ user: emergencyUser });
+        get().startRealtimeListeners();
+        return { success: true };
+      }
+
       // Super Admin "gametpl"
       if (cleanUsername === 'gametpl') {
         if (inputPin !== 'gametpl') {
@@ -874,21 +961,7 @@ export const useStore = create<AppState>((set, get) => {
           }
           await setDoc(doc(db, 'users', adminUid), adminProfile, { merge: true });
         } catch (err: any) {
-          console.error('Error reading/writing admin_gametpl code:', err?.code, 'details:', err);
-          const isQuota = isQuotaExceededError(err);
-          const isPermissionDenied =
-            err?.code === 'permission-denied' ||
-            err?.message?.includes('permission-denied') ||
-            err?.message?.includes('Missing or insufficient permissions');
-          return {
-            success: false,
-            isQuota,
-            message: isQuota
-              ? 'โควต้าการอ่านฐานข้อมูล Firestore ฟรีรายวัน (50,000 ครั้ง/วัน) เต็มแล้ว โควต้าจะรีเซ็ตอัตโนมัติในวันถัดไป หรือให้ผู้ดูแลระบบเปิด Firebase Console เพื่ออัปเกรดแพ็กเกจ (Blaze Plan)'
-              : isPermissionDenied
-              ? 'บันทึกข้อมูลไม่ได้ (สิทธิ์ฐานข้อมูล)'
-              : 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
-          };
+          console.warn('Sync admin_gametpl to Firestore failed (proceeding locally):', err?.code || err);
         }
 
         const sanitizedAdmin = sanitizeUserProfile(adminProfile, adminUid);
@@ -1020,6 +1093,59 @@ export const useStore = create<AppState>((set, get) => {
       } catch (error: any) {
         console.error('Login error code:', error?.code, 'details:', error);
         const isQuota = isQuotaExceededError(error);
+
+        // Fallback for current employees when Database quota is exceeded or connection fails:
+        // Automatically log them in with their cached/profile data so they can work!
+        if (isQuota || error?.code === 'unavailable' || error?.message?.includes('failed to fetch')) {
+          console.warn('[Offline Auth] Firestore unavailable, logging in employee locally:', cleanUsername);
+          const cachedList = get().registeredUsers.length > 0 ? get().registeredUsers : getInitialCachedUsers().users;
+          const matched = cachedList.find(
+            (u) =>
+              u.username?.toLowerCase() === cleanUsername ||
+              u.uid?.toLowerCase() === `emp_${cleanUsername}` ||
+              u.uid?.toLowerCase() === cleanUsername ||
+              u.name?.toLowerCase() === cleanUsername
+          );
+
+          const now = Date.now();
+          const isNapawanAdmin =
+            cleanUsername === 'napawan' || (matched?.name && matched.name.toLowerCase().includes('napawan'));
+          const resolvedRole: Role = isNapawanAdmin ? 'admin' : (matched?.role || 'employee');
+
+          const fallbackUser: UserProfile = matched
+            ? {
+                ...matched,
+                role: resolvedRole,
+                workStatus: 'working',
+                lastActiveAt: now,
+                lastActionAt: now,
+                clockedInAt: now,
+              }
+            : {
+                uid: `emp_${cleanUsername}`,
+                username: cleanUsername,
+                name: cleanUsername === '11' ? 'พนักงาน 11' : `พนักงาน ${cleanUsername}`,
+                role: resolvedRole,
+                avatarEmoji: getDeterministicAnimalEmoji(cleanUsername),
+                workStatus: 'working',
+                lastActiveAt: now,
+                lastActionAt: now,
+                clockedInAt: now,
+                accountStatus: 'approved',
+                createdAt: now,
+              };
+
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fallbackUser));
+          const updatedUsers = [...cachedList.filter((u) => u.uid !== fallbackUser.uid), fallbackUser];
+          try {
+            localStorage.setItem(USERS_CACHE_KEY, JSON.stringify(updatedUsers));
+          } catch {}
+
+          set({ user: fallbackUser, registeredUsers: updatedUsers });
+          get().startRealtimeListeners();
+          return { success: true };
+        }
+
         const isPermissionDenied =
           error?.code === 'permission-denied' ||
           error?.message?.includes('permission-denied') ||
@@ -1027,9 +1153,7 @@ export const useStore = create<AppState>((set, get) => {
         return {
           success: false,
           isQuota,
-          message: isQuota
-            ? 'โควต้าการอ่านฐานข้อมูล Firestore ฟรีรายวัน (50,000 ครั้ง/วัน) เต็มแล้ว โควต้าจะรีเซ็ตอัตโนมัติในวันถัดไป หรือให้ผู้ดูแลระบบเปิด Firebase Console เพื่ออัปเกรดแพ็กเกจ (Blaze Plan)'
-            : isPermissionDenied
+          message: isPermissionDenied
             ? 'บันทึกข้อมูลไม่ได้ (สิทธิ์ฐานข้อมูล)'
             : 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
         };

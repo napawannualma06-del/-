@@ -641,6 +641,19 @@ export function Queue() {
         iphoneModel: formData.iphoneModel,
       }).catch(console.error);
 
+      // Optimistically add to store so the new case appears in the list immediately
+      const createdCase: Case = {
+        id: docRef.id,
+        ...(newCase as any),
+      };
+      useStore.setState((state) => {
+        const updated = [createdCase, ...state.cases.filter((c) => c.id !== docRef.id)];
+        try {
+          localStorage.setItem('thaiplus_cached_cases', JSON.stringify(updated));
+        } catch {}
+        return { cases: updated };
+      });
+
       setFormData({
         agentName: '',
         iphoneModel: 'iPhone 17 Pro Max',

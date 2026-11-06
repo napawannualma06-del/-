@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useStore, UserProfile } from '../store/useStore';
+import { useStore } from '../store/useStore';
 import { Logo } from './Logo';
 import { 
-  Users, 
   UserPlus, 
   LogIn, 
   KeyRound, 
@@ -25,9 +24,7 @@ export function Login() {
   const { 
     loginWithUsername, 
     registerEmployee, 
-    registeredUsers,
     fetchRegisteredUsers,
-    setUserDirectly,
     isDarkMode,
     toggleDarkMode
   } = useStore();
@@ -91,33 +88,6 @@ export function Login() {
     }
   };
 
-  const handleQuickSelect = async (u: UserProfile) => {
-    if (u.accountStatus === 'pending') {
-      setErrorMsg(`บัญชี "${u.name}" อยู่ระหว่างรอแอดมินอนุมัติ กรุณาแจ้งแอดมินเพื่อเปิดใช้งาน`);
-      return;
-    }
-    if (u.accountStatus === 'rejected') {
-      setErrorMsg(`บัญชี "${u.name}" ไม่ได้รับอนุมัติให้เข้าใช้งาน`);
-      return;
-    }
-    if (u.username === 'gametpl') {
-      setActiveTab('login');
-      setLoginUsername('gametpl');
-      setLoginPin('gametpl');
-      // Directly log in as super admin
-      setLoading(true);
-      try {
-        const res = await loginWithUsername('gametpl', 'gametpl');
-        if (!res.success) {
-          setErrorMsg(res.message || 'เข้าสู่ระบบไม่สำเร็จ');
-        }
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-    setUserDirectly(u);
-  };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-center py-8 px-4 sm:px-6 lg:px-8 transition-colors duration-200">
@@ -269,60 +239,76 @@ export function Login() {
           {/* LOGIN FORM */}
           {activeTab === 'login' && (
             <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                  ชื่อผู้ใช้ / รหัสพนักงาน
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    placeholder="เช่น emp01, somchai"
-                    value={loginUsername}
-                    onChange={(e) => setLoginUsername(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-                  />
-                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    ชื่อผู้ใช้ / รหัสพนักงาน
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      placeholder="เช่น emp01, somchai"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
+                    />
+                    <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                  รหัสผ่าน หรือ PIN (ถ้ามีตั้งไว้)
-                </label>
-                <div className="relative">
-                  <input
-                    type="password"
-                    placeholder="หากไม่มี PIN เว้นว่างได้"
-                    value={loginPin}
-                    onChange={(e) => setLoginPin(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-                  />
-                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    รหัสผ่าน หรือ PIN (ถ้ามีตั้งไว้)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      placeholder="หากไม่มี PIN เว้นว่างได้"
+                      value={loginPin}
+                      onChange={(e) => setLoginPin(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
+                    />
+                    <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  </div>
+                  <div className="flex justify-end mt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForgotPasswordModal(true);
+                        setErrorMsg(null);
+                      }}
+                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold hover:underline transition cursor-pointer"
+                    >
+                      ลืมรหัสผ่าน / PIN?
+                    </button>
+                  </div>
                 </div>
-                <div className="flex justify-end mt-1.5">
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full mt-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-semibold text-sm rounded-xl shadow-md shadow-indigo-200 dark:shadow-none transition disabled:opacity-50 flex items-center justify-center cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4 mr-2" />
+                  {loading ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ'}
+                </button>
+
+                <div className="pt-2 text-center">
                   <button
                     type="button"
                     onClick={() => {
-                      setShowForgotPasswordModal(true);
+                      setLoginUsername('23');
+                      setLoginPin('23');
                       setErrorMsg(null);
                     }}
-                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold hover:underline transition cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-xs font-semibold transition cursor-pointer border border-indigo-200/80 dark:border-indigo-800/80 shadow-xs"
+                    title="คลิกเพื่อกรอกชื่อผู้ใช้ 23 และรหัส 23 อัตโนมัติ"
                   >
-                    ลืมรหัสผ่าน / PIN?
+                    <span>⚡ บัญชีด่วนฉุกเฉิน (ไม่ใช้ Database):</span>
+                    <span className="font-mono bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 text-indigo-900 dark:text-indigo-100 font-bold">23 / 23</span>
                   </button>
                 </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full mt-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-semibold text-sm rounded-xl shadow-md shadow-indigo-200 dark:shadow-none transition disabled:opacity-50 flex items-center justify-center cursor-pointer"
-              >
-                <LogIn className="w-4 h-4 mr-2" />
-                {loading ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ'}
-              </button>
-            </form>
+              </form>
           )}
 
           {/* REGISTER FORM */}

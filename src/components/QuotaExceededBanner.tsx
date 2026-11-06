@@ -50,6 +50,19 @@ export const QuotaExceededBanner: React.FC<QuotaExceededBannerProps> = ({
 
             <button
               type="button"
+              onClick={() => {
+                sessionStorage.removeItem('firestore_quota_exceeded');
+                localStorage.removeItem('firestore_quota_exceeded');
+                window.location.hash = '#/';
+                window.location.reload();
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-xs font-semibold shadow-xs transition cursor-pointer"
+            >
+              <span>เข้าใช้งานต่อด้วยข้อมูลเดิม</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowAdminDetails(!showAdminDetails)}
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition cursor-pointer"
             >
