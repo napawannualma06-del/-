@@ -873,11 +873,17 @@ export const useStore = create<AppState>((set, get) => {
             adminProfile.createdAt = existingData.createdAt || now;
           }
           await setDoc(doc(db, 'users', adminUid), adminProfile, { merge: true });
-        } catch (err) {
-          console.error('Error reading/writing admin_gametpl:', err);
+        } catch (err: any) {
+          console.error('Error reading/writing admin_gametpl code:', err?.code, 'details:', err);
+          const isPermissionDenied =
+            err?.code === 'permission-denied' ||
+            err?.message?.includes('permission-denied') ||
+            err?.message?.includes('Missing or insufficient permissions');
           return {
             success: false,
-            message: 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
+            message: isPermissionDenied
+              ? 'บันทึกข้อมูลไม่ได้ (สิทธิ์ฐานข้อมูล)'
+              : 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
           };
         }
 
@@ -1007,11 +1013,17 @@ export const useStore = create<AppState>((set, get) => {
         set({ user: loggedInUser });
         get().startRealtimeListeners();
         return { success: true };
-      } catch (error) {
-        console.error('Login error:', error);
+      } catch (error: any) {
+        console.error('Login error code:', error?.code, 'details:', error);
+        const isPermissionDenied =
+          error?.code === 'permission-denied' ||
+          error?.message?.includes('permission-denied') ||
+          error?.message?.includes('Missing or insufficient permissions');
         return {
           success: false,
-          message: 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
+          message: isPermissionDenied
+            ? 'บันทึกข้อมูลไม่ได้ (สิทธิ์ฐานข้อมูล)'
+            : 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
         };
       }
     },

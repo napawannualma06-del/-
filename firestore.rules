@@ -54,8 +54,8 @@ service cloud.firestore {
       return hasOnlyAllowedFields([
                'uid', 'username', 'name', 'email', 'role',
                'pin', 'pinHash', 'pinSalt', 'hasPin',
-               'fcmToken', 'workStatus', 'offWorkAt', 'lastActiveAt', 'lastActionAt', 'clockedInAt',
-               'autoClockOutReason', 'avatarEmoji', 'createdAt',
+               'fcmToken', 'workStatus', 'offWorkAt', 'lastActiveAt', 'lastActionAt', 'lastHeartbeatAt', 'clockedInAt',
+               'autoClockOutReason', 'avatarEmoji', 'createdAt', 'updatedAt',
                'accountStatus', 'approvedAt', 'approvedBy',
                'passwordResetRequested', 'passwordResetRequestedAt'
              ]) &&
@@ -73,10 +73,12 @@ service cloud.firestore {
              (!('offWorkAt' in data) || data.offWorkAt == null || data.offWorkAt is number) &&
              (!('lastActiveAt' in data) || data.lastActiveAt == null || data.lastActiveAt is number) &&
              (!('lastActionAt' in data) || data.lastActionAt == null || data.lastActionAt is number) &&
+             (!('lastHeartbeatAt' in data) || data.lastHeartbeatAt == null || data.lastHeartbeatAt is number || data.lastHeartbeatAt is timestamp) &&
              (!('clockedInAt' in data) || data.clockedInAt == null || data.clockedInAt is number) &&
              (!('autoClockOutReason' in data) || data.autoClockOutReason == null || (data.autoClockOutReason is string && data.autoClockOutReason.size() < 500)) &&
              (!('avatarEmoji' in data) || data.avatarEmoji == null || (data.avatarEmoji is string && data.avatarEmoji.size() <= 20)) &&
              data.createdAt is number &&
+             (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is number || data.updatedAt is timestamp) &&
              (!('accountStatus' in data) || data.accountStatus in ['pending', 'approved', 'rejected']) &&
              (!('approvedAt' in data) || data.approvedAt == null || data.approvedAt is number) &&
              (!('approvedBy' in data) || data.approvedBy == null || (data.approvedBy is string && data.approvedBy.size() <= 100)) &&
@@ -252,6 +254,15 @@ service cloud.firestore {
     }
 
     match /messengers/{messengerId} {
+      allow read: if isAuthenticatedOrPinSession();
+      allow create, update: if isAuthenticatedOrPinSession()
+                            && request.resource.data.name is string
+                            && request.resource.data.phone is string
+                            && request.resource.data.province is string;
+      allow delete: if isAuthenticatedOrPinSession();
+    }
+
+    match /custom_messengers/{messengerId} {
       allow read: if isAuthenticatedOrPinSession();
       allow create, update: if isAuthenticatedOrPinSession()
                             && request.resource.data.name is string
