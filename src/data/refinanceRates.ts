@@ -1,18 +1,19 @@
 export interface RefinancePlan {
-  termMonths: 1 | 3 | 6 | 9 | 12 | 15;
+  termMonths: 1 | 6 | 9 | 12 | 15;
   monthlyAmount: number;
 }
 
 export interface RefinanceModelRate {
   id: string;
   series: 'iPhone 13' | 'iPhone 14' | 'iPhone 15' | 'iPhone 16' | 'iPhone 17' | 'iPhone 18';
+  seriesLabel?: string;
   model: string;
   loanAmount: number; // ยอดที่ได้ปกติ (บาท)
   isNew?: boolean;
+  requiresBoxAndReceipt?: boolean;
   notes?: string;
   plans: {
     term1?: number;
-    term3?: number;
     term6?: number;
     term9?: number;
     term12?: number;
@@ -53,28 +54,31 @@ export const BATTERY_CONDITIONS: BatteryCondition[] = [
 ];
 
 export const GENERAL_CONDITIONS = [
-  '⚡ อัปเดตใหม่: เพิ่มเรทผ่อน 1 เดือน (งวดเดียวจบ ดอกเบี้ย 25%) ยึดตามตารางทางการ',
-  '⚡ อัตราใหม่ เริ่มใช้ 1 ต.ค. 69 • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป',
-  'รับเครื่องนอก • เครื่องหิ้ว ทุกโมเดล',
+  '⚡ อัปเดตตารางใหม่ เริ่มใช้ราคา 5 พ.ย. 69 (v4.0) • งวด 1 เดือน ดอก 22% • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป',
+  'เลือกงวดได้: 1 / 6 / 9 / 12 / 15 เดือน (ช่องงวด = ค่างวดต่อเดือน)',
+  'iPhone 18 ทุกรุ่น ต้องมีกล่อง + ใบเสร็จ',
+  'แบตเตอรี่: 100–75% รับเต็มยอด • 74–70% หัก 500 บาท (แจ้งเตือนลูกค้า แต่ไม่ลดยอดจัด) • ต่ำกว่า 70% ไม่รับ',
+  'รับเครื่องนอก/เครื่องหิ้วทุกโมเดล • รับบัตรเครดิตผ่าน iCloud • ปิดยอดจ่ายร้าน • อายุ 18 ปีขึ้นไป',
+  'ลูกค้ามีเครื่องใช้งานต่อ ไม่ต้องฝากเครื่อง • รับ iOS ล่าสุด • ปิดก่อนกำหนดได้ตลอดสัญญา',
   'เครื่องนอก: <10k ลด ~1,000 | 10k-20k ลด ~2,000 | 20k+ ลด ~3,000 (ยึดยอดใกล้เคียงในตาราง)',
   'เครื่องรีเฟอร์บิช (Refurbished): จัดยอดลดลง 50% (ยึดยอดใกล้เคียงในตาราง)',
   'งานซ่อมเปลี่ยนจอ / เปลี่ยนกล้อง: ลดลงไปจัดยอดที่ต่ำกว่าและใกล้เคียงยอดเดิมที่สุดในตาราง',
   'งานซ่อมเปลี่ยนบอร์ด / บอร์ดจิก: ไม่รับทำรายการโดยเด็ดขาด ❌',
-  'เปลี่ยนแบต หรือ แบตเตอรี่ 70-74%: แจ้งเตือนหัก 500 บาท แต่ไม่ลดยอดจัด',
   'ส่วนลดปิดยอดก่อนกำหนด: ปิดงวดที่ 1 ลด 20% | ปิดงวดที่ 2 ลด 15% | ปิดงวดที่ 3 เป็นต้นไป ลด 10% (ยกเว้นเลือกผ่อน 1 งวด ไม่มีส่วนลด)',
   'เงื่อนไขการชำระเงิน: ชำระล่าช้า มีค่าดำเนินการวันละ 50 บาท | ค้างชำระ 1 วันขึ้นไป แจ้งเตือนพร้อมภาพหน้าจอ | ค้างชำระเกิน 7 วัน เครื่องจะถูกจำกัดการใช้งาน (ใช้ได้เฉพาะ LINE และแอปธนาคาร)',
   'ยึดราคาและค่างวดที่มีในตารางเท่านั้น ไม่คิดยอดหรือค่างวดใหม่นอกตาราง',
-  'รับบัตรเครดิตผ่าน iCloud • ปิดยอดจ่ายร้าน • ลูกค้ามีเครื่องใช้งานต่อ ไม่ต้องฝากเครื่อง',
 ];
 
 export const FOOTER_NOTES = [
-  'อัปเดตเรท: เพิ่มผ่อน 1 เดือน (ชำระงวดเดียวจบ ดอกเบี้ย 25%) ยึดตามตารางทางการสำหรับทุกรุ่น',
-  'อัตราใหม่ เริ่มใช้ 1 ต.ค. 69 • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป',
+  'เริ่มใช้ราคา 5 พ.ย. 69 (v4.0) • งวด 1 เดือน ดอก 22% • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป',
+  'เลือกงวดได้: 1 / 6 / 9 / 12 / 15 เดือน (หน่วย: บาท • ช่องงวด = ค่างวดต่อเดือน)',
+  'iPhone 18 Series ทุกรุ่น ต้องมีกล่อง + ใบเสร็จ',
+  'แบตเตอรี่: 100–75% รับเต็มยอด • 74–70% หัก 500 บาท (แจ้งเตือนเฉยๆ แต่ไม่ต้องลดยอดจัด) • ต่ำกว่า 70% ไม่รับ',
+  'รับเครื่องนอก/เครื่องหิ้วทุกโมเดล • รับบัตรเครดิตผ่าน iCloud • ปิดยอดจ่ายร้าน • อายุ 18 ปีขึ้นไป',
+  'ลูกค้ามีเครื่องใช้งานต่อ ไม่ต้องฝากเครื่อง • รับ iOS ล่าสุด • ปิดก่อนกำหนดได้ตลอดสัญญา',
   'เครื่องนอก: ยอดจัด <10,000 ลด ~1,000 | 10,000-20,000 ลด ~2,000 | 20,000+ ลด ~3,000 แล้วเทียบหายอดจัดที่ใกล้เคียงที่สุดในตาราง',
   'เครื่องรีเฟอร์บิช (Refurbished): จัดยอดลดลง 50% แล้วเทียบหายอดจัดที่ใกล้เคียงที่สุดในตาราง',
-  'งานซ่อม: หักเปลี่ยนจอ / เปลี่ยนกล้อง ➡️ ไปจัดยอดที่ลดลงมาใกล้กับยอดจัดเดิมที่สุดในตาราง (เช่น 16e 10,000 บ. ➡️ ไปจัดยอด 15 ที่ 9,500 บ., 16 Pro 17,000 บ. ➡️ ไปจัดยอด 16 Plus ที่ 15,000 บ.)',
-  'งานซ่อม: เปลี่ยนบอร์ด / บอร์ดจิก ❌ ไม่รับทำรายการ',
-  'แบตเตอรี่: เปลี่ยนแบต หรือ สุขภาพแบต 70-74% ⚠️ แจ้งเตือนเฉยๆ ว่าหัก 500 บาท แต่ไม่ต้องลดยอดจัด (แบต <70% ไม่รับ)',
+  'งานซ่อม: หักเปลี่ยนจอ / เปลี่ยนกล้อง ➡️ ไปจัดยอดที่ลดลงมาใกล้กับยอดจัดเดิมที่สุดในตาราง | เปลี่ยนบอร์ด / บอร์ดจิก ❌ ไม่รับทำรายการ',
   'ส่วนลดปิดยอดก่อนกำหนด: ปิดในงวดที่ 1 ลด 20% ของยอดคงเหลือ | ปิดในงวดที่ 2 ลด 15% | ปิดในงวดที่ 3 เป็นต้นไป ลด 10% (ยกเว้นเลือกผ่อน 1 งวด ชำระตามยอดสัญญา ไม่มีส่วนลด)',
   'เงื่อนไขการชำระเงิน: ชำระล่าช้า มีค่าดำเนินการวันละ 50 บาท | ค้างชำระ 1 วันขึ้นไป: แจ้งเตือนพร้อมภาพหน้าจอ | ค้างชำระเกิน 7 วัน: เครื่องจะถูกจำกัดการใช้งาน โดยสามารถใช้ได้เฉพาะ LINE และแอปธนาคาร',
   'กฎเหล็ก THAIPLUS: ยึดราคาและค่างวดในตารางเท่านั้น ไม่คิดยอดใหม่นอกตาราง',
@@ -86,22 +90,22 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     id: 'ip-13',
     series: 'iPhone 13',
     model: 'iPhone 13',
-    loanAmount: 6000,
-    plans: { term1: 7500, term3: 3200, term6: 1900, term9: 1387, term12: 1220 },
+    loanAmount: 5500,
+    plans: { term1: 6710, term6: 1742, term9: 1381, term12: 1173 },
   },
   {
     id: 'ip-13-pro',
     series: 'iPhone 13',
     model: 'iPhone 13 Pro',
-    loanAmount: 8500,
-    plans: { term1: 10625, term3: 4533, term6: 2692, term9: 1964, term12: 1728 },
+    loanAmount: 8000,
+    plans: { term1: 9760, term6: 2533, term9: 2009, term12: 1707 },
   },
   {
     id: 'ip-13-pm',
     series: 'iPhone 13',
     model: 'iPhone 13 Pro Max',
-    loanAmount: 9500,
-    plans: { term1: 11875, term3: 5067, term6: 3008, term9: 2196, term12: 1932 },
+    loanAmount: 9000,
+    plans: { term1: 10980, term6: 2850, term9: 2260, term12: 1920 },
   },
 
   // iPhone 14
@@ -109,29 +113,29 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     id: 'ip-14',
     series: 'iPhone 14',
     model: 'iPhone 14',
-    loanAmount: 7000,
-    plans: { term1: 8750, term3: 3733, term6: 2217, term9: 1618, term12: 1423 },
+    loanAmount: 6500,
+    plans: { term1: 7930, term6: 2058, term9: 1632, term12: 1387 },
   },
   {
     id: 'ip-14-plus',
     series: 'iPhone 14',
     model: 'iPhone 14 Plus',
-    loanAmount: 9000,
-    plans: { term1: 11250, term3: 4800, term6: 2850, term9: 2080, term12: 1830 },
+    loanAmount: 8500,
+    plans: { term1: 10370, term6: 2692, term9: 2134, term12: 1813 },
   },
   {
     id: 'ip-14-pro',
     series: 'iPhone 14',
     model: 'iPhone 14 Pro',
-    loanAmount: 10500,
-    plans: { term1: 13125, term3: 5600, term6: 3325, term9: 2427, term12: 2135 },
+    loanAmount: 10000,
+    plans: { term1: 12200, term6: 3167, term9: 2511, term12: 2133 },
   },
   {
     id: 'ip-14-pm',
     series: 'iPhone 14',
     model: 'iPhone 14 Pro Max',
-    loanAmount: 12500,
-    plans: { term1: 15625, term3: 6667, term6: 3958, term9: 2889, term12: 2542 },
+    loanAmount: 12000,
+    plans: { term1: 14640, term6: 3800, term9: 3013, term12: 2560 },
   },
 
   // iPhone 15
@@ -139,29 +143,29 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     id: 'ip-15',
     series: 'iPhone 15',
     model: 'iPhone 15',
-    loanAmount: 9500,
-    plans: { term1: 11875, term3: 5067, term6: 3008, term9: 2196, term12: 1932 },
+    loanAmount: 9000,
+    plans: { term1: 10980, term6: 2850, term9: 2260, term12: 1920 },
   },
   {
     id: 'ip-15-plus',
     series: 'iPhone 15',
     model: 'iPhone 15 Plus',
-    loanAmount: 12500,
-    plans: { term1: 15625, term3: 6667, term6: 3958, term9: 2889, term12: 2542 },
+    loanAmount: 12000,
+    plans: { term1: 14640, term6: 3800, term9: 3013, term12: 2560 },
   },
   {
     id: 'ip-15-pro',
     series: 'iPhone 15',
     model: 'iPhone 15 Pro',
-    loanAmount: 13500,
-    plans: { term1: 16875, term3: 7200, term6: 4275, term9: 3120, term12: 2745 },
+    loanAmount: 13000,
+    plans: { term1: 15860, term6: 4117, term9: 3264, term12: 2773 },
   },
   {
     id: 'ip-15-pm',
     series: 'iPhone 15',
     model: 'iPhone 15 Pro Max',
-    loanAmount: 17000,
-    plans: { term1: 21250, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
+    loanAmount: 16000,
+    plans: { term1: 19520, term6: 5067, term9: 4018, term12: 3413 },
   },
 
   // iPhone 16
@@ -169,36 +173,36 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     id: 'ip-16e',
     series: 'iPhone 16',
     model: 'iPhone 16e',
-    loanAmount: 10000,
-    plans: { term1: 12500, term3: 5333, term6: 3167, term9: 2311, term12: 2033 },
+    loanAmount: 9500,
+    plans: { term1: 11590, term6: 3008, term9: 2386, term12: 2027 },
   },
   {
     id: 'ip-16',
     series: 'iPhone 16',
     model: 'iPhone 16',
-    loanAmount: 13500,
-    plans: { term1: 16875, term3: 7200, term6: 4275, term9: 3120, term12: 2745 },
+    loanAmount: 13000,
+    plans: { term1: 15860, term6: 4117, term9: 3264, term12: 2773 },
   },
   {
     id: 'ip-16-plus',
     series: 'iPhone 16',
     model: 'iPhone 16 Plus',
-    loanAmount: 15000,
-    plans: { term1: 18750, term3: 8000, term6: 4750, term9: 3467, term12: 3050 },
+    loanAmount: 14000,
+    plans: { term1: 17080, term6: 4433, term9: 3516, term12: 2987 },
   },
   {
     id: 'ip-16-pro',
     series: 'iPhone 16',
     model: 'iPhone 16 Pro',
-    loanAmount: 17000,
-    plans: { term1: 21250, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
+    loanAmount: 16000,
+    plans: { term1: 19520, term6: 5067, term9: 4018, term12: 3413 },
   },
   {
     id: 'ip-16-pm',
     series: 'iPhone 16',
     model: 'iPhone 16 Pro Max',
-    loanAmount: 21000,
-    plans: { term1: 26250, term3: 11200, term6: 6650, term9: 4853, term12: 4270, term15: 3920 },
+    loanAmount: 20000,
+    plans: { term1: 24400, term6: 6333, term9: 5022, term12: 4267, term15: 3733 },
   },
 
   // iPhone 17
@@ -206,76 +210,120 @@ export const REFINANCE_RATES: RefinanceModelRate[] = [
     id: 'ip-17e',
     series: 'iPhone 17',
     model: 'iPhone 17e',
-    loanAmount: 12000,
-    plans: { term1: 15000, term3: 6400, term6: 3800, term9: 2773, term12: 2440 },
+    loanAmount: 11500,
+    plans: { term1: 14030, term6: 3642, term9: 2888, term12: 2453 },
   },
   {
     id: 'ip-17',
     series: 'iPhone 17',
     model: 'iPhone 17',
-    loanAmount: 17000,
-    plans: { term1: 21250, term3: 9067, term6: 5383, term9: 3929, term12: 3457, term15: 3173 },
+    loanAmount: 16000,
+    plans: { term1: 19520, term6: 5067, term9: 4018, term12: 3413 },
   },
   {
     id: 'ip-17-air',
     series: 'iPhone 17',
     model: 'iPhone 17 Air',
-    loanAmount: 19000,
-    plans: { term1: 23750, term3: 10133, term6: 6017, term9: 4391, term12: 3863, term15: 3547 },
+    loanAmount: 18000,
+    plans: { term1: 21960, term6: 5700, term9: 4520, term12: 3840, term15: 3360 },
   },
   {
     id: 'ip-17-pro',
     series: 'iPhone 17',
     model: 'iPhone 17 Pro',
-    loanAmount: 24000,
-    plans: { term1: 30000, term3: 12800, term6: 7600, term9: 5547, term12: 4880, term15: 4480 },
+    loanAmount: 23000,
+    plans: { term1: 28060, term6: 7283, term9: 5776, term12: 4907, term15: 4293 },
   },
   {
     id: 'ip-17-pm',
     series: 'iPhone 17',
     model: 'iPhone 17 Pro Max',
-    loanAmount: 28000,
-    plans: { term1: 35000, term3: 14933, term6: 8867, term9: 6471, term12: 5693, term15: 5227 },
-  },
-  {
-    id: 'ip-17-pm-2tb',
-    series: 'iPhone 17',
-    model: 'iPhone 17 Pro Max 2TB',
-    isNew: true,
-    loanAmount: 30000,
-    plans: { term1: 37500, term3: 16000, term6: 9500, term9: 6933, term12: 6100, term15: 5600 },
-    notes: 'ความจุพิเศษ 2TB รับยอดสูงสุด',
+    loanAmount: 26500,
+    plans: { term1: 32330, term6: 8392, term9: 6654, term12: 5653, term15: 4947 },
   },
 
-  // iPhone 18
+  // iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)
   {
     id: 'ip-18',
     series: 'iPhone 18',
+    seriesLabel: 'iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)',
     model: 'iPhone 18',
     isNew: true,
-    loanAmount: 24000,
-    plans: { term1: 30000, term3: 12800, term6: 7600, term9: 5547, term12: 4880, term15: 4480 },
+    requiresBoxAndReceipt: true,
+    loanAmount: 18000,
+    plans: { term1: 21960, term6: 5700, term9: 4520, term12: 3840, term15: 3360 },
+    notes: 'ต้องมีกล่อง + ใบเสร็จ',
+  },
+  {
+    id: 'ip-18-air',
+    series: 'iPhone 18',
+    seriesLabel: 'iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)',
+    model: 'iPhone 18 Air',
+    isNew: true,
+    requiresBoxAndReceipt: true,
+    loanAmount: 20500,
+    plans: { term1: 25010, term6: 6492, term9: 5148, term12: 4373, term15: 3827 },
+    notes: 'ต้องมีกล่อง + ใบเสร็จ',
   },
   {
     id: 'ip-18-pro',
     series: 'iPhone 18',
+    seriesLabel: 'iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)',
     model: 'iPhone 18 Pro',
     isNew: true,
-    loanAmount: 28000,
-    plans: { term1: 35000, term3: 14933, term6: 8867, term9: 6471, term12: 5693, term15: 5227 },
+    requiresBoxAndReceipt: true,
+    loanAmount: 26000,
+    plans: { term1: 31720, term6: 8233, term9: 6529, term12: 5547, term15: 4853 },
+    notes: 'ต้องมีกล่อง + ใบเสร็จ',
   },
   {
-    id: 'ip-18-pm',
+    id: 'ip-18-pm-256',
     series: 'iPhone 18',
-    model: 'iPhone 18 Pro Max',
+    seriesLabel: 'iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)',
+    model: 'iPhone 18 Pro Max 256GB',
     isNew: true,
+    requiresBoxAndReceipt: true,
     loanAmount: 30000,
-    plans: { term1: 37500, term3: 16000, term6: 9500, term9: 6933, term12: 6100, term15: 5600 },
+    plans: { term1: 36600, term6: 9500, term9: 7533, term12: 6400, term15: 5600 },
+    notes: 'ต้องมีกล่อง + ใบเสร็จ',
+  },
+  {
+    id: 'ip-18-pm-512',
+    series: 'iPhone 18',
+    seriesLabel: 'iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)',
+    model: 'iPhone 18 Pro Max 512GB',
+    isNew: true,
+    requiresBoxAndReceipt: true,
+    loanAmount: 33000,
+    plans: { term1: 40260, term6: 10450, term9: 8287, term12: 7040, term15: 6160 },
+    notes: 'ต้องมีกล่อง + ใบเสร็จ',
+  },
+  {
+    id: 'ip-18-pm-1tb',
+    series: 'iPhone 18',
+    seriesLabel: 'iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)',
+    model: 'iPhone 18 Pro Max 1TB',
+    isNew: true,
+    requiresBoxAndReceipt: true,
+    loanAmount: 35000,
+    plans: { term1: 42700, term6: 11083, term9: 8789, term12: 7467, term15: 6533 },
+    notes: 'ต้องมีกล่อง + ใบเสร็จ',
+  },
+  {
+    id: 'ip-18-pm-2tb',
+    series: 'iPhone 18',
+    seriesLabel: 'iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)',
+    model: 'iPhone 18 Pro Max 2TB',
+    isNew: true,
+    requiresBoxAndReceipt: true,
+    loanAmount: 40000,
+    plans: { term1: 48800, term6: 12667, term9: 10044, term12: 8533, term15: 7467 },
+    notes: 'ต้องมีกล่อง + ใบเสร็จ',
   },
 ];
 
-// Unique sorted loan amounts in the table:
-// [6000, 7000, 8500, 9000, 9500, 10000, 10500, 12000, 12500, 13500, 15000, 17000, 19000, 21000, 24000, 28000, 30000]
+// Unique sorted loan amounts in the table (v4.0):
+// [5500, 6500, 8000, 8500, 9000, 9500, 10000, 11500, 12000, 13000, 14000, 16000, 18000, 20000, 20500, 23000, 26000, 26500, 30000, 33000, 35000, 40000]
 export const UNIQUE_LOAN_TIERS = Array.from(new Set(REFINANCE_RATES.map(r => r.loanAmount))).sort((a, b) => a - b);
 
 /**
@@ -303,9 +351,6 @@ export function findClosestRateInTable(targetAmount: number): RefinanceModelRate
 /**
  * ค้นหายอดจัดที่ "ลดลงมาต่ำกว่ายอดจัดเดิม และใกล้กับยอดจัดเดิมที่สุดในตาราง"
  * ใช้สำหรับงานซ่อม: เปลี่ยนจอ, เปลี่ยนกล้อง
- * ตัวอย่าง:
- * - 16e (10,000) ➡️ ยอดต่ำลงมาที่ใกล้ที่สุดคือ 9,500 (iPhone 15)
- * - 16 Pro (17,000) ➡️ ยอดต่ำลงมาที่ใกล้ที่สุดคือ 15,000 (iPhone 16 Plus)
  */
 export function getPreviousLowerTierRate(currentLoanAmount: number): RefinanceModelRate {
   const lowerTiers = UNIQUE_LOAN_TIERS.filter(amount => amount < currentLoanAmount);
@@ -341,7 +386,7 @@ export function getForeignMachineMatchingRate(modelRate: RefinanceModelRate): {
     nominalReduction = 3000;
   }
 
-  const targetAmount = Math.max(6000, currentLoan - nominalReduction);
+  const targetAmount = Math.max(5500, currentLoan - nominalReduction);
   const matchedRate = findClosestRateInTable(targetAmount);
 
   return {
@@ -361,7 +406,7 @@ export function getRefurbishedMatchingRate(baseLoanAmount: number): {
   targetAmount: number;
   matchedRate: RefinanceModelRate;
 } {
-  const targetAmount = Math.max(6000, Math.round(baseLoanAmount * 0.5));
+  const targetAmount = Math.max(5500, Math.round(baseLoanAmount * 0.5));
   const matchedRate = findClosestRateInTable(targetAmount);
 
   return {
@@ -377,11 +422,17 @@ export function findRefinanceRate(modelName: string): RefinanceModelRate | undef
   const exact = REFINANCE_RATES.find(r => r.model.toLowerCase() === normalized);
   if (exact) return exact;
 
-  if (normalized.includes('2tb') && normalized.includes('17')) {
-    return REFINANCE_RATES.find(r => r.id === 'ip-17-pm-2tb');
+  // Map legacy "iPhone 18 Pro Max" without storage to 256GB
+  if (normalized === 'iphone 18 pro max') {
+    return REFINANCE_RATES.find(r => r.id === 'ip-18-pm-256');
   }
 
-  // Sort from longest model name to shortest to avoid partial matches (e.g. "iPhone 18" matching "iPhone 18 Pro Max")
+  // Legacy "iPhone 17 Pro Max 2TB" -> iPhone 17 Pro Max
+  if (normalized.includes('17 pro max')) {
+    return REFINANCE_RATES.find(r => r.id === 'ip-17-pm');
+  }
+
+  // Sort from longest model name to shortest to avoid partial matches
   const sortedByLength = [...REFINANCE_RATES].sort((a, b) => b.model.length - a.model.length);
   return sortedByLength.find(r => normalized.includes(r.model.toLowerCase()) || r.model.toLowerCase().includes(normalized));
 }
@@ -415,7 +466,7 @@ export interface RefinanceCalcOptions {
  * - ล่าช้าเกิน 16 วัน: บวกค่าปลดล็อกเพิ่ม 500 บาท
  */
 export interface EarlyPayoffCalculation {
-  selectedTerm: 1 | 3 | 6 | 9 | 12 | 15;
+  selectedTerm: 1 | 6 | 9 | 12 | 15;
   monthlyAmount: number;
   totalContractAmount: number;
   closingAtInstallment: number; // งวดที่ปิด (เช่น งวดที่ 1, 2, 3...)
@@ -432,7 +483,7 @@ export interface EarlyPayoffCalculation {
 }
 
 export function calculateEarlyPayoffDiscount(
-  selectedTerm: 1 | 3 | 6 | 9 | 12 | 15,
+  selectedTerm: 1 | 6 | 9 | 12 | 15,
   monthlyAmount: number,
   closingAtInstallment: number = 1,
   lateDays: number = 0
@@ -443,9 +494,6 @@ export function calculateEarlyPayoffDiscount(
   const remainingInstallments = selectedTerm - paidInstallments;
   const remainingBalance = remainingInstallments * monthlyAmount;
 
-  // เปอร์เซ็นต์ส่วนลดตามงวดที่ปิด:
-  // - ยกเว้นเลือกผ่อน 1 งวด (selectedTerm === 1) ไม่ต้องมีส่วนลด (0%)
-  // - สัญญาระยะอื่นๆ ทุกงวด: ปิดงวดที่ 1 ลด 20%, ปิดงวดที่ 2 ลด 15%, ปิดงวดที่ 3+ ลด 10%
   let discountRatePercent = 0;
   if (selectedTerm === 1) {
     discountRatePercent = 0;

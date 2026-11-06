@@ -22,9 +22,7 @@ import {
   Wrench,
   Ban,
   MessageSquare,
-  Gift,
-  HelpCircle,
-  CalendarCheck
+  Gift
 } from 'lucide-react';
 import { 
   REFINANCE_RATES, 
@@ -32,6 +30,7 @@ import {
   RefinanceModelRate,
   MachineOrigin,
   RepairConditions,
+  findRefinanceRate,
   calculateAdjustedRefinance,
   calculateEarlyPayoffDiscount
 } from '../data/refinanceRates';
@@ -60,11 +59,21 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
   // Calculator state
   const [calcModelId, setCalcModelId] = useState<string>(() => {
     if (initialModel) {
-      const match = REFINANCE_RATES.find(r => r.model.toLowerCase() === initialModel.toLowerCase());
+      const match = findRefinanceRate(initialModel);
       if (match) return match.id;
     }
     return 'ip-16e';
   });
+
+  useEffect(() => {
+    if (initialModel) {
+      const match = findRefinanceRate(initialModel);
+      if (match) {
+        setCalcModelId(match.id);
+      }
+    }
+  }, [initialModel]);
+
   const [calcBattery, setCalcBattery] = useState<number>(85);
   const [calcOrigin, setCalcOrigin] = useState<MachineOrigin>('thai');
   const [calcIsRefurbished, setCalcIsRefurbished] = useState<boolean>(false);
@@ -76,7 +85,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
   const [batteryReplaced, setBatteryReplaced] = useState<boolean>(false);
 
   // Term selection & Early payoff simulation state
-  const [selectedTerm, setSelectedTerm] = useState<1 | 3 | 6 | 9 | 12 | 15>(6);
+  const [selectedTerm, setSelectedTerm] = useState<1 | 6 | 9 | 12 | 15>(6);
   const [earlyClosingAt, setEarlyClosingAt] = useState<number>(1); // ปิดในงวดที่ 1, 2, 3...
   const [lateDays, setLateDays] = useState<number>(0); // วันล่าช้า
 
@@ -115,11 +124,10 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
     });
   }, [selectedRate, calcBattery, calcOrigin, calcIsRefurbished, repairConditions]);
 
-  // Available terms for the matched rate
+  // Available terms for the matched rate (1 / 6 / 9 / 12 / 15 months)
   const availableTerms = useMemo(() => {
-    const list: (1 | 3 | 6 | 9 | 12 | 15)[] = [];
+    const list: (1 | 6 | 9 | 12 | 15)[] = [];
     if (calcResult.plans.term1) list.push(1);
-    if (calcResult.plans.term3) list.push(3);
     if (calcResult.plans.term6) list.push(6);
     if (calcResult.plans.term9) list.push(9);
     if (calcResult.plans.term12) list.push(12);
@@ -137,7 +145,6 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
   // Ensure selectedTerm is valid
   const currentMonthlyAmount = useMemo(() => {
     if (selectedTerm === 1) return calcResult.plans.term1;
-    if (selectedTerm === 3) return calcResult.plans.term3;
     if (selectedTerm === 6) return calcResult.plans.term6;
     if (selectedTerm === 9) return calcResult.plans.term9;
     if (selectedTerm === 12) return calcResult.plans.term12;
@@ -167,6 +174,9 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
 
     // รวมเหตุผลการประเมินยอดแบบเข้าใจง่าย
     const adjustmentReasons: string[] = [];
+    if (selectedRate.requiresBoxAndReceipt) {
+      adjustmentReasons.push(`• รุ่น ${selectedRate.series} ต้องมีกล่อง + ใบเสร็จครบถ้วน`);
+    }
     if (screenReplaced && cameraReplaced) {
       adjustmentReasons.push(`• ตัวเครื่องมีประวัติเปลี่ยนหน้าจอและเปลี่ยนกล้อง ➡️ ระบบจึงปรับลดระดับยอดจัดไฟแนนซ์ลงมาตามเกณฑ์มาตรฐาน`);
     } else if (screenReplaced) {
@@ -186,7 +196,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
     }
 
     const lines = [
-      `📱 สรุปรายละเอียดสินเชื่อรีไฟแนนซ์ iPhone (THAIPLUS)`,
+      `📱 สรุปรายละเอียดสินเชื่อรีไฟแนนซ์ iPhone (THAIPLUS v4.0)`,
       `──────────────────────────────`,
       `รุ่น: ${model}`,
       `ยอดจัดไฟแนนซ์: ${finalLoan} บาท`,
@@ -245,8 +255,8 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
     if (batteryReplaced) repairList.push('เปลี่ยนแบต (เตือนหัก 500 บ.)');
 
     const lines = [
-      `⚡ THAIPLUS | ตารางรีไฟแนนซ์ iPhone`,
-      `📱 รุ่น: ${selectedRate.model}`,
+      `⚡ THAIPLUS | ตารางรีไฟแนนซ์ iPhone (v4.0)`,
+      `📱 รุ่น: ${selectedRate.model}${selectedRate.requiresBoxAndReceipt ? ' (ต้องมีกล่อง + ใบเสร็จ)' : ''}`,
       `🏷 ประเภทเครื่อง: ${calcOrigin === 'foreign' ? 'เครื่องนอก' : 'เครื่องศูนย์ไทย'} ${calcIsRefurbished ? '• รีเฟอร์บิช (50%)' : ''}`,
       repairList.length > 0 ? `🔧 ประวัติซ่อม: ${repairList.join(', ')}` : null,
       isSpecial && !calcResult.isRejected ? `📌 เทียบยึดเรทในตารางของรุ่น: ${calcResult.matchedModelRate.model}` : null,
@@ -279,15 +289,15 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-white/20 text-white border border-white/20">
-                  Thaiplus
+                  Thaiplus v4.0
                 </span>
                 <span className="text-xs text-blue-100 hidden sm:inline">
-                  รับซื้อ • ปล่อยเช่า • รีไฟแนนซ์ iPhone
+                  เริ่มใช้ราคา 5 พ.ย. 69 · หน่วย: บาท · ช่องงวด = ค่างวดต่อเดือน
                 </span>
               </div>
               <h2 className="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-1.5 mt-0.5">
-                รีไฟแนนซ์ iPhone ผ่อนรายเดือน
-                <span className="text-xs font-normal text-blue-200">(คู่มือ, เครื่องคำนวณ & ส่วนลดปิดยอด)</span>
+                ไทยพลัส – รีไฟแนนซ์ iPhone ผ่อนรายเดือน
+                <span className="text-xs font-normal text-blue-200 hidden md:inline">(1 / 6 / 9 / 12 / 15 เดือน)</span>
               </h2>
             </div>
           </div>
@@ -316,7 +326,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
               )}
             >
               <Table className="w-3.5 h-3.5" />
-              ตารางเรทผ่อน
+              ตารางเรทผ่อน (v4.0)
             </button>
             <button
               type="button"
@@ -356,18 +366,18 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
           )}
         </div>
 
-        {/* Banner: New Rates Effective 1 Oct 69 */}
+        {/* Banner: New Rates Effective 5 Nov 69 (v4.0) */}
         <div className="px-4 sm:px-6 py-2 bg-gradient-to-r from-amber-500/15 via-indigo-500/10 to-amber-500/15 border-b border-amber-300/40 dark:border-amber-700/40 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200 shrink-0">
           <div className="flex items-center gap-2">
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white uppercase tracking-wider shadow-xs">
-              อัพเดทใหม่
+              v4.0 ล่าสุด
             </span>
             <span className="font-semibold text-[11px] sm:text-xs">
-              ⚡ อัตราใหม่ เริ่มใช้ 1 ต.ค. 69 • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป
+              ⚡ เริ่มใช้ราคา 5 พ.ย. 69 (v4.0) • งวด 1 เดือน ดอก 22% • ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป
             </span>
           </div>
           <span className="hidden sm:inline text-[10px] text-amber-700 dark:text-amber-300 font-medium">
-            ยึดราคาและค่างวดตามตารางทางการ
+            iPhone 18 ต้องมีกล่อง + ใบเสร็จ
           </span>
         </div>
 
@@ -518,12 +528,12 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                 </span>
                 {[
                   { id: 'all', label: 'ทั้งหมด (ทุกรุ่น)' },
-                  { id: 'iPhone 18', label: 'iPhone 18 Series' },
-                  { id: 'iPhone 17', label: 'iPhone 17 Series' },
-                  { id: 'iPhone 16', label: 'iPhone 16 Series' },
-                  { id: 'iPhone 15', label: 'iPhone 15 Series' },
-                  { id: 'iPhone 14', label: 'iPhone 14 Series' },
-                  { id: 'iPhone 13', label: 'iPhone 13 Series' },
+                  { id: 'iPhone 13', label: 'iPhone 13' },
+                  { id: 'iPhone 14', label: 'iPhone 14' },
+                  { id: 'iPhone 15', label: 'iPhone 15' },
+                  { id: 'iPhone 16', label: 'iPhone 16' },
+                  { id: 'iPhone 17', label: 'iPhone 17' },
+                  { id: 'iPhone 18', label: 'iPhone 18 (กล่อง+ใบเสร็จ)' },
                 ].map(s => (
                   <button
                     key={s.id}
@@ -541,35 +551,40 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                 ))}
               </div>
 
-              {/* Installment Table */}
+              {/* Installment Table (Matching Official v4.0 Layout) */}
               <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
                 <table className="w-full text-left text-xs divide-y divide-slate-200 dark:divide-slate-800">
-                  <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-semibold">
+                  <thead className="bg-[#1b3a6b] text-white font-bold">
                     <tr>
                       <th className="py-2.5 px-3">รุ่น iPhone</th>
-                      <th className="py-2.5 px-3 text-right bg-blue-50/70 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300">
-                        {tableOrigin === 'foreign' || tableIsRefurbished || tableRepairOption !== 'none' ? 'ยอดจัด (ยึดตามตาราง)' : 'ยอดที่ได้ (บาท)'}
+                      <th className="py-2.5 px-3 text-right">
+                        {tableOrigin === 'foreign' || tableIsRefurbished || tableRepairOption !== 'none' ? 'ยอดจัด (ยึดตามตาราง)' : 'ยอดที่ได้'}
                       </th>
-                      <th className="py-2.5 px-3 text-right bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300">
-                        1 เดือน <span className="text-[10px] font-normal text-emerald-600 dark:text-emerald-400">(ดอก 25%)</span>
+                      <th className="py-2.5 px-3 text-right">
+                        1 เดือน <span className="text-[10px] font-normal text-blue-200">(ดอก 22%)</span>
                       </th>
-                      <th className="py-2.5 px-3 text-right">3 เดือน</th>
                       <th className="py-2.5 px-3 text-right">6 เดือน</th>
                       <th className="py-2.5 px-3 text-right">9 เดือน</th>
                       <th className="py-2.5 px-3 text-right">12 เดือน</th>
-                      <th className="py-2.5 px-3 text-right bg-indigo-50/70 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300">15 เดือน</th>
+                      <th className="py-2.5 px-3 text-right">15 เดือน</th>
                       <th className="py-2.5 px-2 text-center">คำนวณ</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 bg-white dark:bg-slate-900">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-900">
                     {filteredRates.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="py-8 text-center text-slate-400">
+                        <td colSpan={8} className="py-8 text-center text-slate-400">
                           ไม่พบข้อมูลรุ่น iPhone ที่ค้นหา
                         </td>
                       </tr>
                     ) : (
-                      filteredRates.map((rate) => {
+                      filteredRates.map((rate, idx) => {
+                        const prevSeries = idx > 0 ? filteredRates[idx - 1].series : null;
+                        const showSeriesHeader = rate.series !== prevSeries;
+                        const seriesHeaderText = rate.series === 'iPhone 18'
+                          ? 'iPhone 18 (ต้องมีกล่อง + ใบเสร็จ)'
+                          : rate.series;
+
                         const tableCalc = calculateAdjustedRefinance(rate, {
                           batteryHealth: 100,
                           machineOrigin: tableOrigin,
@@ -583,66 +598,68 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                         const isModified = tableOrigin === 'foreign' || tableIsRefurbished || tableRepairOption !== 'none';
 
                         return (
-                          <tr 
-                            key={rate.id}
-                            className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
-                          >
-                            <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-white whitespace-nowrap">
-                              <div className="flex items-center gap-1.5">
-                                <span>{rate.model}</span>
-                                {rate.isNew && (
-                                  <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-rose-500 text-white uppercase tracking-wider">
-                                    NEW
-                                  </span>
-                                )}
-                              </div>
-                              <span className="text-[10px] text-slate-400 font-normal">{rate.series}</span>
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-bold text-blue-600 dark:text-blue-400 bg-blue-50/30 dark:bg-blue-950/10 whitespace-nowrap">
-                              <div>{tableCalc.finalLoan.toLocaleString()} บ.</div>
-                              {isModified && (
-                                <div className="text-[10px] font-normal text-slate-400">
-                                  <span className="line-through mr-1">{rate.loanAmount.toLocaleString()}</span>
-                                  <span className="text-amber-600 dark:text-amber-400 font-medium">ยึด {tableCalc.matchedModelRate.model}</span>
+                          <React.Fragment key={rate.id}>
+                            {showSeriesHeader && (
+                              <tr className="bg-[#dce6f7] dark:bg-indigo-950/70">
+                                <td colSpan={8} className="py-2 px-3 font-extrabold text-slate-900 dark:text-indigo-200 text-xs">
+                                  {seriesHeaderText}
+                                </td>
+                              </tr>
+                            )}
+                            <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                              <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                                <div className="flex items-center gap-1.5">
+                                  <span>{rate.model}</span>
+                                  {rate.requiresBoxAndReceipt && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300/60 dark:border-amber-800">
+                                      กล่อง+ใบเสร็จ
+                                    </span>
+                                  )}
                                 </div>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50/20 dark:bg-emerald-950/10 whitespace-nowrap">
-                              {tableCalc.plans.term1 ? `${tableCalc.plans.term1.toLocaleString()} บ.` : '-'}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                              {tableCalc.plans.term3 ? `${tableCalc.plans.term3.toLocaleString()} บ.` : '-'}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                              {tableCalc.plans.term6 ? `${tableCalc.plans.term6.toLocaleString()} บ.` : '-'}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                              {tableCalc.plans.term9 ? `${tableCalc.plans.term9.toLocaleString()} บ.` : '-'}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                              {tableCalc.plans.term12 ? `${tableCalc.plans.term12.toLocaleString()} บ.` : '-'}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50/30 dark:bg-indigo-950/10 whitespace-nowrap">
-                              {tableCalc.plans.term15 ? `${tableCalc.plans.term15.toLocaleString()} บ.` : '-'}
-                            </td>
-                            <td className="py-2.5 px-2 text-center whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCalcModelId(rate.id);
-                                  setCalcOrigin(tableOrigin);
-                                  setCalcIsRefurbished(tableIsRefurbished);
-                                  setScreenReplaced(tableRepairOption === 'screen');
-                                  setCameraReplaced(tableRepairOption === 'camera');
-                                  setActiveTab('calculator');
-                                }}
-                                className="px-2 py-1 rounded-md text-[11px] font-medium bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-300 transition cursor-pointer"
-                                title="เปิดเครื่องคำนวณ"
-                              >
-                                คำนวณ
-                              </button>
-                            </td>
-                          </tr>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-bold text-blue-700 dark:text-blue-400 bg-blue-50/20 dark:bg-blue-950/10 whitespace-nowrap tabular-nums">
+                                <div>{tableCalc.finalLoan.toLocaleString()}</div>
+                                {isModified && (
+                                  <div className="text-[10px] font-normal text-slate-400">
+                                    <span className="line-through mr-1">{rate.loanAmount.toLocaleString()}</span>
+                                    <span className="text-amber-600 dark:text-amber-400 font-medium">ยึด {tableCalc.matchedModelRate.model}</span>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50/20 dark:bg-emerald-950/10 whitespace-nowrap tabular-nums">
+                                {tableCalc.plans.term1 ? tableCalc.plans.term1.toLocaleString() : '–'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap tabular-nums">
+                                {tableCalc.plans.term6 ? tableCalc.plans.term6.toLocaleString() : '–'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap tabular-nums">
+                                {tableCalc.plans.term9 ? tableCalc.plans.term9.toLocaleString() : '–'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap tabular-nums">
+                                {tableCalc.plans.term12 ? tableCalc.plans.term12.toLocaleString() : '–'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-semibold text-indigo-700 dark:text-indigo-400 bg-indigo-50/20 dark:bg-indigo-950/10 whitespace-nowrap tabular-nums">
+                                {tableCalc.plans.term15 ? tableCalc.plans.term15.toLocaleString() : '–'}
+                              </td>
+                              <td className="py-2.5 px-2 text-center whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCalcModelId(rate.id);
+                                    setCalcOrigin(tableOrigin);
+                                    setCalcIsRefurbished(tableIsRefurbished);
+                                    setScreenReplaced(tableRepairOption === 'screen');
+                                    setCameraReplaced(tableRepairOption === 'camera');
+                                    setActiveTab('calculator');
+                                  }}
+                                  className="px-2 py-1 rounded-md text-[11px] font-medium bg-slate-100 hover:bg-indigo-50 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-300 transition cursor-pointer"
+                                  title="เปิดเครื่องคำนวณ"
+                                >
+                                  คำนวณ
+                                </button>
+                              </td>
+                            </tr>
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -650,15 +667,22 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                 </table>
               </div>
 
-              {/* Rules & Notes Summary */}
-              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 space-y-1.5">
-                <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              {/* Official v4.0 Footnotes Box */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 space-y-1.5">
+                <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 mb-1">
                   <Info className="w-4 h-4 text-indigo-500" />
-                  เกณฑ์การจัดยอด & เงื่อนไขสำคัญ (THAIPLUS):
+                  หมายเหตุตารางรีไฟแนนซ์ iPhone ผ่อนรายเดือน (เริ่มใช้ราคา 5 พ.ย. 69 · v4.0):
                 </div>
-                {FOOTER_NOTES.map((note, idx) => (
-                  <p key={idx} className="text-[11px] leading-relaxed">• {note}</p>
-                ))}
+                <p className="text-[11px] leading-relaxed">• <strong>งวด 1 เดือน ดอก 22%</strong> · ผ่อน 15 เดือน เฉพาะรุ่นที่ยอดที่ได้ 17,000 บาทขึ้นไป</p>
+                <p className="text-[11px] leading-relaxed">• <strong>เลือกงวดได้:</strong> 1 / 6 / 9 / 12 / 15 เดือน</p>
+                <p className="text-[11px] leading-relaxed">• <strong>แบตเตอรี่:</strong> 100–75% รับเต็มยอด · 74–70% หัก 500 บาท · ต่ำกว่า 70% ไม่รับ</p>
+                <p className="text-[11px] leading-relaxed">• รับเครื่องนอก/เครื่องหิ้วทุกโมเดล · รับบัตรเครดิตผ่าน iCloud · ปิดยอดจ่ายร้าน · อายุ 18 ปีขึ้นไป</p>
+                <p className="text-[11px] leading-relaxed">• ลูกค้ามีเครื่องใช้งานต่อ ไม่ต้องฝากเครื่อง · รับ iOS ล่าสุด · ปิดก่อนกำหนดได้ตลอดสัญญา</p>
+                <div className="pt-1.5 mt-1.5 border-t border-slate-200 dark:border-slate-700/70 space-y-1 text-slate-500 dark:text-slate-400">
+                  {FOOTER_NOTES.slice(6).map((note, idx) => (
+                    <p key={idx} className="text-[11px] leading-relaxed">• {note}</p>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -685,10 +709,16 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                     >
                       {REFINANCE_RATES.map((r) => (
                         <option key={r.id} value={r.id}>
-                          {r.model} {r.isNew ? '(NEW 2TB)' : ''} — ยอดจัดปกติ {r.loanAmount.toLocaleString()} บ.
+                          {r.model} {r.requiresBoxAndReceipt ? '(ต้องมีกล่อง+ใบเสร็จ)' : ''} — ยอดที่ได้ {r.loanAmount.toLocaleString()} บ.
                         </option>
                       ))}
                     </select>
+                    {selectedRate.requiresBoxAndReceipt && (
+                      <p className="mt-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-lg px-2.5 py-1 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>iPhone 18 Series ต้องมีกล่อง + ใบเสร็จ</span>
+                      </p>
+                    )}
                   </div>
 
                   {/* เครื่องนอก / เครื่องศูนย์ไทย Selector */}
@@ -980,6 +1010,11 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                         <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-950/80 px-2 py-0.5 rounded-full">
                           {selectedRate.series}
                         </span>
+                        {selectedRate.requiresBoxAndReceipt && (
+                          <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-full">
+                            ต้องมีกล่อง + ใบเสร็จ
+                          </span>
+                        )}
                         {calcOrigin === 'foreign' && (
                           <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-full">
                             เครื่องนอก
@@ -1002,7 +1037,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                     </div>
 
                     <div className="text-right">
-                      <span className="text-xs text-slate-500 dark:text-slate-400 block">ยอดจัดสุทธิ</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 block">ยอดที่ได้สุทธิ</span>
                       <div className={clsx(
                         "text-2xl sm:text-3xl font-extrabold",
                         calcResult.isRejected
@@ -1049,22 +1084,21 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                     </div>
                   ) : (
                     <>
-                      {/* Interactive Term Selector Buttons (ปุ่มเลือกจำนวนงวดที่ลูกค้าเลือกได้เลย) */}
+                      {/* Interactive Term Selector Buttons (1 / 6 / 9 / 12 / 15 เดือน) */}
                       <div className="mt-5">
                         <div className="flex items-center justify-between mb-2">
                           <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                             <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                            เลือกล็อกงวดผ่อนที่ลูกค้าต้องการ:
+                            เลือกงวดผ่อนที่ลูกค้าต้องการ (1 / 6 / 9 / 12 / 15 เดือน):
                           </label>
                           <span className="text-[11px] text-slate-500 dark:text-slate-400">
                             (คลิกเลือกงวดที่ลูกค้าตกลง)
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                           {[
-                            { term: 1 as const, val: calcResult.plans.term1, label: '1 เดือน' },
-                            { term: 3 as const, val: calcResult.plans.term3, label: '3 เดือน' },
+                            { term: 1 as const, val: calcResult.plans.term1, label: '1 เดือน (ดอก 22%)' },
                             { term: 6 as const, val: calcResult.plans.term6, label: '6 เดือน' },
                             { term: 9 as const, val: calcResult.plans.term9, label: '9 เดือน' },
                             { term: 12 as const, val: calcResult.plans.term12, label: '12 เดือน' },
@@ -1114,7 +1148,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                                     )}>บ./ด.</span>
                                   </div>
                                 ) : (
-                                  <span className="text-[10px] text-slate-400 mt-1 block">-</span>
+                                  <span className="text-[10px] text-slate-400 mt-1 block">–</span>
                                 )}
                               </button>
                             );
@@ -1162,14 +1196,14 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                             <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
                               ลูกค้าต้องการปิดยอดในงวดที่:
                             </label>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1 flex-wrap">
                               {Array.from({ length: selectedTerm }, (_, i) => i + 1).map((inst) => (
                                 <button
                                   key={inst}
                                   type="button"
                                   onClick={() => setEarlyClosingAt(inst)}
                                   className={clsx(
-                                    "flex-1 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer text-center",
+                                    "px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer text-center",
                                     earlyClosingAt === inst
                                       ? "bg-emerald-600 text-white shadow-xs"
                                       : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200"
@@ -1315,7 +1349,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
                   <div className="mt-5 grid grid-cols-2 gap-2 text-[11px]">
                     <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                      <span>ยึดเรทราคาและค่างวดในตารางเท่านั้น</span>
+                      <span>ยึดเรทราคาและค่างวดในตาราง v4.0 เท่านั้น</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
@@ -1340,7 +1374,7 @@ export const RefinanceGuideModal: React.FC<RefinanceGuideModalProps> = ({
         <div className="px-4 sm:px-6 py-3 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
-            <span>THAIPLUS: ส่วนลดปิดยอด (งวด 1: 20% • งวด 2: 15% • งวด 3+: 10%) • ล่าช้า มีค่าดำเนินการ 50 บ./วัน (เกิน 7 วัน จำกัดการใช้งาน)</span>
+            <span>THAIPLUS v4.0 (เริ่มใช้ 5 พ.ย. 69): งวด 1 เดือน ดอก 22% • ผ่อน 15 เดือน เฉพาะยอดที่ได้ 17,000+ บ. • iPhone 18 ต้องมีกล่อง+ใบเสร็จ</span>
           </div>
 
           <button

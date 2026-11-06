@@ -127,10 +127,13 @@ export const statusMap: Record<Case['status'], { label: string; badgeClass: stri
 };
 
 export const POPULAR_IPHONES = [
-  'iPhone 18 Pro Max',
+  'iPhone 18 Pro Max 2TB',
+  'iPhone 18 Pro Max 1TB',
+  'iPhone 18 Pro Max 512GB',
+  'iPhone 18 Pro Max 256GB',
   'iPhone 18 Pro',
+  'iPhone 18 Air',
   'iPhone 18',
-  'iPhone 17 Pro Max 2TB',
   'iPhone 17 Pro Max',
   'iPhone 17 Pro',
   'iPhone 17 Air',
