@@ -7,7 +7,9 @@ import {
   doc, 
   onSnapshot, 
   query, 
-  orderBy 
+  orderBy,
+  where,
+  limit 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
@@ -140,7 +142,11 @@ export function OvertimeModal({
     if (!isOpen) return;
 
     setLoading(true);
-    const q = query(collection(db, 'overtime_requests'), orderBy('createdAt', 'desc'));
+    const q = isAdmin
+      ? query(collection(db, 'overtime_requests'), orderBy('createdAt', 'desc'), limit(100))
+      : user?.uid
+      ? query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid), limit(50))
+      : query(collection(db, 'overtime_requests'), orderBy('createdAt', 'desc'), limit(50));
 
     const unsubscribe = onSnapshot(
       q,

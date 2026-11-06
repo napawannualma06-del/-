@@ -7,7 +7,9 @@ import {
   doc, 
   onSnapshot, 
   query, 
-  orderBy 
+  orderBy,
+  where,
+  limit 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
@@ -102,7 +104,11 @@ export function TechnicalIssueModal({
   useEffect(() => {
     if (!isOpen) return;
 
-    const q = query(collection(db, 'technical_issues'), orderBy('createdAt', 'desc'));
+    const q = isAdmin
+      ? query(collection(db, 'technical_issues'), orderBy('createdAt', 'desc'), limit(80))
+      : user?.uid
+      ? query(collection(db, 'technical_issues'), where('reporterId', '==', user.uid), limit(50))
+      : query(collection(db, 'technical_issues'), orderBy('createdAt', 'desc'), limit(50));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {

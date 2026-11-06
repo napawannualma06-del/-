@@ -91,8 +91,11 @@ export interface FirestoreErrorInfo {
 
 export function isQuotaExceededError(error: unknown): boolean {
   if (!error) return false;
+  const code = (error as any)?.code || '';
   const msg = error instanceof Error ? error.message : typeof error === 'string' ? error : JSON.stringify(error);
   return (
+    code === 'resource-exhausted' ||
+    msg.includes('resource-exhausted') ||
     msg.includes('Quota exceeded') ||
     msg.includes('RESOURCE_EXHAUSTED') ||
     msg.includes('Quota limit exceeded') ||

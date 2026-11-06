@@ -14,7 +14,9 @@ import {
   Moon,
   Clock,
   ShieldAlert,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink,
+  AlertTriangle
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
@@ -223,9 +225,39 @@ export function Login() {
           )}
 
           {errorMsg && (
-            <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-xl text-red-700 dark:text-red-300 text-xs font-medium">
-              {errorMsg}
-            </div>
+            errorMsg.includes('โควต้า') || errorMsg.includes('Quota') ? (
+              <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 rounded-xl text-amber-900 dark:text-amber-200 text-xs space-y-2.5 shadow-xs">
+                <div className="flex items-center gap-2 font-bold text-sm text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>โควต้าฐานข้อมูลฟรีรายวันเต็ม (Quota Limit)</span>
+                </div>
+                <p className="leading-relaxed">
+                  {errorMsg}
+                </p>
+                <div className="pt-1 flex flex-col sm:flex-row gap-2">
+                  <a
+                    href="https://console.firebase.google.com/project/boreal-phantasmata-5thv3/firestore/databases/ai-studio-remix-908bc4ff-dfd6-489a-81dc-d04498181529/data?openUpgradeDialog=true"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold text-xs transition cursor-pointer shadow-xs"
+                  >
+                    <span>เปิด Firebase Console เพื่ออัปเกรด</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="inline-flex items-center justify-center px-3 py-2 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 rounded-lg font-semibold text-xs transition hover:bg-amber-50 cursor-pointer"
+                  >
+                    ลองรีโหลดหน้าเว็บใหม่
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 rounded-xl text-red-700 dark:text-red-300 text-xs font-medium">
+                {errorMsg}
+              </div>
+            )
           )}
 
           {successMsg && (

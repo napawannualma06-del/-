@@ -13,7 +13,7 @@ import {
   orderBy,
   limit,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, ensureFirebaseAnonymousAuth } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, ensureFirebaseAnonymousAuth, isQuotaExceededError } from '../lib/firebase';
 import { UserProfile, Role, WorkStatus, AccountStatus, Case, Agent } from '../types';
 import { ANIMAL_LIST } from '../components/AnimalAvatar';
 import { clockOutEmployeeAndReturnCases, ShiftActionResult } from '../lib/shiftService';
@@ -875,13 +875,17 @@ export const useStore = create<AppState>((set, get) => {
           await setDoc(doc(db, 'users', adminUid), adminProfile, { merge: true });
         } catch (err: any) {
           console.error('Error reading/writing admin_gametpl code:', err?.code, 'details:', err);
+          const isQuota = isQuotaExceededError(err);
           const isPermissionDenied =
             err?.code === 'permission-denied' ||
             err?.message?.includes('permission-denied') ||
             err?.message?.includes('Missing or insufficient permissions');
           return {
             success: false,
-            message: isPermissionDenied
+            isQuota,
+            message: isQuota
+              ? 'โควต้าการอ่านฐานข้อมูล Firestore ฟรีรายวัน (50,000 ครั้ง/วัน) เต็มแล้ว โควต้าจะรีเซ็ตอัตโนมัติในวันถัดไป หรือให้ผู้ดูแลระบบเปิด Firebase Console เพื่ออัปเกรดแพ็กเกจ (Blaze Plan)'
+              : isPermissionDenied
               ? 'บันทึกข้อมูลไม่ได้ (สิทธิ์ฐานข้อมูล)'
               : 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
           };
@@ -1015,13 +1019,17 @@ export const useStore = create<AppState>((set, get) => {
         return { success: true };
       } catch (error: any) {
         console.error('Login error code:', error?.code, 'details:', error);
+        const isQuota = isQuotaExceededError(error);
         const isPermissionDenied =
           error?.code === 'permission-denied' ||
           error?.message?.includes('permission-denied') ||
           error?.message?.includes('Missing or insufficient permissions');
         return {
           success: false,
-          message: isPermissionDenied
+          isQuota,
+          message: isQuota
+            ? 'โควต้าการอ่านฐานข้อมูล Firestore ฟรีรายวัน (50,000 ครั้ง/วัน) เต็มแล้ว โควต้าจะรีเซ็ตอัตโนมัติในวันถัดไป หรือให้ผู้ดูแลระบบเปิด Firebase Console เพื่ออัปเกรดแพ็กเกจ (Blaze Plan)'
+            : isPermissionDenied
             ? 'บันทึกข้อมูลไม่ได้ (สิทธิ์ฐานข้อมูล)'
             : 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
         };

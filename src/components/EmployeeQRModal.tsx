@@ -43,7 +43,8 @@ import {
   addDoc,
   onSnapshot,
   query,
-  orderBy
+  orderBy,
+  limit
 } from 'firebase/firestore';
 import {
   THAI_BANKS,
@@ -187,7 +188,7 @@ export function EmployeeQRModal({
       }
     );
 
-    const repayQuery = query(collection(db, 'peer_repayments'), orderBy('createdAt', 'desc'));
+    const repayQuery = query(collection(db, 'peer_repayments'), orderBy('createdAt', 'desc'), limit(50));
     const unsubRepayments = onSnapshot(
       repayQuery,
       (snapshot) => {
