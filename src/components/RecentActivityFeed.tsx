@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { ActivityLog } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -32,46 +32,42 @@ export const RecentActivityFeed: React.FC = () => {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
 
-  useEffect(() => {
+  const fetchActivities = async () => {
     if (!user?.uid) {
       setActivities([]);
       return;
     }
+    try {
+      const q = query(
+        collection(db, 'activities'),
+        orderBy('timestamp', 'desc'),
+        limit(20)
+      );
+      const snapshot = await getDocs(q);
+      const list: ActivityLog[] = [];
+      snapshot.forEach((doc) => {
+        const item = { id: doc.id, ...doc.data() } as ActivityLog;
+        const typeStr = String(item.type || '').toLowerCase();
+        const descStr = String(item.description || '').toLowerCase();
+        if (
+          typeStr.includes('ot') ||
+          typeStr.includes('advance') ||
+          descStr.includes('ot') ||
+          descStr.includes('แอดวานซ์') ||
+          descStr.includes('เบิกเงิน')
+        ) {
+          return;
+        }
+        list.push(item);
+      });
+      setActivities(list);
+    } catch (err) {
+      console.warn('Load activities error:', err);
+    }
+  };
 
-    const q = query(
-      collection(db, 'activities'),
-      orderBy('timestamp', 'desc'),
-      limit(30)
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const list: ActivityLog[] = [];
-        snapshot.forEach((doc) => {
-          const item = { id: doc.id, ...doc.data() } as ActivityLog;
-          const typeStr = String(item.type || '').toLowerCase();
-          const descStr = String(item.description || '').toLowerCase();
-          // Exclude personal confidential activities (OT, advance, funds) from public ticker
-          if (
-            typeStr.includes('ot') ||
-            typeStr.includes('advance') ||
-            descStr.includes('ot') ||
-            descStr.includes('แอดวานซ์') ||
-            descStr.includes('เบิกเงิน')
-          ) {
-            return;
-          }
-          list.push(item);
-        });
-        setActivities(list);
-      },
-      (err) => {
-        console.warn('Realtime activities listener error:', err);
-      }
-    );
-
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchActivities();
   }, [user?.uid]);
 
   const latest = activities[0];

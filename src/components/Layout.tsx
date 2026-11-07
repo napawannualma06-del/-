@@ -8,7 +8,7 @@ import { AvatarSelectorModal } from './AvatarSelectorModal';
 import { TeamChatBubble } from './TeamChatBubble';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { NotificationCenter, TechNotificationItem } from './NotificationCenter';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { playNotificationChime } from '../lib/sound';
 import { 
@@ -201,30 +201,34 @@ export function Layout() {
           where('reporterId', '==', user.uid)
         );
 
-    const unsub = onSnapshot(qTech, (snap) => {
-      let count = 0;
-      const notifsList: TechNotificationItem[] = [];
+    const otQuery = isAdmin
+      ? query(collection(db, 'overtime_requests'), where('status', '==', 'pending'))
+      : query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid));
 
-      snap.forEach((doc) => {
-        const d = doc.data();
-        if (d.status === 'pending' || d.status === 'in_progress') {
-          count++;
-        }
+    const advanceQuery = isAdmin
+      ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
+      : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
 
-        // Check if this issue belongs to the currently logged in user
-        const isMyIssue = user && (d.reporterId === user.uid || (user.username && d.reporterUsername === user.username));
-        if (isMyIssue) {
-          const oldStatus = knownTechStatusRef.current.get(doc.id);
-          const newStatus = d.status as 'pending' | 'in_progress' | 'resolved';
+    // Load pending badge counts once on mount/user change via getDocs (no continuous listeners to save reads)
+    const loadBadgeCounts = async () => {
+      try {
+        const snapTech = await getDocs(qTech);
+        let count = 0;
+        const notifsList: TechNotificationItem[] = [];
 
-          // If status is in_progress or resolved, add to employee notification center list
-          if (newStatus === 'in_progress' || newStatus === 'resolved') {
-            const notifKey = `${doc.id}_${newStatus}_${d.updatedAt || 0}`;
+        snapTech.forEach((doc) => {
+          const d = doc.data() as Record<string, any>;
+          if (d.status === 'pending' || d.status === 'in_progress') {
+            count++;
+          }
+          const isMyIssue = user && (d.reporterId === user.uid || (user.username && d.reporterUsername === user.username));
+          if (isMyIssue && (d.status === 'in_progress' || d.status === 'resolved')) {
+            const notifKey = `${doc.id}_${d.status}_${d.updatedAt || 0}`;
             notifsList.push({
               id: doc.id,
               title: d.title || 'ปัญหาเทคนิค',
               serialNumber: d.serialNumber || '-',
-              status: newStatus,
+              status: d.status,
               statusChangedBy: d.statusChangedBy,
               adminNote: d.adminNote,
               updatedAt: d.updatedAt || d.createdAt || Date.now(),
@@ -232,89 +236,32 @@ export function Layout() {
               notifKey,
             });
           }
+        });
+        notifsList.sort((a, b) => b.updatedAt - a.updatedAt);
+        setTechNotifications(notifsList);
+        setPendingTechCount(count);
 
-          // If not initial load and status has changed to in_progress or resolved
-          if (!initialTechLoadRef.current && oldStatus && oldStatus !== newStatus && (newStatus === 'in_progress' || newStatus === 'resolved')) {
-            playNotificationChime();
+        const snapOT = await getDocs(otQuery);
+        let pendingOT = 0;
+        snapOT.forEach((doc) => {
+          const d = doc.data() as Record<string, any>;
+          if (d.status === 'pending') pendingOT++;
+        });
+        setPendingOTCount(pendingOT);
 
-            const notifKey = `${doc.id}_${newStatus}_${d.updatedAt || Date.now()}`;
-            const toastData: TechStatusToast = {
-              id: `${doc.id}-${Date.now()}`,
-              issueId: doc.id,
-              notifKey,
-              title: d.title || 'ปัญหาเทคนิค',
-              serialNumber: d.serialNumber || '-',
-              status: newStatus,
-              statusChangedBy: d.statusChangedBy,
-              adminNote: d.adminNote,
-            };
-            setActiveTechToast(toastData);
-
-            if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-            toastTimeoutRef.current = setTimeout(() => {
-              setActiveTechToast(null);
-            }, 9000);
-
-            if ('Notification' in window && Notification.permission === 'granted') {
-              try {
-                const notifTitle = newStatus === 'in_progress' ? '🛠️ แอดมินรับเรื่องแล้ว!' : '✅ ปัญหาได้รับการแก้ไขเสร็จสิ้น!';
-                const notifBody = `หัวข้อ: ${d.title}${d.serialNumber && d.serialNumber !== '-' ? ` (SN: ${d.serialNumber})` : ''}\nแอดมินได้${newStatus === 'in_progress' ? 'รับเรื่องแล้ว' : 'แก้ไขเสร็จสิ้นเรียบร้อยแล้ว'}`;
-                new Notification(notifTitle, {
-                  body: notifBody,
-                  icon: '/icon.png',
-                });
-              } catch (e) {
-                console.warn('Browser notification failed:', e);
-              }
-            }
-          }
-
-          knownTechStatusRef.current.set(doc.id, newStatus);
-        }
-      });
-
-      notifsList.sort((a, b) => b.updatedAt - a.updatedAt);
-      setTechNotifications(notifsList);
-      initialTechLoadRef.current = false;
-      setPendingTechCount(count);
-    }, () => {});
-
-    // Listen to overtime_requests for pending badge (for admins: status=='pending', for employees: employeeId==user.uid)
-    const otQuery = isAdmin
-      ? query(collection(db, 'overtime_requests'), where('status', '==', 'pending'))
-      : query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid));
-    const unsubOT = onSnapshot(otQuery, (snap) => {
-      let pendingCount = 0;
-      snap.forEach((doc) => {
-        const d = doc.data();
-        if (d.status === 'pending') {
-          pendingCount++;
-        }
-      });
-      setPendingOTCount(pendingCount);
-    }, () => {});
-
-    // Listen to advance_requests for pending badge (for admins: status=='pending', for employees: employeeId==user.uid)
-    const advanceQuery = isAdmin
-      ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
-      : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
-    const unsubAdvance = onSnapshot(advanceQuery, (snap) => {
-      let pendingCount = 0;
-      snap.forEach((doc) => {
-        const d = doc.data();
-        if (d.status === 'pending') {
-          pendingCount++;
-        }
-      });
-      setPendingAdvanceCount(pendingCount);
-    }, () => {});
-
-    return () => {
-      unsub();
-      unsubOT();
-      unsubAdvance();
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+        const snapAdv = await getDocs(advanceQuery);
+        let pendingAdv = 0;
+        snapAdv.forEach((doc) => {
+          const d = doc.data() as Record<string, any>;
+          if (d.status === 'pending') pendingAdv++;
+        });
+        setPendingAdvanceCount(pendingAdv);
+      } catch (e) {
+        console.warn('Load badge counts error:', e);
+      }
     };
+
+    loadBadgeCounts();
   }, [user?.uid, user?.username, user?.role]);
 
   useEffect(() => {
@@ -727,14 +674,14 @@ export function Layout() {
                       ? "border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
                       : "border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/80"
                   )}
-                  title={isOffWork ? "ขณะนี้ว่างงาน (คลิกเพื่อเข้างาน)" : "ขณะนี้เข้างานอยู่ (คลิกเพื่อบันทึกเลิกงาน)"}
+                  title={isOffWork ? "ขณะนี้หยุดงาน (คลิกเพื่อเข้างาน)" : "ขณะนี้เข้างานอยู่ (คลิกเพื่อบันทึกเลิกงาน)"}
                 >
                   <span className={clsx(
                     "w-2 h-2 rounded-full shrink-0",
                     isOffWork ? "bg-slate-400" : "bg-emerald-500"
                   )} />
                   <span className="hidden sm:inline">
-                    {isOffWork ? 'ว่างงาน' : 'เข้างานอยู่'}
+                    {isOffWork ? 'หยุด' : 'เข้างานอยู่'}
                   </span>
                 </button>
               )}

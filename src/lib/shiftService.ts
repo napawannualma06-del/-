@@ -251,8 +251,8 @@ export async function autoClockOutInactiveEmployee(
       actorName: employeeName,
       description:
         activeCases.length > 0
-          ? `เปลี่ยนเป็นว่างงานอัตโนมัติ (${reason}) และคืนเคสกลับเข้าคิว ${activeCases.length} เคส`
-          : `เปลี่ยนเป็นว่างงานอัตโนมัติ (${reason})`,
+          ? `เปลี่ยนเป็นหยุดอัตโนมัติ (${reason}) และคืนเคสกลับเข้าคิว ${activeCases.length} เคส`
+          : `เปลี่ยนเป็นหยุดอัตโนมัติ (${reason})`,
     }).catch(() => {});
 
     return {

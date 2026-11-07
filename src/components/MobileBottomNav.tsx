@@ -236,7 +236,7 @@ export function MobileBottomNav({
                   "w-2 h-2 rounded-full shrink-0",
                   isOffWork ? "bg-slate-400" : "bg-white animate-pulse"
                 )} />
-                <span>{isOffWork ? 'ว่างงาน' : 'เข้างานอยู่'}</span>
+                <span>{isOffWork ? 'หยุด' : 'เข้างานอยู่'}</span>
               </button>
             </div>
 

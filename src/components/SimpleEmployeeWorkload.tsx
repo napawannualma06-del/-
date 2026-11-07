@@ -135,7 +135,7 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                 <span className="text-slate-300 dark:text-slate-700">·</span>
                 <span className="inline-flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-slate-400" />
-                  <span>ว่างงาน <strong className="text-slate-800 dark:text-slate-200">{totalOffWork}</strong></span>
+                  <span>หยุด <strong className="text-slate-800 dark:text-slate-200">{totalOffWork}</strong></span>
                 </span>
               </>
             )}
@@ -252,9 +252,9 @@ export const SimpleEmployeeWorkload: React.FC<SimpleEmployeeWorkloadProps> = ({
                           <div className="flex items-center gap-1.5">
                             <span 
                               className="text-[11px] font-medium text-slate-400 dark:text-slate-500"
-                              title={emp.autoClockOutReason ? `เปลี่ยนเป็นว่างงานอัตโนมัติ: ${emp.autoClockOutReason}` : undefined}
+                              title={emp.autoClockOutReason ? `เปลี่ยนเป็นหยุดอัตโนมัติ: ${emp.autoClockOutReason}` : undefined}
                             >
-                              ว่างงาน{emp.autoClockOutReason ? ' (ระบบ)' : ''}
+                              หยุด{emp.autoClockOutReason ? ' (ระบบ)' : ''}
                             </span>
                             {canManage && (
                               <button

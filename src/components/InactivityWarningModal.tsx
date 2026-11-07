@@ -45,7 +45,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
                 ระบบจัดการกะอัตโนมัติ
               </span>
               <h3 className="font-bold text-base text-slate-900 dark:text-white leading-tight">
-                สถานะของคุณเปลี่ยนเป็น "ว่างงาน" แล้ว
+                สถานะของคุณเปลี่ยนเป็น "หยุด" แล้ว
               </h3>
             </div>
           </div>
@@ -55,7 +55,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
               เนื่องจากไม่มีการ
               <strong className="mx-1 text-amber-700 dark:text-amber-300 font-semibold">สร้างเคส, รับเคส, ใส่หมายเหตุ หรือทำแอคชั่นใดๆ</strong>
               เกิน 2 ชั่วโมง และ<strong className="text-rose-600 dark:text-rose-400 font-bold">ไม่ได้รับการยืนยันว่าทำงานอยู่ภายใน 1 ชั่วโมงหลังจากแจ้งเตือน</strong>
-              ระบบจึงได้ปรับสถานะเป็น <strong>"ว่างงาน"</strong> ให้อัตโนมัติ เพื่อป้องกันเคสค้าง
+              ระบบจึงได้ปรับสถานะเป็น <strong>"หยุด"</strong> ให้อัตโนมัติ เพื่อป้องกันเคสค้าง
             </p>
 
             <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 text-xs text-slate-800 dark:text-slate-200 space-y-1">
@@ -67,7 +67,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
                 {returnedCasesCount > 0 ? (
                   <>เคสที่คุณกำลังดำเนินการอยู่ทั้งหมด <strong className="font-bold underline text-indigo-600 dark:text-indigo-400">จำนวน {returnedCasesCount} เคส</strong> ได้ถูกส่งคืนกลับไปที่ <strong>"รอรับเคส"</strong> เรียบร้อยแล้ว เพื่อให้เพื่อนร่วมทีมรับไปดำเนินการต่อได้ทันที</>
                 ) : (
-                  <>ไม่มีเคสค้างที่กำลังทำอยู่ สถานะถูกเปลี่ยนเป็น <strong>"ว่างงาน"</strong> เรียบร้อยแล้ว</>
+                  <>ไม่มีเคสค้างที่กำลังทำอยู่ สถานะถูกเปลี่ยนเป็น <strong>"หยุด"</strong> เรียบร้อยแล้ว</>
                 )}
               </p>
             </div>
@@ -129,7 +129,7 @@ export const InactivityWarningModal: React.FC<InactivityWarningModalProps> = ({
           <div className="py-4 space-y-4">
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
               ไม่มีการสร้างเคส รับเคส ใส่หมายเหตุ หรือทำแอคชั่นในระบบมาครบ <strong className="text-amber-700 dark:text-amber-300 font-semibold">2 ชั่วโมงแล้ว</strong>
-              ระบบจะรอการยืนยันอีก <strong>1 ชั่วโมง</strong> หากไม่ได้กดยืนยันว่ากำลังทำงานอยู่ ระบบจะเปลี่ยนสถานะเป็น <strong>"ว่างงาน"</strong> และส่งคืนเคสให้อัตโนมัติในอีก:
+              ระบบจะรอการยืนยันอีก <strong>1 ชั่วโมง</strong> หากไม่ได้กดยืนยันว่ากำลังทำงานอยู่ ระบบจะเปลี่ยนสถานะเป็น <strong>"หยุด"</strong> และส่งคืนเคสให้อัตโนมัติในอีก:
             </p>
 
             {/* Countdown Badge */}

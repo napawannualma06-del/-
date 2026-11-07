@@ -83,43 +83,6 @@ export const TeamChatBubble: React.FC = () => {
       );
 
       return () => unsubscribeOpen();
-    } else {
-      // Closed state: only listen to the single latest message (limit 1)
-      const qClosed = query(
-        collection(db, 'team_chats'),
-        orderBy('createdAt', 'desc'),
-        limit(1)
-      );
-
-      const unsubscribeClosed = onSnapshot(
-        qClosed,
-        (snapshot) => {
-          if (snapshot.empty) return;
-          const docSnap = snapshot.docs[0];
-          const latestMsg = { id: docSnap.id, ...docSnap.data() } as ChatMessage;
-
-          if (
-            latestMsg.createdAt > lastSeenTimeRef.current &&
-            latestMsg.senderId !== user.uid &&
-            lastNotifiedMsgIdRef.current !== latestMsg.id
-          ) {
-            lastNotifiedMsgIdRef.current = latestMsg.id;
-            setUnreadCount((prev) => prev + 1);
-            const mentionedMe =
-              (latestMsg.mentions && user.username && latestMsg.mentions.includes(user.username)) ||
-              (user.name && latestMsg.text?.includes(`@${user.name}`)) ||
-              (user.username && latestMsg.text?.includes(`@${user.username}`));
-            if (mentionedMe) {
-              setHasNewMention(true);
-            }
-          }
-        },
-        (error) => {
-          console.warn('Realtime team chat (closed limit 1) listener error:', error);
-        }
-      );
-
-      return () => unsubscribeClosed();
     }
   }, [isOpen, user?.uid, user?.username, user?.name]);
 

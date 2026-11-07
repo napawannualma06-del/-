@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
-import { collection, query, onSnapshot, where } from 'firebase/firestore';
+import { collection, query, getDocs, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Case, statusMap } from './Queue';
 import { Logo } from './Logo';
@@ -203,7 +203,7 @@ export function AdminDashboard() {
     });
   }, [timeFilter, customStartDate, customEndDate, fetchHistoricalCases]);
 
-  // Subscribe to badge counts only when user is logged in (using filtered queries to minimize reads)
+  // Load badge counts once on mount via getDocs (no continuous listeners to save reads)
   useEffect(() => {
     if (!user?.uid) return;
     const qTech = isAdmin
@@ -215,42 +215,46 @@ export function AdminDashboard() {
           collection(db, 'technical_issues'),
           where('reporterId', '==', user.uid)
         );
-    const unsubTech = onSnapshot(qTech, (snap) => {
-      let count = 0;
-      snap.forEach((d) => {
-        const data = d.data();
-        if (data.status === 'pending' || data.status === 'in_progress') count++;
-      });
-      setPendingTechCount(count);
-    }, () => {});
 
     const qOT = isAdmin
       ? query(collection(db, 'overtime_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid));
-    const unsubOT = onSnapshot(qOT, (snap) => {
-      let count = 0;
-      snap.forEach((d) => {
-        if (d.data().status === 'pending') count++;
-      });
-      setPendingOTCount(count);
-    }, () => {});
 
     const qAdv = isAdmin
       ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
-    const unsubAdv = onSnapshot(qAdv, (snap) => {
-      let count = 0;
-      snap.forEach((d) => {
-        if (d.data().status === 'pending') count++;
-      });
-      setPendingAdvanceCount(count);
-    }, () => {});
 
-    return () => {
-      unsubTech();
-      unsubOT();
-      unsubAdv();
+    const loadBadges = async () => {
+      try {
+        const snapTech = await getDocs(qTech);
+        let countTech = 0;
+        snapTech.forEach((d) => {
+          const data = d.data() as Record<string, any>;
+          if (data.status === 'pending' || data.status === 'in_progress') countTech++;
+        });
+        setPendingTechCount(countTech);
+
+        const snapOT = await getDocs(qOT);
+        let countOT = 0;
+        snapOT.forEach((d) => {
+          const data = d.data() as Record<string, any>;
+          if (data.status === 'pending') countOT++;
+        });
+        setPendingOTCount(countOT);
+
+        const snapAdv = await getDocs(qAdv);
+        let countAdv = 0;
+        snapAdv.forEach((d) => {
+          const data = d.data() as Record<string, any>;
+          if (data.status === 'pending') countAdv++;
+        });
+        setPendingAdvanceCount(countAdv);
+      } catch (e) {
+        console.warn('Load admin badge counts error:', e);
+      }
     };
+
+    loadBadges();
   }, [user?.uid, isAdmin]);
 
   if (loading) {

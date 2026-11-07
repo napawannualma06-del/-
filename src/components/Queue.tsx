@@ -678,7 +678,7 @@ export function Queue() {
     if (!user) return;
     if (user.workStatus === 'off_work') {
       const confirmClockIn = window.confirm(
-        'ขณะนี้คุณอยู่ในสถานะ "ว่างงาน" ต้องการเปลี่ยนสถานะเป็น "เข้างาน" และรับเคสนี้ใช่หรือไม่?'
+        'ขณะนี้คุณอยู่ในสถานะ "หยุด" ต้องการเปลี่ยนสถานะเป็น "เข้างาน" และรับเคสนี้ใช่หรือไม่?'
       );
       if (!confirmClockIn) return;
       await clockIn();
