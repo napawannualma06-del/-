@@ -75,8 +75,13 @@ export function Layout() {
 
   useEffect(() => {
     const handleQuotaEvent = () => setIsQuotaExceeded(true);
+    const handleQuotaClearedEvent = () => setIsQuotaExceeded(false);
     window.addEventListener('firestore-quota-exceeded', handleQuotaEvent);
-    return () => window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
+    window.addEventListener('firestore-quota-cleared', handleQuotaClearedEvent);
+    return () => {
+      window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
+      window.removeEventListener('firestore-quota-cleared', handleQuotaClearedEvent);
+    };
   }, []);
 
   const [notifGranted, setNotifGranted] = useState(false);

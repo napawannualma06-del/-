@@ -388,8 +388,13 @@ export function Queue() {
 
   useEffect(() => {
     const handleQuotaEvent = () => setIsQuotaExceeded(true);
+    const handleQuotaClearedEvent = () => setIsQuotaExceeded(false);
     window.addEventListener('firestore-quota-exceeded', handleQuotaEvent);
-    return () => window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
+    window.addEventListener('firestore-quota-cleared', handleQuotaClearedEvent);
+    return () => {
+      window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
+      window.removeEventListener('firestore-quota-cleared', handleQuotaClearedEvent);
+    };
   }, []);
 
   // Load historical closed/cancelled cases via getDocs (with limit) ONLY when user clicks closed/cancelled tab
