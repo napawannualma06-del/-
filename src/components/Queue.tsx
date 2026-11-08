@@ -68,7 +68,6 @@ import { ReturnCaseModal } from './ReturnCaseModal';
 import { TransferCaseModal } from './TransferCaseModal';
 import { CloseCaseModal } from './CloseCaseModal';
 import { HoldCaseModal } from './HoldCaseModal';
-import { RecentActivityFeed } from './RecentActivityFeed';
 import { AgentSelect, AgentManagerModal } from './AgentSelect';
 import { 
   getPreviousAssignee, 
@@ -400,7 +399,7 @@ export function Queue() {
   // Load historical closed/cancelled cases via getDocs (with limit) ONLY when user clicks closed/cancelled tab
   useEffect(() => {
     if (activeFilter === 'closed' || activeFilter === 'cancelled') {
-      fetchHistoricalCases({ status: activeFilter, limitCount: 150 });
+      fetchHistoricalCases({ status: activeFilter, limitCount: 50 });
     }
   }, [activeFilter, fetchHistoricalCases]);
 
@@ -1131,9 +1130,6 @@ export function Queue() {
           </div>
         </div>
       )}
-
-      {/* Real-time Activity Feed Banner & Modal */}
-      <RecentActivityFeed />
 
       {/* SIMPLE EMPLOYEE WORKLOAD OVERVIEW (ใครกำลังรับงานอยู่กี่เคส แสดงแบบง่ายๆ) */}
       <SimpleEmployeeWorkload 

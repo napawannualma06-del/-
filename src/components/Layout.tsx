@@ -5,7 +5,6 @@ import { Logo } from './Logo';
 import { AnimalAvatar } from './AnimalAvatar';
 import { ClockOutConfirmModal } from './ClockOutConfirmModal';
 import { AvatarSelectorModal } from './AvatarSelectorModal';
-import { TeamChatBubble } from './TeamChatBubble';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { NotificationCenter, TechNotificationItem } from './NotificationCenter';
 import { collection, getDocs, query, where } from 'firebase/firestore';
@@ -812,9 +811,6 @@ export function Layout() {
         onResetActivity={resetActivity}
         onDismissAutoClockOut={dismissAutoClockOut}
       />
-
-      {/* Real-time Team Chat Floating Bubble */}
-      {user && <TeamChatBubble />}
 
       {/* Technical Issues Modal */}
       {user && (

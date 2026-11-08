@@ -98,7 +98,7 @@ function getDeterministicAnimalEmoji(identifier: string): string {
 }
 
 // ============================================================================
-// Server-Side Background Maintenance (Runs once every 10 minutes on backend)
+// Server-Side Background Maintenance (Runs once every 30 minutes on backend)
 // 1. Auto-cancel expired cases (> 3 days old, only pending/stuck, never closed)
 // 2. Auto clock-out inactive employees (> 3 hours idle, excluding admins)
 // ============================================================================
@@ -754,10 +754,10 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Q-Case Server] Listening on http://0.0.0.0:${PORT} (Dev/Prod: ${isProd ? 'Production' : 'Development'})`);
-    // Schedule server-side maintenance sweep once every 10 minutes
+    // Schedule server-side maintenance sweep once every 30 minutes
     setInterval(() => {
       runServerMaintenanceSweep();
-    }, 10 * 60 * 1000);
+    }, 30 * 60 * 1000);
   });
 }
 

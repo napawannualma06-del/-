@@ -2,7 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   query, 
-  onSnapshot, 
+  getDocs, 
+  where,
+  limit,
+  startAfter,
   orderBy, 
   doc, 
   updateDoc, 
@@ -79,6 +82,9 @@ export function AdminOTDashboard() {
 
   const [requests, setRequests] = useState<OvertimeRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState<any>(null);
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<'all' | OvertimeStatus>('all');
@@ -90,27 +96,69 @@ export function AdminOTDashboard() {
   const [adminComment, setAdminComment] = useState('');
   const [isReviewing, setIsReviewing] = useState(false);
 
-  // Real-time listener for all OT requests
-  useEffect(() => {
-    const q = query(collection(db, 'overtime_requests'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const list: OvertimeRequest[] = [];
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...(doc.data() as Omit<OvertimeRequest, 'id'>) });
-        });
-        setRequests(list);
-        setLoading(false);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'overtime_requests');
-        setLoading(false);
-      }
-    );
+  // Load OT requests for current/selected cycle (26-25) via getDocs with limit(100)
+  const fetchCycleRequests = async (isLoadMore = false) => {
+    if (isLoadMore) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
 
-    return () => unsubscribe();
-  }, []);
+    try {
+      const constraints: any[] = [
+        where('date', '>=', selectedCycleInfo.startDate),
+        where('date', '<=', selectedCycleInfo.endDate),
+        orderBy('date', 'desc'),
+        limit(100)
+      ];
+
+      if (isLoadMore && lastVisibleDoc) {
+        constraints.push(startAfter(lastVisibleDoc));
+      }
+
+      const q = query(collection(db, 'overtime_requests'), ...constraints);
+      const snapshot = await getDocs(q);
+      const list: OvertimeRequest[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...(docSnap.data() as Omit<OvertimeRequest, 'id'>) });
+      });
+
+      if (isLoadMore) {
+        setRequests((prev) => [...prev, ...list]);
+      } else {
+        setRequests(list);
+      }
+
+      setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length >= 100);
+    } catch (error) {
+      console.warn('Error fetching cycle OT requests:', error);
+      // Fallback: If date index is missing, fetch by limit(100) ordered by createdAt
+      try {
+        const fallbackQ = query(
+          collection(db, 'overtime_requests'),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+        const fbSnap = await getDocs(fallbackQ);
+        const fbList: OvertimeRequest[] = [];
+        fbSnap.forEach((docSnap) => {
+          fbList.push({ id: docSnap.id, ...(docSnap.data() as Omit<OvertimeRequest, 'id'>) });
+        });
+        setRequests(fbList);
+        setHasMore(false);
+      } catch (fbErr) {
+        handleFirestoreError(fbErr, OperationType.GET, 'overtime_requests');
+      }
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCycleRequests(false);
+  }, [selectedCycleKey]);
 
   // Filter requests by cycle period (26th prev month to 25th current month)
   const cycleRequests = useMemo(() => {
@@ -745,6 +793,20 @@ export function AdminOTDashboard() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Load More Button */}
+        {hasMore && !loading && (
+          <div className="p-4 border-t border-slate-100 dark:border-slate-800 text-center">
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => fetchCycleRequests(true)}
+              className="px-4 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 font-semibold text-xs transition cursor-pointer border border-indigo-200 dark:border-indigo-800/80 disabled:opacity-50"
+            >
+              {loadingMore ? 'กำลังโหลดเพิ่ม...' : 'โหลดเพิ่ม'}
+            </button>
           </div>
         )}
       </div>

@@ -748,11 +748,31 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     fetchHistoricalCases: async (options: HistoricalFetchOptions) => {
-      const { status, minCreatedAt, maxCreatedAt, limitCount = 200, forceRefresh = false } = options;
-      const cacheKey = `${status || 'all'}_${minCreatedAt || 0}_${maxCreatedAt || 0}_${limitCount}`;
+      const { status, minCreatedAt, maxCreatedAt, limitCount = 50, forceRefresh = false } = options;
+      const cacheKey = `thaiplus_hist_${status || 'all'}_${minCreatedAt || 0}_${maxCreatedAt || 0}_${limitCount}`;
+      const now = Date.now();
+      const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
-      if (!forceRefresh && fetchedHistoryKeys.has(cacheKey)) {
-        return get().historicalCases;
+      // 1. Try local storage cache if not force refreshing
+      if (!forceRefresh) {
+        try {
+          const cachedRaw = localStorage.getItem(cacheKey);
+          if (cachedRaw) {
+            const parsed = JSON.parse(cachedRaw);
+            if (parsed && Array.isArray(parsed.cases) && now - (parsed.timestamp || 0) < CACHE_TTL_MS) {
+              parsed.cases.forEach((c: Case) => historicalCasesMap.set(c.id, c));
+              const allHistorical = Array.from(historicalCasesMap.values()).sort(
+                (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+              );
+              set({ historicalCases: allHistorical, historicalLoading: false });
+              return allHistorical;
+            }
+          }
+        } catch {}
+
+        if (fetchedHistoryKeys.has(cacheKey)) {
+          return get().historicalCases;
+        }
       }
 
       set({ historicalLoading: true });
@@ -787,6 +807,7 @@ export const useStore = create<AppState>((set, get) => {
         }
 
         const snap = await getDocs(qHist);
+        const fetchedCases: Case[] = [];
         snap.forEach((d) => {
           const data = d.data() as Record<string, unknown>;
           const c = { id: d.id, ...data } as Case;
@@ -794,7 +815,13 @@ export const useStore = create<AppState>((set, get) => {
             return;
           }
           historicalCasesMap.set(d.id, c);
+          fetchedCases.push(c);
         });
+
+        // Save to localStorage cache for 30 minutes
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify({ cases: fetchedCases, timestamp: now }));
+        } catch {}
 
         fetchedHistoryKeys.add(cacheKey);
         const allHistorical = Array.from(historicalCasesMap.values()).sort(

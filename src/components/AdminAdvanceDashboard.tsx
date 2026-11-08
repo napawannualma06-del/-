@@ -2,7 +2,10 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, 
   query, 
-  onSnapshot, 
+  getDocs, 
+  where,
+  limit,
+  startAfter,
   orderBy, 
   doc, 
   updateDoc, 
@@ -80,6 +83,9 @@ export function AdminAdvanceDashboard() {
 
   const [requests, setRequests] = useState<AdvanceRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastVisibleDoc, setLastVisibleDoc] = useState<any>(null);
 
   // Filters & Search
   const [statusFilter, setStatusFilter] = useState<'all' | AdvanceStatus>('all');
@@ -96,27 +102,69 @@ export function AdminAdvanceDashboard() {
   // Lightbox View for Slips
   const [viewingSlipUrl, setViewingSlipUrl] = useState<{ url: string; title: string } | null>(null);
 
-  // Real-time listener for all advance requests
-  useEffect(() => {
-    const q = query(collection(db, 'advance_requests'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const list: AdvanceRequest[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdvanceRequest, 'id'>) });
-        });
-        setRequests(list);
-        setLoading(false);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'advance_requests');
-        setLoading(false);
-      }
-    );
+  // Load advance requests for current/selected cycle (26-25) via getDocs with limit(100)
+  const fetchCycleRequests = async (isLoadMore = false) => {
+    if (isLoadMore) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
 
-    return () => unsubscribe();
-  }, []);
+    try {
+      const constraints: any[] = [
+        where('requestDate', '>=', selectedCycleInfo.startDate),
+        where('requestDate', '<=', selectedCycleInfo.endDate),
+        orderBy('requestDate', 'desc'),
+        limit(100)
+      ];
+
+      if (isLoadMore && lastVisibleDoc) {
+        constraints.push(startAfter(lastVisibleDoc));
+      }
+
+      const q = query(collection(db, 'advance_requests'), ...constraints);
+      const snapshot = await getDocs(q);
+      const list: AdvanceRequest[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdvanceRequest, 'id'>) });
+      });
+
+      if (isLoadMore) {
+        setRequests((prev) => [...prev, ...list]);
+      } else {
+        setRequests(list);
+      }
+
+      setLastVisibleDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length >= 100);
+    } catch (error) {
+      console.warn('Error fetching cycle advance requests:', error);
+      // Fallback: If date index is missing, fetch by limit(100) ordered by createdAt
+      try {
+        const fallbackQ = query(
+          collection(db, 'advance_requests'),
+          orderBy('createdAt', 'desc'),
+          limit(100)
+        );
+        const fbSnap = await getDocs(fallbackQ);
+        const fbList: AdvanceRequest[] = [];
+        fbSnap.forEach((docSnap) => {
+          fbList.push({ id: docSnap.id, ...(docSnap.data() as Omit<AdvanceRequest, 'id'>) });
+        });
+        setRequests(fbList);
+        setHasMore(false);
+      } catch (fbErr) {
+        handleFirestoreError(fbErr, OperationType.GET, 'advance_requests');
+      }
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCycleRequests(false);
+  }, [selectedCycleKey]);
 
   // Filter requests by cycle period (26th prev month to 25th current month)
   const cycleRequests = useMemo(() => {
@@ -928,6 +976,20 @@ export function AdminAdvanceDashboard() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Load More Button */}
+        {hasMore && !loading && (
+          <div className="p-4 border-t border-slate-100 dark:border-slate-800 text-center">
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => fetchCycleRequests(true)}
+              className="px-4 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-semibold text-xs transition cursor-pointer border border-emerald-200 dark:border-emerald-800/80 disabled:opacity-50"
+            >
+              {loadingMore ? 'กำลังโหลดเพิ่ม...' : 'โหลดเพิ่ม'}
+            </button>
           </div>
         )}
       </div>
