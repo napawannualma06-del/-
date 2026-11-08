@@ -110,6 +110,7 @@ export function Layout() {
   const initialTechLoadRef = useRef(true);
   const knownTechStatusRef = useRef<Map<string, string>>(new Map());
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastBadgeLoadTimeRef = useRef<number>(0);
   const isOffWork = user?.workStatus === 'off_work';
 
   // Read notification keys tracking
@@ -208,8 +209,13 @@ export function Layout() {
       ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
 
-    // Load pending badge counts once on mount/user change via getDocs (no continuous listeners to save reads)
+    // Load pending badge counts once on mount/user change via getDocs (no continuous listeners, 5-minute cooldown)
     const loadBadgeCounts = async () => {
+      const now = Date.now();
+      if (now - lastBadgeLoadTimeRef.current < 5 * 60 * 1000) {
+        return;
+      }
+      lastBadgeLoadTimeRef.current = now;
       try {
         const snapTech = await getDocs(qTech);
         let count = 0;

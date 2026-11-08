@@ -313,6 +313,33 @@ export function OvertimeModal({
     });
   }, [requests, user]);
 
+  // Auto switch / sync cycle when pending requests exist or on modal open
+  useEffect(() => {
+    if (!isOpen) return;
+    const pending = requests.find(r => r.status === 'pending');
+    if (pending) {
+      const pCycle = pending.cyclePeriod || getOTCycleFromDate(pending.date).cycleKey;
+      const currentCycleHasPending = requests.some(
+        r => r.status === 'pending' && (r.cyclePeriod || getOTCycleFromDate(r.date).cycleKey) === selectedCycleKey
+      );
+      if (!currentCycleHasPending && pCycle) {
+        setSelectedCycleKey(pCycle);
+      }
+    }
+  }, [isOpen, requests, selectedCycleKey]);
+
+  // All pending requests across all cycles (Strictly real-time for admin)
+  const allPendingRequests = useMemo(() => {
+    return requests.filter(r => r.status === 'pending');
+  }, [requests]);
+
+  const otherCyclePendingRequests = useMemo(() => {
+    return allPendingRequests.filter(r => {
+      const reqCycle = r.cyclePeriod || getOTCycleFromDate(r.date).cycleKey;
+      return reqCycle !== selectedCycleKey;
+    });
+  }, [allPendingRequests, selectedCycleKey]);
+
   const cycleFilteredRequests = useMemo(() => {
     return requests.filter(r => {
       // จับคู่งวดตัดรอบ cyclePeriod หรือคำนวณจากวันที่ r.date
@@ -334,11 +361,16 @@ export function OvertimeModal({
     const totalApprovedHours = list
       .filter(r => r.status === 'approved')
       .reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
-    const totalPendingHours = list
-      .filter(r => r.status === 'pending')
+    
+    // For admin, pending requests should reflect ALL pending requests requiring approval across all cycles
+    const pendingList = isAdmin && activeTab === 'admin' 
+      ? allPendingRequests 
+      : list.filter(r => r.status === 'pending');
+
+    const totalPendingHours = pendingList
       .reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
     const totalRequestsCount = list.length;
-    const pendingCount = list.filter(r => r.status === 'pending').length;
+    const pendingCount = pendingList.length;
 
     return {
       totalApprovedHours: Math.round(totalApprovedHours * 100) / 100,
@@ -346,7 +378,7 @@ export function OvertimeModal({
       totalRequestsCount,
       pendingCount,
     };
-  }, [isAdmin, activeTab, cycleFilteredRequests, cycleFilteredMyRequests]);
+  }, [isAdmin, activeTab, cycleFilteredRequests, cycleFilteredMyRequests, allPendingRequests]);
 
   // Export to Excel CSV
   const handleExportExcel = () => {
@@ -362,6 +394,18 @@ export function OvertimeModal({
 
   // Filtered list based on status & search
   const displayedRequests = useMemo(() => {
+    // If admin is specifically filtering for pending, show ALL pending requests across all cycles so nothing is hidden!
+    if (activeTab === 'admin' && isAdmin && statusFilter === 'pending') {
+      return allPendingRequests.filter(r => {
+        const q = searchQuery.toLowerCase().trim();
+        return q === '' ||
+          (r.employeeName && r.employeeName.toLowerCase().includes(q)) ||
+          (r.employeeUsername && r.employeeUsername.toLowerCase().includes(q)) ||
+          (r.reason && r.reason.toLowerCase().includes(q)) ||
+          (r.date && r.date.includes(q));
+      });
+    }
+
     const baseList = activeTab === 'admin' && isAdmin ? cycleFilteredRequests : cycleFilteredMyRequests;
     return baseList.filter(r => {
       const matchStatus = statusFilter === 'all' || r.status === statusFilter;
@@ -373,7 +417,7 @@ export function OvertimeModal({
         (r.date && r.date.includes(q));
       return matchStatus && matchSearch;
     });
-  }, [activeTab, isAdmin, cycleFilteredRequests, cycleFilteredMyRequests, statusFilter, searchQuery]);
+  }, [activeTab, isAdmin, statusFilter, allPendingRequests, cycleFilteredRequests, cycleFilteredMyRequests, searchQuery]);
 
   if (!isOpen) return null;
 
@@ -566,9 +610,31 @@ export function OvertimeModal({
 
                     {/* วันที่ทำ OT */}
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        วันที่ทำงานล่วงเวลา (OT) <span className="text-rose-500">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                          วันที่ทำงานล่วงเวลา (OT) <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDate(format(new Date(), 'yyyy-MM-dd'))}
+                            className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 transition cursor-pointer"
+                          >
+                            วันนี้ ({format(new Date(), 'd MMM', { locale: th })})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const y = new Date();
+                              y.setDate(y.getDate() - 1);
+                              setDate(format(y, 'yyyy-MM-dd'));
+                            }}
+                            className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-200 transition cursor-pointer"
+                          >
+                            เมื่อวาน
+                          </button>
+                        </div>
+                      </div>
                       <div className="relative">
                         <input
                           type="date"
@@ -580,7 +646,7 @@ export function OvertimeModal({
                       </div>
                       {date && (
                         <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1 flex items-center gap-1 font-medium">
-                          <CalendarCheck className="w-3 h-3" />
+                          <CalendarCheck className="w-3 h-3 shrink-0" />
                           <span>จะถูกนับรวมใน: <strong>{getOTCycleFromDate(date).cycleLabel}</strong> ({getOTCycleFromDate(date).periodLabel})</span>
                         </div>
                       )}
@@ -715,7 +781,16 @@ export function OvertimeModal({
                   <span className="text-[10px] text-slate-400">ใน {selectedCycleInfo.cycleLabel}</span>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-gradient-to-br from-amber-500/10 to-amber-500/5 border border-amber-200 dark:border-amber-900/60">
+                <div 
+                  onClick={() => setStatusFilter(statusFilter === 'pending' ? 'all' : 'pending')}
+                  className={clsx(
+                    "p-3.5 rounded-xl border transition cursor-pointer active:scale-98 select-none",
+                    statusFilter === 'pending'
+                      ? "bg-amber-100/80 dark:bg-amber-950/80 border-amber-400 dark:border-amber-600 ring-2 ring-amber-400/30"
+                      : "bg-gradient-to-br from-amber-500/10 to-amber-500/5 border-amber-200 dark:border-amber-900/60 hover:border-amber-300"
+                  )}
+                  title="คลิกเพื่อกรองเฉพาะรายการรออนุมัติทั้งหมด"
+                >
                   <div className="flex items-center justify-between text-amber-700 dark:text-amber-400 text-xs font-bold">
                     <span>รออนุมัติ</span>
                     <Clock className="w-4 h-4" />
@@ -724,7 +799,14 @@ export function OvertimeModal({
                     {cycleSummary.totalPendingHours}
                     <span className="text-xs font-normal text-slate-400 ml-1">ชม.</span>
                   </div>
-                  <span className="text-[10px] text-slate-400">({cycleSummary.pendingCount} คำขอ)</span>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 mt-0.5">
+                    <span>({cycleSummary.pendingCount} คำขอ)</span>
+                    {otherCyclePendingRequests.length > 0 && isAdmin && activeTab === 'admin' && (
+                      <span className="text-amber-600 dark:text-amber-400 font-bold">
+                        (มีรอบอื่น)
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
@@ -755,6 +837,177 @@ export function OvertimeModal({
                   </button>
                 </div>
               </div>
+
+              {/* Real-time Pending Review Section for Admin */}
+              {activeTab === 'admin' && isAdmin && allPendingRequests.length > 0 && (
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-500/15 via-amber-500/5 to-transparent border-2 border-amber-400/80 dark:border-amber-600 shadow-sm space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                      </span>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        คำขอ OT รอตรวจอนุมัติ (เรียลไทม์)
+                        <span className="px-2 py-0.5 rounded-full text-xs font-black bg-amber-500 text-white shadow-2xs">
+                          {allPendingRequests.length} รายการ
+                        </span>
+                      </h3>
+                    </div>
+                    {otherCyclePendingRequests.length > 0 && (
+                      <span className="text-[11px] font-medium text-amber-800 dark:text-amber-300 bg-amber-100/90 dark:bg-amber-950/80 px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-800">
+                        ดึงคำขอรอตรวจมาแสดงให้ทันที แม้จะอยู่นอกรอบที่เลือก ({otherCyclePendingRequests.length} รายการ)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {allPendingRequests.map((req) => {
+                      const reqCycleInfo = getOTCycleFromDate(req.date);
+                      const isDiffCycle = reqCycleInfo.cycleKey !== selectedCycleKey;
+                      const isReviewingThis = reviewingId === req.id;
+
+                      return (
+                        <div
+                          key={req.id}
+                          className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 shadow-xs"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2.5">
+                            <div className="flex items-start gap-3">
+                              <AnimalAvatar
+                                avatarEmoji={req.employeeAvatarEmoji}
+                                identifier={req.employeeUsername || req.employeeId}
+                                name={req.employeeName}
+                                size="md"
+                              />
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold text-sm text-slate-900 dark:text-white">
+                                    {req.employeeName}
+                                  </span>
+                                  {req.employeeUsername && (
+                                    <span className="text-[11px] text-slate-400">
+                                      @{req.employeeUsername}
+                                    </span>
+                                  )}
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-700 flex items-center gap-1">
+                                    <Clock className="w-3 h-3 text-amber-600" />
+                                    รออนุมัติ
+                                  </span>
+                                  {isDiffCycle && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedCycleKey(reqCycleInfo.cycleKey)}
+                                      className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition cursor-pointer"
+                                      title="คลิกเพื่อสลับไปยังรอบนี้"
+                                    >
+                                      รอบ {reqCycleInfo.cycleLabel.replace('รอบตัดยอด ', '')} ↗
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-slate-600 dark:text-slate-300">
+                                  <span className="flex items-center gap-1 font-semibold text-indigo-600 dark:text-indigo-400">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    {req.date}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="w-3.5 h-3.5 text-slate-400" />
+                                    {req.startTime} - {req.endTime} น.
+                                  </span>
+                                  <span className="font-bold text-slate-900 dark:text-white px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800">
+                                    {req.hours} ชั่วโมง
+                                  </span>
+                                </div>
+
+                                <div className="mt-2 text-xs text-slate-700 dark:text-slate-300 bg-amber-50/50 dark:bg-amber-950/20 p-2.5 rounded-lg border border-amber-200/80 dark:border-amber-900/60">
+                                  <span className="font-semibold text-slate-500 dark:text-slate-400 block text-[10px]">
+                                    เหตุผลที่ทำ OT:
+                                  </span>
+                                  <p className="mt-0.5 whitespace-pre-wrap">{req.reason}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 self-start">
+                              {!isReviewingThis ? (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReviewAction(req.id, 'approved')}
+                                    disabled={isReviewing}
+                                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
+                                    title="อนุมัติคำขอ OT ทันที"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    อนุมัติ
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReviewingId(req.id);
+                                      setAdminComment('');
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 text-xs font-bold border border-rose-300 dark:border-rose-800 transition flex items-center gap-1 cursor-pointer"
+                                    title="ไม่อนุมัติ หรือระบุเหตุผล"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    ไม่อนุมัติ
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteRequest(req.id)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                    title="ลบคำขอนี้"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          {/* Review Comment Box for Rejection or Note */}
+                          {isReviewingThis && (
+                            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                ระบุเหตุผลหรือข้อความแจ้งพนักงาน (ไม่บังคับ):
+                              </label>
+                              <textarea
+                                rows={2}
+                                value={adminComment}
+                                onChange={(e) => setAdminComment(e.target.value)}
+                                placeholder="เช่น ไม่อนุมัติเนื่องจากเกินเวลาที่กำหนด, ยอดชั่วโมงไม่ตรง..."
+                                className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                              />
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReviewingId(null);
+                                    setAdminComment('');
+                                  }}
+                                  className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                                >
+                                  ยกเลิก
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleReviewAction(req.id, 'rejected')}
+                                  disabled={isReviewing}
+                                  className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                >
+                                  ยืนยันไม่อนุมัติ
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Filter Chips & Search Bar */}
               <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { collection, query, getDocs, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -98,7 +98,9 @@ export function AdminDashboard() {
     cases: liveCases,
     historicalCases,
     casesLoading: loading,
+    totalCaseCounts,
     fetchHistoricalCases,
+    fetchTotalCaseCounts,
   } = useStore();
   const isAdmin = isUserAdmin(user);
   const [showUserModal, setShowUserModal] = useState(false);
@@ -162,6 +164,11 @@ export function AdminDashboard() {
     }
   }, [isAdmin, mainTab]);
 
+  // Fetch total case counts aggregation once on mount
+  useEffect(() => {
+    fetchTotalCaseCounts();
+  }, [fetchTotalCaseCounts]);
+
   // Load historical cases on-demand via getDocs with limit ONLY when user selects a historical date range
   useEffect(() => {
     if (timeFilter === 'today') return;
@@ -203,9 +210,16 @@ export function AdminDashboard() {
     });
   }, [timeFilter, customStartDate, customEndDate, fetchHistoricalCases]);
 
-  // Load badge counts once on mount via getDocs (no continuous listeners to save reads)
+  // Load badge counts once on mount via getDocs (no continuous listeners, 5-minute cooldown)
+  const lastAdminBadgeLoadRef = useRef<number>(0);
   useEffect(() => {
     if (!user?.uid) return;
+    const now = Date.now();
+    if (now - lastAdminBadgeLoadRef.current < 5 * 60 * 1000) {
+      return;
+    }
+    lastAdminBadgeLoadRef.current = now;
+
     const qTech = isAdmin
       ? query(
           collection(db, 'technical_issues'),
@@ -741,7 +755,7 @@ export function AdminDashboard() {
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 )}
               >
-                ทั้งหมด ({cases.length})
+                ทั้งหมด ({totalCaseCounts.total > 0 ? totalCaseCounts.total : cases.length})
               </button>
             </div>
           </div>
@@ -833,10 +847,14 @@ export function AdminDashboard() {
           </div>
           <div className="mt-2">
             <div className="text-xl sm:text-2xl font-extrabold text-emerald-600 dark:text-emerald-400">
-              {closedCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
+              {timeFilter === 'all' && totalCaseCounts.closed > 0 ? totalCaseCounts.closed : closedCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
             </div>
             <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">
-              สำเร็จ {filteredCases.length > 0 ? Math.round((closedCases.length / filteredCases.length) * 100) : 0}%
+              สำเร็จ {timeFilter === 'all' && totalCaseCounts.total > 0
+                ? Math.round((totalCaseCounts.closed / totalCaseCounts.total) * 100)
+                : filteredCases.length > 0 
+                ? Math.round((closedCases.length / filteredCases.length) * 100) 
+                : 0}%
             </p>
           </div>
         </div>
@@ -921,7 +939,7 @@ export function AdminDashboard() {
           </div>
           <div className="mt-2">
             <div className="text-xl sm:text-2xl font-extrabold text-rose-600 dark:text-rose-400">
-              {cancelledCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
+              {timeFilter === 'all' && totalCaseCounts.cancelled > 0 ? totalCaseCounts.cancelled : cancelledCases.length} <span className="text-xs font-medium text-slate-400">เคส</span>
             </div>
             <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 line-clamp-1">
               {cancelledCases.filter(c => c.remarks?.includes(AUTO_CANCEL_REMARK)).length > 0

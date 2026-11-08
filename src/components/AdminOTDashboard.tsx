@@ -10,7 +10,8 @@ import {
   doc, 
   updateDoc, 
   deleteDoc, 
-  addDoc 
+  addDoc,
+  onSnapshot
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
@@ -95,6 +96,29 @@ export function AdminOTDashboard() {
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [adminComment, setAdminComment] = useState('');
   const [isReviewing, setIsReviewing] = useState(false);
+
+  // Real-time listener for ALL pending requests across all cycles (Strictly real-time for admin)
+  const [allPendingRequests, setAllPendingRequests] = useState<OvertimeRequest[]>([]);
+  useEffect(() => {
+    if (!isAdmin) return;
+    const qPending = query(
+      collection(db, 'overtime_requests'),
+      where('status', '==', 'pending'),
+      orderBy('createdAt', 'desc')
+    );
+    const unsub = onSnapshot(
+      qPending,
+      (snapshot) => {
+        const list: OvertimeRequest[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...(docSnap.data() as Omit<OvertimeRequest, 'id'>) });
+        });
+        setAllPendingRequests(list);
+      },
+      (err) => console.warn('Pending OT listen error:', err)
+    );
+    return () => unsub();
+  }, [isAdmin]);
 
   // Load OT requests for current/selected cycle (26-25) via getDocs with limit(100)
   const fetchCycleRequests = async (isLoadMore = false) => {
@@ -234,18 +258,36 @@ export function AdminOTDashboard() {
   }, [cycleRequests]);
 
   const totalPendingHours = useMemo(() => {
-    const sum = cycleRequests
-      .filter((r) => r.status === 'pending')
+    const sum = allPendingRequests
       .reduce((acc, r) => acc + (Number(r.hours) || 0), 0);
     return Math.round(sum * 100) / 100;
-  }, [cycleRequests]);
+  }, [allPendingRequests]);
 
   const totalPendingRequests = useMemo(() => {
-    return cycleRequests.filter((r) => r.status === 'pending').length;
-  }, [cycleRequests]);
+    return allPendingRequests.length;
+  }, [allPendingRequests]);
 
   // Filtered list for detailed table
   const filteredRequests = useMemo(() => {
+    // If admin is specifically filtering for pending, show ALL pending requests across all cycles
+    if (statusFilter === 'pending') {
+      return allPendingRequests.filter((r) => {
+        const matchEmployee = selectedEmployeeFilter === 'all' || 
+          r.employeeId === selectedEmployeeFilter ||
+          r.employeeUsername === selectedEmployeeFilter ||
+          r.employeeName === selectedEmployeeFilter;
+        
+        const q = searchQuery.toLowerCase().trim();
+        const matchSearch = q === '' ||
+          (r.employeeName && r.employeeName.toLowerCase().includes(q)) ||
+          (r.employeeUsername && r.employeeUsername.toLowerCase().includes(q)) ||
+          (r.reason && r.reason.toLowerCase().includes(q)) ||
+          (r.date && r.date.includes(q));
+
+        return matchEmployee && matchSearch;
+      });
+    }
+
     return cycleRequests.filter((r) => {
       const matchStatus = statusFilter === 'all' || r.status === statusFilter;
       const matchEmployee = selectedEmployeeFilter === 'all' || 
@@ -262,7 +304,7 @@ export function AdminOTDashboard() {
 
       return matchStatus && matchEmployee && matchSearch;
     });
-  }, [cycleRequests, statusFilter, selectedEmployeeFilter, searchQuery]);
+  }, [cycleRequests, allPendingRequests, statusFilter, selectedEmployeeFilter, searchQuery]);
 
   // Admin Approve / Reject action
   const handleReviewAction = async (requestId: string, status: 'approved' | 'rejected') => {
@@ -390,7 +432,16 @@ export function AdminOTDashboard() {
             </p>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-gradient-to-br from-amber-500/10 to-amber-500/5 border border-amber-200 dark:border-amber-900/60">
+          <div 
+            onClick={() => setStatusFilter(statusFilter === 'pending' ? 'all' : 'pending')}
+            className={clsx(
+              "p-3.5 rounded-xl border transition cursor-pointer active:scale-98 select-none",
+              statusFilter === 'pending'
+                ? "bg-amber-100/80 dark:bg-amber-950/80 border-amber-400 dark:border-amber-600 ring-2 ring-amber-400/30"
+                : "bg-gradient-to-br from-amber-500/10 to-amber-500/5 border border-amber-200 dark:border-amber-900/60 hover:border-amber-300"
+            )}
+            title="คลิกเพื่อกรองเฉพาะรายการรออนุมัติทั้งหมด"
+          >
             <div className="flex items-center justify-between text-amber-700 dark:text-amber-400 text-xs font-bold">
               <span>รอแอดมินอนุมัติ</span>
               <Clock className="w-4 h-4" />
@@ -399,7 +450,7 @@ export function AdminOTDashboard() {
               {totalPendingHours} <span className="text-xs font-normal text-slate-400">ชั่วโมง</span>
             </div>
             <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
-              {totalPendingRequests} คำขอที่ต้องตรวจสอบ
+              {totalPendingRequests} คำขอที่ต้องตรวจสอบ (คลิกดูทั้งหมด)
             </p>
           </div>
 
@@ -430,6 +481,161 @@ export function AdminOTDashboard() {
           </div>
         </div>
       </div>
+
+      {/* REAL-TIME PENDING OT REVIEW SECTION (Always visible & actionable for Admin) */}
+      {allPendingRequests.length > 0 && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-xs border-2 border-amber-400 dark:border-amber-600 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-amber-100 dark:border-amber-950">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+              </span>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Clock className="w-5 h-5 text-amber-500" />
+                คำขอ OT รอตรวจอนุมัติ (เรียลไทม์)
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-500 text-white shadow-2xs">
+                  {allPendingRequests.length} รายการ
+                </span>
+              </h3>
+            </div>
+            <span className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/80 px-2.5 py-1 rounded-lg border border-amber-200 dark:border-amber-800">
+              ⚡ ตรวจสอบและกดอนุมัติได้ทันทีโดยไม่ต้องรอ
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {allPendingRequests.map((req) => {
+              const reqCycleInfo = getOTCycleFromDate(req.date);
+              const isReviewingThis = reviewingId === req.id;
+
+              return (
+                <div
+                  key={req.id}
+                  className="p-4 rounded-xl bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/80 shadow-xs flex flex-col justify-between gap-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-3">
+                      <AnimalAvatar
+                        avatarEmoji={req.employeeAvatarEmoji}
+                        identifier={req.employeeUsername || req.employeeId}
+                        name={req.employeeName}
+                        size="md"
+                      />
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-slate-900 dark:text-white">
+                            {req.employeeName}
+                          </span>
+                          {req.employeeUsername && (
+                            <span className="text-[11px] text-slate-400">
+                              @{req.employeeUsername}
+                            </span>
+                          )}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                            รออนุมัติ
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-slate-600 dark:text-slate-300">
+                          <span className="flex items-center gap-1 font-semibold text-indigo-600 dark:text-indigo-400">
+                            <Calendar className="w-3.5 h-3.5" />
+                            {req.date}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            {req.startTime} - {req.endTime} น.
+                          </span>
+                          <span className="font-bold text-slate-900 dark:text-white px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                            {req.hours} ชม.
+                          </span>
+                        </div>
+
+                        <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                          รอบตัดยอด: <span className="font-semibold text-slate-700 dark:text-slate-300">{reqCycleInfo.cycleLabel}</span>
+                        </div>
+
+                        <div className="mt-2 text-xs text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-amber-200/80 dark:border-amber-900/60">
+                          <span className="font-semibold text-slate-500 dark:text-slate-400 block text-[10px]">
+                            เหตุผลที่ทำ OT:
+                          </span>
+                          <p className="mt-0.5 whitespace-pre-wrap">{req.reason}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/60 flex items-center justify-between gap-2">
+                    {!isReviewingThis ? (
+                      <div className="flex items-center gap-2 w-full justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleReviewAction(req.id, 'approved')}
+                          disabled={isReviewing}
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          อนุมัติ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReviewingId(req.id);
+                            setAdminComment('');
+                          }}
+                          className="px-3.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 text-xs font-bold border border-rose-300 dark:border-rose-800 transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          ไม่อนุมัติ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRequest(req.id)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                          title="ลบคำขอนี้"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="w-full space-y-2">
+                        <textarea
+                          rows={2}
+                          value={adminComment}
+                          onChange={(e) => setAdminComment(e.target.value)}
+                          placeholder="ระบุเหตุผลที่ไม่อนุมัติหรือข้อความแจ้งเตือน..."
+                          className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReviewingId(null);
+                              setAdminComment('');
+                            }}
+                            className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                          >
+                            ยกเลิก
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReviewAction(req.id, 'rejected')}
+                            disabled={isReviewing}
+                            className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                          >
+                            ยืนยันไม่อนุมัติ
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* SECTION 1: EMPLOYEE OT SUMMARY CARDS (สรุปยอด OT รายบุคคล) */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-slate-200/80 dark:border-slate-800 overflow-hidden transition-colors">

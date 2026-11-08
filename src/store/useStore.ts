@@ -12,6 +12,7 @@ import {
   updateDoc,
   orderBy,
   limit,
+  getCountFromServer,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, ensureFirebaseAnonymousAuth, isQuotaExceededError } from '../lib/firebase';
 import { UserProfile, Role, WorkStatus, AccountStatus, Case, Agent } from '../types';
@@ -157,6 +158,13 @@ interface AppState {
   deletedAgentNames: string[];
   agentsLastFetchedAt: number;
   agentsLoading: boolean;
+  // Global Case Counts (Fetched via lightweight count aggregation, 1 read per query)
+  totalCaseCounts: {
+    total: number;
+    closed: number;
+    cancelled: number;
+  };
+  fetchTotalCaseCounts: (forceRefresh?: boolean) => Promise<{ total: number; closed: number; cancelled: number }>;
 
   initAuth: () => void;
   startRealtimeListeners: () => void;
@@ -427,6 +435,12 @@ export const useStore = create<AppState>((set, get) => {
     casesLoading: true,
     historicalLoading: false,
 
+    totalCaseCounts: {
+      total: 0,
+      closed: 0,
+      cancelled: 0,
+    },
+
     agents: initialAgentsState.agents,
     deletedAgentNames: initialAgentsState.deletedAgentNames,
     agentsLastFetchedAt: initialAgentsState.timestamp,
@@ -552,10 +566,24 @@ export const useStore = create<AppState>((set, get) => {
                   } catch {}
                   updatedCurrentUser = null;
                 } else {
-                  updatedCurrentUser = matched;
-                  try {
-                    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(matched));
-                  } catch {}
+                  // Only replace object reference if key fields actually changed!
+                  const hasRealChange =
+                    currentUser.uid !== matched.uid ||
+                    currentUser.role !== matched.role ||
+                    currentUser.workStatus !== matched.workStatus ||
+                    currentUser.name !== matched.name ||
+                    currentUser.username !== matched.username ||
+                    currentUser.accountStatus !== matched.accountStatus ||
+                    currentUser.avatarEmoji !== matched.avatarEmoji;
+
+                  if (hasRealChange) {
+                    updatedCurrentUser = matched;
+                    try {
+                      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(matched));
+                    } catch {}
+                  } else {
+                    updatedCurrentUser = currentUser; // Keep existing reference to avoid downstream cascade
+                  }
                 }
               }
             }
@@ -833,6 +861,51 @@ export const useStore = create<AppState>((set, get) => {
         handleFirestoreError(error, OperationType.GET, 'cases');
         set({ historicalLoading: false });
         return get().historicalCases;
+      }
+    },
+
+    // Ultra lightweight count aggregation query (1 read per query, cache for 15 minutes)
+    fetchTotalCaseCounts: async (forceRefresh = false) => {
+      const CACHE_KEY = 'thaiplus_total_case_counts_v1';
+      const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+      const now = Date.now();
+
+      if (!forceRefresh) {
+        try {
+          const cachedRaw = localStorage.getItem(CACHE_KEY);
+          if (cachedRaw) {
+            const parsed = JSON.parse(cachedRaw);
+            if (parsed && typeof parsed.total === 'number' && now - (parsed.timestamp || 0) < CACHE_TTL_MS) {
+              const res = { total: parsed.total, closed: parsed.closed || 0, cancelled: parsed.cancelled || 0 };
+              set({ totalCaseCounts: res });
+              return res;
+            }
+          }
+        } catch {}
+      }
+
+      try {
+        const [totalSnap, closedSnap, cancelledSnap] = await Promise.all([
+          getCountFromServer(collection(db, 'cases')),
+          getCountFromServer(query(collection(db, 'cases'), where('status', '==', 'closed'))),
+          getCountFromServer(query(collection(db, 'cases'), where('status', '==', 'cancelled'))),
+        ]);
+
+        const counts = {
+          total: totalSnap.data().count,
+          closed: closedSnap.data().count,
+          cancelled: cancelledSnap.data().count,
+        };
+
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ ...counts, timestamp: now }));
+        } catch {}
+
+        set({ totalCaseCounts: counts });
+        return counts;
+      } catch (err) {
+        console.warn('Error fetching total case count aggregations:', err);
+        return get().totalCaseCounts;
       }
     },
 

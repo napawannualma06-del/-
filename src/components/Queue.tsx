@@ -288,7 +288,9 @@ export function Queue() {
     cases: liveCases,
     historicalCases,
     casesLoading: loading,
+    totalCaseCounts,
     fetchHistoricalCases,
+    fetchTotalCaseCounts,
   } = useStore();
   const isAdmin = isUserAdmin(user);
   const [activeFilter, setActiveFilter] = useState<'all' | 'new' | 'pending' | 'in_progress' | 'stuck' | 'remarks' | 'mine' | 'closed' | 'cancelled'>('all');
@@ -395,6 +397,11 @@ export function Queue() {
       window.removeEventListener('firestore-quota-cleared', handleQuotaClearedEvent);
     };
   }, []);
+
+  // Fetch total case counts aggregation once on mount (1 read per count query, 15 min cache)
+  useEffect(() => {
+    fetchTotalCaseCounts();
+  }, [fetchTotalCaseCounts]);
 
   // Load historical closed/cancelled cases via getDocs (with limit) ONLY when user clicks closed/cancelled tab
   useEffect(() => {
@@ -1433,7 +1440,7 @@ export function Queue() {
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
-            จบแล้ว ({closedCount})
+            จบแล้ว ({totalCaseCounts.closed > 0 ? totalCaseCounts.closed : closedCount})
           </button>
 
           {/* ยกเลิกเคส */}
@@ -1447,7 +1454,7 @@ export function Queue() {
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
             )}
           >
-            ยกเลิก ({cancelledCount})
+            ยกเลิก ({totalCaseCounts.cancelled > 0 ? totalCaseCounts.cancelled : cancelledCount})
           </button>
         </div>
 
