@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
+  AlertCircle,
   Calendar, 
   CalendarCheck, 
   Clock, 
@@ -34,13 +35,25 @@ interface EmployeeShiftModalProps {
   onClose: () => void;
 }
 
+function getTodayCycleKey(): string {
+  const now = new Date();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return getOTCycleFromDate(todayStr).cycleKey;
+}
+
 export function EmployeeShiftModal({ isOpen, onClose }: EmployeeShiftModalProps) {
   const { user, registeredUsers } = useStore();
 
   const availableCycles = useMemo(() => getAvailableOTCycles(), []);
-  const [selectedCycleKey, setSelectedCycleKey] = useState<string>(() => {
-    return availableCycles[0]?.cycleKey || getOTCycleFromDate(new Date().toISOString().split('T')[0]).cycleKey;
-  });
+  const [selectedCycleKey, setSelectedCycleKey] = useState<string>(() => getTodayCycleKey());
+
+  // Reset to current cycle whenever the modal is opened
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedCycleKey(getTodayCycleKey());
+    }
+  }, [isOpen]);
 
   const selectedCycleInfo = useMemo(() => {
     const found = availableCycles.find((c) => c.cycleKey === selectedCycleKey);
@@ -53,8 +66,11 @@ export function EmployeeShiftModal({ isOpen, onClose }: EmployeeShiftModalProps)
 
   const [templates, setTemplates] = useState<ShiftTemplate[]>(DEFAULT_SHIFT_TEMPLATES);
   const [scheduleDays, setScheduleDays] = useState<Record<string, Record<string, string>>>({});
+  const [hasSavedSchedule, setHasSavedSchedule] = useState<boolean>(false);
   const [prefs, setPrefs] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadTrigger, setReloadTrigger] = useState(0);
 
   // Fetch read-only schedule for the selected cycle
   useEffect(() => {
@@ -63,6 +79,7 @@ export function EmployeeShiftModal({ isOpen, onClose }: EmployeeShiftModalProps)
     let isCancelled = false;
     async function loadSchedule() {
       setLoading(true);
+      setLoadError(false);
       try {
         const [loadedTemplates, loadedPrefs, loadedSchedule] = await Promise.all([
           fetchShiftTemplates(),
@@ -71,12 +88,20 @@ export function EmployeeShiftModal({ isOpen, onClose }: EmployeeShiftModalProps)
         ]);
 
         if (!isCancelled) {
+          const daysData = loadedSchedule.days || {};
+          const hasAnyCell = Object.values(daysData).some(
+            (empDays) => empDays && Object.values(empDays).some((val) => Boolean(val))
+          );
           setTemplates(loadedTemplates);
           setPrefs(loadedPrefs);
-          setScheduleDays(loadedSchedule.days || {});
+          setScheduleDays(daysData);
+          setHasSavedSchedule(Boolean(loadedSchedule.updatedAt) && hasAnyCell);
         }
       } catch (err) {
         console.error('Error loading employee shift view:', err);
+        if (!isCancelled) {
+          setLoadError(true);
+        }
       } finally {
         if (!isCancelled) {
           setLoading(false);
@@ -88,7 +113,7 @@ export function EmployeeShiftModal({ isOpen, onClose }: EmployeeShiftModalProps)
     return () => {
       isCancelled = true;
     };
-  }, [isOpen, selectedCycleKey]);
+  }, [isOpen, selectedCycleKey, reloadTrigger]);
 
   // Visible employees (exclude hidden)
   const visibleEmployees = useMemo(() => {
@@ -156,7 +181,7 @@ export function EmployeeShiftModal({ isOpen, onClose }: EmployeeShiftModalProps)
                   onChange={(e) => setSelectedCycleKey(e.target.value)}
                   className="bg-transparent text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-hidden cursor-pointer"
                 >
-                  {availableCycles.slice(0, 4).map((c) => (
+                  {availableCycles.map((c) => (
                     <option key={c.cycleKey} value={c.cycleKey} className="dark:bg-slate-800">
                       {c.cycleLabel} ({c.periodLabel})
                     </option>
@@ -168,8 +193,9 @@ export function EmployeeShiftModal({ isOpen, onClose }: EmployeeShiftModalProps)
             {/* Export CSV Button */}
             <button
               type="button"
+              disabled={loading || loadError || !hasSavedSchedule}
               onClick={handleExportExcel}
-              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
               title="ส่งออกตารางกะเป็นไฟล์ Excel CSV"
             >
               <Download className="w-3.5 h-3.5" />
@@ -228,6 +254,25 @@ export function EmployeeShiftModal({ isOpen, onClose }: EmployeeShiftModalProps)
             <div className="p-12 text-center text-slate-400 dark:text-slate-500 text-sm">
               <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
               กำลังโหลดข้อมูลตารางกะงานรอบ {selectedCycleInfo.cycleLabel}...
+            </div>
+          ) : loadError ? (
+            <div className="p-12 text-center space-y-3">
+              <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+              <div className="text-sm font-bold text-rose-700 dark:text-rose-400">
+                โหลดตารางไม่สำเร็จ กรุณาลองใหม่
+              </div>
+              <button
+                type="button"
+                onClick={() => setReloadTrigger((c) => c + 1)}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>โหลดใหม่</span>
+              </button>
+            </div>
+          ) : !hasSavedSchedule ? (
+            <div className="p-12 text-center text-slate-500 dark:text-slate-400 text-sm font-semibold">
+              รอบนี้ยังไม่ได้จัดตารางกะ
             </div>
           ) : visibleEmployees.length === 0 ? (
             <div className="p-12 text-center text-slate-400 dark:text-slate-500 text-sm">
