@@ -44,7 +44,8 @@ import {
   ArrowUpDown,
   Hourglass,
   Key,
-  CalendarCheck
+  CalendarCheck,
+  Briefcase
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -58,6 +59,7 @@ import { AdminOTDashboard } from './AdminOTDashboard';
 import { AdminAdvanceDashboard } from './AdminAdvanceDashboard';
 import { AdminApiIntegration } from './AdminApiIntegration';
 import { AdminShiftDashboard } from './AdminShiftDashboard';
+import { AdminHRDashboard } from './AdminHRDashboard';
 import { UserManagementModal } from './UserManagementModal';
 import { 
   getPreviousAssignee, 
@@ -155,7 +157,7 @@ export function AdminDashboard() {
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [pendingOTCount, setPendingOTCount] = useState(0);
   const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
-  const [mainTab, setMainTab] = useState<'cases' | 'ot' | 'advance' | 'api' | 'shifts'>('cases');
+  const [mainTab, setMainTab] = useState<'cases' | 'ot' | 'advance' | 'api' | 'shifts' | 'hr'>('cases');
   const [leaderboardSortBy, setLeaderboardSortBy] = useState<'closed' | 'speed_fast' | 'speed_slow'>('closed');
   const [showTimeAnalytics, setShowTimeAnalytics] = useState(false);
 
@@ -540,6 +542,8 @@ export function AdminDashboard() {
                 ? 'แดชบอร์ดขอเบิกเงินแอดวานซ์'
                 : mainTab === 'shifts'
                 ? 'ตารางกะงานพนักงาน'
+                : mainTab === 'hr'
+                ? 'ข้อมูลพื้นฐานพนักงาน (HR)'
                 : 'API ยืนยันรหัสเคสสำหรับเว็บหลัก'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
@@ -551,6 +555,8 @@ export function AdminDashboard() {
                 ? 'ตรวจอนุมัติเบิกเงิน โอนเงิน แนบสลิปหลักฐาน และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
                 : mainTab === 'shifts'
                 ? 'จัดกะ วันหยุด วันลา ตามรอบ 26 ถึง 25'
+                : mainTab === 'hr'
+                ? 'จัดการข้อมูลพนักงาน วันเริ่มงาน อายุงาน และสถานะการทดลองงาน'
                 : 'จัดการ API Key ตรวจสอบความถูกต้องของเคส และทดสอบการเชื่อมต่อ API กับเว็บหลัก'}
             </p>
           </div>
@@ -624,6 +630,20 @@ export function AdminDashboard() {
                 >
                   <CalendarCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
                   <span>ตารางกะ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMainTab('hr')}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                    mainTab === 'hr'
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  <Briefcase className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>HR</span>
                 </button>
 
                 <button
@@ -855,6 +875,8 @@ export function AdminDashboard() {
         <AdminAdvanceDashboard />
       ) : isAdmin && mainTab === 'shifts' ? (
         <AdminShiftDashboard />
+      ) : isAdmin && mainTab === 'hr' ? (
+        <AdminHRDashboard />
       ) : isAdmin && mainTab === 'api' ? (
         <AdminApiIntegration currentAdminName={user?.name || 'Admin'} cases={cases} />
       ) : (

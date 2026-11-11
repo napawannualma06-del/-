@@ -269,3 +269,27 @@ export interface CycleScheduleDoc {
   updatedAt?: number;
   updatedBy?: string;
 }
+
+// ===============================================================
+// HR Basic Employee Profile Types (system_settings/hr_profiles)
+// ===============================================================
+
+export type HRProbationStatus = 'probation' | 'passed';
+
+export interface HRProfile {
+  fullName: string;
+  nickname: string;
+  position: string;
+  startDate: string; // YYYY-MM-DD
+  probationDays: number; // ค่าเริ่ม 119
+  probationEndDate: string; // YYYY-MM-DD
+  probationStatus: HRProbationStatus; // 'probation' | 'passed'
+  notEmployee: boolean;
+}
+
+export interface HRProfilesDoc {
+  profiles: Record<string, HRProfile>;
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
