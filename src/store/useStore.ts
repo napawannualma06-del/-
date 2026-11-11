@@ -402,6 +402,13 @@ export const useStore = create<AppState>((set, get) => {
             localStorage.setItem('thaiplus_cached_cases', JSON.stringify(merged));
           } catch {}
         }
+        if (typeof window !== 'undefined') {
+          try {
+            sessionStorage.removeItem('firestore_quota_exceeded');
+            localStorage.removeItem('firestore_quota_exceeded');
+            window.dispatchEvent(new CustomEvent('firestore-quota-cleared'));
+          } catch {}
+        }
         set({ cases: merged, casesLoading: false });
       },
       (error) => {

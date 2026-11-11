@@ -141,6 +141,8 @@ export interface TechnicalIssue {
 
 export type OvertimeStatus = 'pending' | 'approved' | 'rejected';
 
+export type OvertimeType = 'holiday_in_hours' | 'holiday_after_hours' | 'workday';
+
 export interface OvertimeRequest {
   id: string;
   employeeId: string;
@@ -153,6 +155,14 @@ export interface OvertimeRequest {
   hours: number;              // Total hours e.g. 2.5
   reason: string;             // Reason
   status: OvertimeStatus;     // 'pending' | 'approved' | 'rejected'
+  otType?: OvertimeType;      // holiday_in_hours (แดง) | holiday_after_hours (เขียว) | workday (ฟ้า)
+  otTypeModifiedBy?: string;
+  otTypeModifiedAt?: number;
+  previousOtType?: OvertimeType;
+  dateModifiedBy?: string;
+  dateModifiedById?: string;
+  dateModifiedAt?: number;
+  previousDate?: string;
   approvedBy?: string;
   approvedById?: string;
   reviewedAt?: number;
@@ -229,4 +239,31 @@ export interface PeerRepayment {
   createdAt: number;
 }
 
+// ===============================================================
+// Shift & Work Schedule Types
+// ===============================================================
 
+export interface ShiftTemplate {
+  id: string;
+  name: string;        // ชื่อกะ เช่น "กะเช้า", "กะบ่าย", "กะดึก"
+  startTime: string;   // เวลาเริ่ม "HH:mm" เช่น "08:00"
+  endTime: string;     // เวลาเลิก "HH:mm" เช่น "17:00"
+  color: string;       // รหัสสี เช่น "#10b981", "emerald"
+  shortCode?: string;  // ตัวย่อในช่อง เช่น "เช้า", "บ่าย", "ดึก"
+}
+
+export interface EmployeeShiftPref {
+  employeeId: string;
+  regularOffDays: number[]; // วันหยุดประจำสัปดาห์ (0 = อาทิตย์, 1 = จันทร์, ..., 6 = เสาร์)
+  defaultShiftId?: string;  // กะประจำ
+  hiddenFromSchedule?: boolean; // ซ่อนจากตารางหรือไม่
+}
+
+export type SpecialDayType = 'off' | 'leave' | 'holiday';
+
+export interface CycleScheduleDoc {
+  // days[employeeId][dateStr YYYY-MM-DD] = shiftId | 'off' | 'leave' | 'holiday'
+  days: Record<string, Record<string, string>>;
+  updatedAt?: number;
+  updatedBy?: string;
+}

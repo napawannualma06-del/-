@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
-import { OvertimeRequest, OvertimeStatus } from '../types';
+import { OvertimeRequest, OvertimeStatus, OvertimeType } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { 
   Clock, 
@@ -34,7 +34,8 @@ import {
   TrendingUp,
   Building2,
   AlertCircle,
-  Plus
+  Plus,
+  Tag
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -43,7 +44,9 @@ import {
   getOTCycleFromDate, 
   getAvailableOTCycles, 
   exportOTToExcelCsv, 
-  OTCycleInfo 
+  OTCycleInfo,
+  OT_TYPE_CONFIG,
+  getOTTypeInfo
 } from '../lib/otUtils';
 
 const STATUS_CONFIG: Record<
@@ -200,6 +203,10 @@ export function AdminOTDashboard() {
       username?: string;
       avatarEmoji?: string;
       approvedHours: number;
+      holidayInHours: number;
+      holidayAfterHours: number;
+      workdayHours: number;
+      unspecifiedHours: number;
       pendingHours: number;
       rejectedHours: number;
       totalRequests: number;
@@ -218,6 +225,10 @@ export function AdminOTDashboard() {
           username: req.employeeUsername,
           avatarEmoji: req.employeeAvatarEmoji,
           approvedHours: 0,
+          holidayInHours: 0,
+          holidayAfterHours: 0,
+          workdayHours: 0,
+          unspecifiedHours: 0,
           pendingHours: 0,
           rejectedHours: 0,
           totalRequests: 0,
@@ -236,6 +247,15 @@ export function AdminOTDashboard() {
       if (req.status === 'approved') {
         item.approvedHours += h;
         item.approvedCount += 1;
+        if (req.otType === 'holiday_in_hours') {
+          item.holidayInHours += h;
+        } else if (req.otType === 'holiday_after_hours') {
+          item.holidayAfterHours += h;
+        } else if (req.otType === 'workday') {
+          item.workdayHours += h;
+        } else {
+          item.unspecifiedHours += h;
+        }
       } else if (req.status === 'pending') {
         item.pendingHours += h;
         item.pendingCount += 1;
@@ -245,8 +265,47 @@ export function AdminOTDashboard() {
       }
     });
 
+    // Round hours for neat display
+    map.forEach((item) => {
+      item.approvedHours = Math.round(item.approvedHours * 100) / 100;
+      item.holidayInHours = Math.round(item.holidayInHours * 100) / 100;
+      item.holidayAfterHours = Math.round(item.holidayAfterHours * 100) / 100;
+      item.workdayHours = Math.round(item.workdayHours * 100) / 100;
+      item.unspecifiedHours = Math.round(item.unspecifiedHours * 100) / 100;
+    });
+
     // Sort by approved hours descending
     return Array.from(map.values()).sort((a, b) => b.approvedHours - a.approvedHours);
+  }, [cycleRequests]);
+
+  // Approved hours categorized by 3 OT types for the cycle
+  const approvedHoursByType = useMemo(() => {
+    let holidayInHours = 0;
+    let holidayAfterHours = 0;
+    let workdayHours = 0;
+    let unspecifiedHours = 0;
+
+    cycleRequests.forEach((r) => {
+      if (r.status === 'approved') {
+        const h = Number(r.hours) || 0;
+        if (r.otType === 'holiday_in_hours') {
+          holidayInHours += h;
+        } else if (r.otType === 'holiday_after_hours') {
+          holidayAfterHours += h;
+        } else if (r.otType === 'workday') {
+          workdayHours += h;
+        } else {
+          unspecifiedHours += h;
+        }
+      }
+    });
+
+    return {
+      holidayInHours: Math.round(holidayInHours * 100) / 100,
+      holidayAfterHours: Math.round(holidayAfterHours * 100) / 100,
+      workdayHours: Math.round(workdayHours * 100) / 100,
+      unspecifiedHours: Math.round(unspecifiedHours * 100) / 100,
+    };
   }, [cycleRequests]);
 
   // Total summary overview
@@ -344,6 +403,93 @@ export function AdminOTDashboard() {
     }
   };
 
+  // Edit OT Date State & Handler
+  const [editingDateRequest, setEditingDateRequest] = useState<OvertimeRequest | null>(null);
+  const [editDateValue, setEditDateValue] = useState<string>('');
+  const [isSavingDate, setIsSavingDate] = useState(false);
+  const [editDateError, setEditDateError] = useState<string | null>(null);
+
+  const handleSaveDate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDateRequest || !isAdmin || !user) return;
+    if (!editDateValue) {
+      setEditDateError('กรุณาเลือกวันที่ต้องการแก้ไขค่ะ');
+      return;
+    }
+
+    setIsSavingDate(true);
+    setEditDateError(null);
+    try {
+      const newCycle = getOTCycleFromDate(editDateValue);
+      const reqRef = doc(db, 'overtime_requests', editingDateRequest.id);
+      const updateData: any = {
+        date: editDateValue,
+        cyclePeriod: newCycle.cycleKey,
+        dateModifiedBy: user.name || 'แอดมิน',
+        dateModifiedById: user.uid,
+        dateModifiedAt: Date.now(),
+        previousDate: editingDateRequest.date,
+        updatedAt: Date.now(),
+      };
+
+      await updateDoc(reqRef, updateData);
+
+      // Optimistically update local states
+      setRequests((prev) =>
+        prev.map((r) => (r.id === editingDateRequest.id ? { ...r, ...updateData } : r))
+      );
+      setAllPendingRequests((prev) =>
+        prev.map((r) => (r.id === editingDateRequest.id ? { ...r, ...updateData } : r))
+      );
+
+      setEditingDateRequest(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `overtime_requests/${editingDateRequest.id}`);
+      setEditDateError('เกิดข้อผิดพลาดในการบันทึกวันที่: ' + (error instanceof Error ? error.message : 'กรุณาลองใหม่ค่ะ'));
+    } finally {
+      setIsSavingDate(false);
+    }
+  };
+
+  // Edit OT Type State & Handler
+  const [editingOtTypeRequest, setEditingOtTypeRequest] = useState<OvertimeRequest | null>(null);
+  const [selectedNewOtType, setSelectedNewOtType] = useState<OvertimeType>('workday');
+  const [isSavingOtType, setIsSavingOtType] = useState(false);
+  const [otTypeError, setOtTypeError] = useState<string | null>(null);
+
+  const handleSaveOtType = async (newType: OvertimeType) => {
+    if (!editingOtTypeRequest || !isAdmin || !user) return;
+    setIsSavingOtType(true);
+    setOtTypeError(null);
+    try {
+      const reqRef = doc(db, 'overtime_requests', editingOtTypeRequest.id);
+      const updateData: any = {
+        otType: newType,
+        otTypeModifiedBy: user.name || 'แอดมิน',
+        otTypeModifiedAt: Date.now(),
+        previousOtType: editingOtTypeRequest.otType || null,
+        updatedAt: Date.now(),
+      };
+
+      await updateDoc(reqRef, updateData);
+
+      // Optimistically update local states
+      setRequests((prev) =>
+        prev.map((r) => (r.id === editingOtTypeRequest.id ? { ...r, ...updateData } : r))
+      );
+      setAllPendingRequests((prev) =>
+        prev.map((r) => (r.id === editingOtTypeRequest.id ? { ...r, ...updateData } : r))
+      );
+
+      setEditingOtTypeRequest(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `overtime_requests/${editingOtTypeRequest.id}`);
+      setOtTypeError('เกิดข้อผิดพลาดในการบันทึกประเภท OT: ' + (error instanceof Error ? error.message : 'กรุณาลองใหม่ค่ะ'));
+    } finally {
+      setIsSavingOtType(false);
+    }
+  };
+
   // Export to Excel
   const handleExportExcel = () => {
     if (cycleRequests.length === 0) {
@@ -427,7 +573,24 @@ export function AdminOTDashboard() {
             <div className="mt-1.5 text-2xl font-black text-indigo-950 dark:text-white">
               {totalApprovedHours} <span className="text-xs font-normal text-slate-400">ชั่วโมง</span>
             </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+            {/* 3-color breakdown badges */}
+            <div className="flex flex-wrap items-center gap-1 mt-2 pt-2 border-t border-indigo-100 dark:border-indigo-900/40 text-[10px]">
+              <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 font-semibold" title="OT วันหยุด ในเวลางาน">
+                หยุด(ใน): {approvedHoursByType.holidayInHours}
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 font-semibold" title="OT วันหยุด หลังเวลางาน">
+                หยุด(หลัง): {approvedHoursByType.holidayAfterHours}
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/70 text-sky-700 dark:text-sky-300 font-semibold" title="OT วันทำงานปกติ">
+                วันปกติ: {approvedHoursByType.workdayHours}
+              </span>
+              {approvedHoursByType.unspecifiedHours > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-medium" title="ไม่ระบุ">
+                  ไม่ระบุ: {approvedHoursByType.unspecifiedHours}
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 truncate">
               {selectedCycleInfo.cycleLabel}
             </p>
           </div>
@@ -542,6 +705,18 @@ export function AdminOTDashboard() {
                             <Calendar className="w-3.5 h-3.5" />
                             {req.date}
                           </span>
+                          {/* OT Type badge */}
+                          {(() => {
+                            const otTypeInfo = getOTTypeInfo(req.otType);
+                            return (
+                              <span className={clsx(
+                                "px-2 py-0.5 rounded-md text-[10px] font-bold border",
+                                otTypeInfo.badgeClass
+                              )} title={otTypeInfo.description}>
+                                {otTypeInfo.label}
+                              </span>
+                            );
+                          })()}
                           <span className="flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5 text-slate-400" />
                             {req.startTime} - {req.endTime} น.
@@ -549,6 +724,19 @@ export function AdminOTDashboard() {
                           <span className="font-bold text-slate-900 dark:text-white px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                             {req.hours} ชม.
                           </span>
+                          {(req as any).dateModifiedBy && (
+                            <span className="text-[10px] text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800 inline-flex items-center gap-1 font-medium">
+                              <span>แก้วันที่โดย {(req as any).dateModifiedBy}</span>
+                              {(req as any).dateModifiedAt && (
+                                <span>({format(new Date((req as any).dateModifiedAt), 'd MMM yyyy HH:mm', { locale: th })})</span>
+                              )}
+                            </span>
+                          )}
+                          {(req as any).otTypeModifiedBy && (
+                            <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/70 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800 inline-flex items-center gap-1 font-medium">
+                              <span>แก้ประเภทโดย {(req as any).otTypeModifiedBy}</span>
+                            </span>
+                          )}
                         </div>
 
                         <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
@@ -568,7 +756,32 @@ export function AdminOTDashboard() {
                   {/* Actions */}
                   <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/60 flex items-center justify-between gap-2">
                     {!isReviewingThis ? (
-                      <div className="flex items-center gap-2 w-full justify-end">
+                      <div className="flex items-center gap-2 w-full justify-end flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingOtTypeRequest(req);
+                            setSelectedNewOtType((req.otType as OvertimeType) || 'workday');
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                          title="เปลี่ยนประเภท OT ของคำขอนี้"
+                        >
+                          <Tag className="w-3.5 h-3.5" />
+                          เปลี่ยนประเภท
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingDateRequest(req);
+                            setEditDateValue(req.date);
+                            setEditDateError(null);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                          title="แก้ไขวันที่ของคำขอ OT"
+                        >
+                          <Calendar className="w-3.5 h-3.5" />
+                          แก้วันที่
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleReviewAction(req.id, 'approved')}
@@ -704,6 +917,24 @@ export function AdminOTDashboard() {
                       </div>
                       <span className="text-[9px] text-slate-400">อนุมัติแล้ว</span>
                     </div>
+                  </div>
+
+                  {/* Hours breakdown by OT Type */}
+                  <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center gap-1 text-[10px]">
+                    <span className="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/40" title="OT วันหยุด ในเวลางาน">
+                      หยุด(ใน): {emp.holidayInHours}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/40" title="OT วันหยุด หลังเวลางาน">
+                      หยุด(หลัง): {emp.holidayAfterHours}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-900/40" title="OT วันทำงานปกติ">
+                      วันปกติ: {emp.workdayHours}
+                    </span>
+                    {emp.unspecifiedHours > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700" title="ไม่ระบุ">
+                        ไม่ระบุ: {emp.unspecifiedHours}
+                      </span>
+                    )}
                   </div>
 
                   <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px]">
@@ -866,6 +1097,18 @@ export function AdminOTDashboard() {
                             <Calendar className="w-3.5 h-3.5" />
                             {req.date}
                           </span>
+                          {/* OT Type badge */}
+                          {(() => {
+                            const otTypeInfo = getOTTypeInfo(req.otType);
+                            return (
+                              <span className={clsx(
+                                "px-2 py-0.5 rounded-md text-[10px] font-bold border",
+                                otTypeInfo.badgeClass
+                              )} title={otTypeInfo.description}>
+                                {otTypeInfo.label}
+                              </span>
+                            );
+                          })()}
                           <span className="flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5 text-slate-400" />
                             {req.startTime} - {req.endTime} น.
@@ -873,6 +1116,19 @@ export function AdminOTDashboard() {
                           <span className="font-black text-slate-900 dark:text-white px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800">
                             {req.hours} ชั่วโมง
                           </span>
+                          {(req as any).dateModifiedBy && (
+                            <span className="text-[10px] text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800 inline-flex items-center gap-1 font-medium">
+                              <span>แก้วันที่โดย {(req as any).dateModifiedBy}</span>
+                              {(req as any).dateModifiedAt && (
+                                <span>({format(new Date((req as any).dateModifiedAt), 'd MMM yyyy HH:mm', { locale: th })})</span>
+                              )}
+                            </span>
+                          )}
+                          {(req as any).otTypeModifiedBy && (
+                            <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/70 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800 inline-flex items-center gap-1 font-medium">
+                              <span>แก้ประเภทโดย {(req as any).otTypeModifiedBy}</span>
+                            </span>
+                          )}
                         </div>
 
                         {/* Reason Box */}
@@ -901,7 +1157,37 @@ export function AdminOTDashboard() {
                     </div>
 
                     {/* Right: Actions */}
-                    <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-center">
+                    <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-center flex-wrap">
+                      {isAdmin && !isReviewingThis && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingOtTypeRequest(req);
+                              setSelectedNewOtType((req.otType as OvertimeType) || 'workday');
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                            title="เปลี่ยนประเภท OT ของคำขอนี้"
+                          >
+                            <Tag className="w-3.5 h-3.5" />
+                            เปลี่ยนประเภท
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingDateRequest(req);
+                              setEditDateValue(req.date);
+                              setEditDateError(null);
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                            title="แก้ไขวันที่ของคำขอ OT นี้"
+                          >
+                            <Calendar className="w-3.5 h-3.5" />
+                            แก้วันที่
+                          </button>
+                        </>
+                      )}
+
                       {isAdmin && req.status === 'pending' && !isReviewingThis && (
                         <div className="flex items-center gap-1.5">
                           <button
@@ -1016,6 +1302,219 @@ export function AdminOTDashboard() {
           </div>
         )}
       </div>
+
+      {/* Modal สำหรับแอดมินแก้วันที่ของคำขอ OT */}
+      {editingDateRequest && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-5 overflow-hidden">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <Calendar className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    แก้ไขวันที่คำขอ OT
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {editingDateRequest.employeeName} ({editingDateRequest.hours} ชม.)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingDateRequest(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+                title="ปิด"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveDate} className="mt-4 space-y-4">
+              <div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                  วันที่เดิม: <strong className="text-slate-800 dark:text-slate-200 font-bold">{editingDateRequest.date}</strong>
+                </div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  เลือกวันที่ใหม่ <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={editDateValue}
+                  onChange={(e) => setEditDateValue(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+              </div>
+
+              {editDateValue && (
+                <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/80 text-xs text-indigo-900 dark:text-indigo-200 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <CalendarCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <span>รอบตัดยอดที่จะถูกคำนวณใหม่:</span>
+                  </div>
+                  <p className="text-[11px] text-indigo-700 dark:text-indigo-300 pl-5">
+                    <strong>{getOTCycleFromDate(editDateValue).cycleLabel}</strong> ({getOTCycleFromDate(editDateValue).periodLabel})
+                  </p>
+                </div>
+              )}
+
+              {editDateError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                  <span>{editDateError}</span>
+                </div>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingDateRequest(null)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingDate || !editDateValue}
+                  className={clsx(
+                    "px-4 py-2 rounded-xl text-xs font-bold text-white transition flex items-center gap-1.5 shadow-md active:scale-98 cursor-pointer",
+                    isSavingDate || !editDateValue
+                      ? "bg-slate-300 dark:bg-slate-700 text-slate-500 cursor-not-allowed shadow-none"
+                      : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20"
+                  )}
+                >
+                  {isSavingDate ? (
+                    <>กำลังบันทึก...</>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      บันทึกวันที่ใหม่
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal สำหรับแอดมินเปลี่ยนประเภท OT */}
+      {editingOtTypeRequest && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-5 overflow-hidden">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <Tag className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    เปลี่ยนประเภท OT
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {editingOtTypeRequest.employeeName} ({editingOtTypeRequest.hours} ชม.)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingOtTypeRequest(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+                title="ปิด"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800 space-y-1">
+                <div>
+                  วันที่: <strong className="text-slate-800 dark:text-slate-200">{editingOtTypeRequest.date}</strong> ({editingOtTypeRequest.startTime} - {editingOtTypeRequest.endTime} น.)
+                </div>
+                <div>
+                  ประเภทเดิม:{' '}
+                  <span className={clsx(
+                    "inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border ml-1",
+                    getOTTypeInfo(editingOtTypeRequest.otType).badgeClass
+                  )}>
+                    {getOTTypeInfo(editingOtTypeRequest.otType).label}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  เลือกประเภทใหม่ (3 สี) <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  {(['holiday_in_hours', 'holiday_after_hours', 'workday'] as OvertimeType[]).map((typeKey) => {
+                    const cfg = OT_TYPE_CONFIG[typeKey];
+                    const isSelected = selectedNewOtType === typeKey;
+                    return (
+                      <button
+                        key={typeKey}
+                        type="button"
+                        onClick={() => setSelectedNewOtType(typeKey)}
+                        className={clsx(
+                          "p-3 rounded-xl border text-left transition flex items-start gap-3 cursor-pointer",
+                          isSelected
+                            ? `${cfg.badgeClass} ring-2 ring-indigo-500/40 font-bold shadow-xs`
+                            : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                        )}
+                      >
+                        <span className={clsx("w-3 h-3 rounded-full mt-0.5 shrink-0", cfg.dotClass)} />
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold">{cfg.label}</div>
+                          <div className="text-[10px] opacity-80 mt-0.5">{cfg.description}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {otTypeError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                  <span>{otTypeError}</span>
+                </div>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingOtTypeRequest(null)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveOtType(selectedNewOtType)}
+                  disabled={isSavingOtType}
+                  className={clsx(
+                    "px-4 py-2 rounded-xl text-xs font-bold text-white transition flex items-center gap-1.5 shadow-md active:scale-98 cursor-pointer",
+                    isSavingOtType
+                      ? "bg-slate-300 dark:bg-slate-700 text-slate-500 cursor-not-allowed shadow-none"
+                      : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20"
+                  )}
+                >
+                  {isSavingOtType ? (
+                    <>กำลังบันทึก...</>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      บันทึกประเภทใหม่
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

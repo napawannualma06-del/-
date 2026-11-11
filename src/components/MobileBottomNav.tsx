@@ -17,7 +17,8 @@ import {
   X, 
   Key,
   ShieldCheck,
-  ChevronRight
+  ChevronRight,
+  CalendarCheck
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -30,6 +31,7 @@ interface MobileBottomNavProps {
   pendingTechCount: number;
   onOpenOT: () => void;
   onOpenAdvance: () => void;
+  onOpenShift?: () => void;
   onOpenRefinance: () => void;
   onOpenMessenger: () => void;
   onOpenEmployeeQR: () => void;
@@ -49,6 +51,7 @@ export function MobileBottomNav({
   pendingTechCount,
   onOpenOT,
   onOpenAdvance,
+  onOpenShift,
   onOpenRefinance,
   onOpenMessenger,
   onOpenEmployeeQR,
@@ -314,7 +317,29 @@ export function MobileBottomNav({
                 </div>
               </button>
 
-              {/* 3. ตารางรีไฟแนนซ์ iPhone */}
+              {/* 3. ตารางกะงาน */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDrawer(false);
+                  if (onOpenShift) onOpenShift();
+                }}
+                className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200/90 dark:border-slate-700/80 rounded-2xl flex items-start gap-2.5 text-left active:scale-[0.98] transition cursor-pointer shadow-2xs group hover:border-indigo-300 dark:hover:border-indigo-700"
+              >
+                <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 shrink-0">
+                  <CalendarCheck className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white block group-hover:text-indigo-600 transition-colors">
+                    ตารางกะงาน
+                  </span>
+                  <span className="text-[10px] text-slate-400 block truncate mt-0.5">
+                    เช็คกะ & วันหยุด
+                  </span>
+                </div>
+              </button>
+
+              {/* 4. ตารางรีไฟแนนซ์ iPhone */}
               <button
                 type="button"
                 onClick={() => {

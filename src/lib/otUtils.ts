@@ -156,7 +156,89 @@ export function calculateHoursBetween(startTime: string, endTime: string): numbe
 }
 
 /**
+ * โครงสร้างและค่าคงที่สำหรับประเภท OT (3 สี)
+ * - holiday_in_hours: OT วันหยุด ในเวลางาน = สีแดง
+ * - holiday_after_hours: OT วันหยุด หลังเวลางาน = สีเขียว
+ * - workday: OT วันทำงานปกติ = สีฟ้า
+ * - คำขอเดิมที่ไม่มีประเภท = "ไม่ระบุ" สีเทา
+ */
+import { OvertimeType } from '../types';
+
+export interface OTTypeConfig {
+  key: OvertimeType;
+  label: string;
+  shortLabel: string;
+  description: string;
+  colorName: 'red' | 'green' | 'blue';
+  badgeClass: string;
+  dotClass: string;
+  textClass: string;
+  buttonBorderClass: string;
+  buttonSelectedClass: string;
+}
+
+export const OT_TYPE_CONFIG: Record<OvertimeType, OTTypeConfig> = {
+  holiday_in_hours: {
+    key: 'holiday_in_hours',
+    label: 'OT วันหยุด ในเวลางาน',
+    shortLabel: 'วันหยุด ในเวลา',
+    description: 'ทำในวันหยุด ช่วงเวลาทำการปกติ (เช่น 09:00 - 18:00 น.)',
+    colorName: 'red',
+    badgeClass: 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800',
+    dotClass: 'bg-rose-500',
+    textClass: 'text-rose-600 dark:text-rose-400',
+    buttonBorderClass: 'border-slate-200 dark:border-slate-700 hover:border-rose-400 hover:bg-rose-50/50 dark:hover:bg-rose-950/30',
+    buttonSelectedClass: 'border-rose-500 bg-rose-50 dark:bg-rose-950/60 ring-2 ring-rose-500/30 text-rose-900 dark:text-rose-100 font-bold',
+  },
+  holiday_after_hours: {
+    key: 'holiday_after_hours',
+    label: 'OT วันหยุด หลังเวลางาน',
+    shortLabel: 'วันหยุด หลังเวลา',
+    description: 'ทำในวันหยุด ช่วงนอกเวลาทำการ (เช่น หลัง 18:00 น. หรือช่วงค่ำ/ดึก)',
+    colorName: 'green',
+    badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800',
+    dotClass: 'bg-emerald-500',
+    textClass: 'text-emerald-600 dark:text-emerald-400',
+    buttonBorderClass: 'border-slate-200 dark:border-slate-700 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30',
+    buttonSelectedClass: 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/60 ring-2 ring-emerald-500/30 text-emerald-900 dark:text-emerald-100 font-bold',
+  },
+  workday: {
+    key: 'workday',
+    label: 'OT วันทำงานปกติ',
+    shortLabel: 'วันทำงานปกติ',
+    description: 'ทำในวันทำงานปกติ หลังเวลาเลิกงาน (เช่น หลัง 18:00 น.)',
+    colorName: 'blue',
+    badgeClass: 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-950/70 dark:text-sky-300 dark:border-sky-800',
+    dotClass: 'bg-sky-500',
+    textClass: 'text-sky-600 dark:text-sky-400',
+    buttonBorderClass: 'border-slate-200 dark:border-slate-700 hover:border-sky-400 hover:bg-sky-50/50 dark:hover:bg-sky-950/30',
+    buttonSelectedClass: 'border-sky-500 bg-sky-50 dark:bg-sky-950/60 ring-2 ring-sky-500/30 text-sky-900 dark:text-sky-100 font-bold',
+  },
+};
+
+export const UNKNOWN_OT_TYPE_CONFIG = {
+  key: undefined,
+  label: 'ไม่ระบุ',
+  shortLabel: 'ไม่ระบุ',
+  description: 'คำขอเดิมที่ยังไม่ได้ระบุประเภท OT',
+  colorName: 'gray' as const,
+  badgeClass: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700',
+  dotClass: 'bg-slate-400',
+  textClass: 'text-slate-500 dark:text-slate-400',
+  buttonBorderClass: 'border-slate-200',
+  buttonSelectedClass: '',
+};
+
+export function getOTTypeInfo(otType?: string): OTTypeConfig | typeof UNKNOWN_OT_TYPE_CONFIG {
+  if (otType && otType in OT_TYPE_CONFIG) {
+    return OT_TYPE_CONFIG[otType as OvertimeType];
+  }
+  return UNKNOWN_OT_TYPE_CONFIG;
+}
+
+/**
  * ฟังก์ชันดาวน์โหลดเป็นไฟล์ Excel CSV (.csv ที่เปิดใน Excel ภาษาไทยได้ 100% ด้วย UTF-8 BOM)
+ * รองรับคอลัมน์ประเภท OT (3 สี) และสรุปยอดแยกตามประเภทท้ายไฟล์
  */
 export function exportOTToExcelCsv(
   requests: any[],
@@ -166,6 +248,7 @@ export function exportOTToExcelCsv(
   const headers = [
     'ลำดับ',
     'วันที่ทำงาน OT',
+    'ประเภท OT',
     'รหัสพนักงาน',
     'ชื่อพนักงาน',
     'เวลาเริ่ม',
@@ -178,13 +261,35 @@ export function exportOTToExcelCsv(
     'รอบบิลตัดยอด'
   ];
 
+  let totalHolidayInHours = 0;
+  let totalHolidayAfterHours = 0;
+  let totalWorkday = 0;
+  let totalUnspecified = 0;
+  let grandTotalHours = 0;
+
   const rows = requests.map((req, idx) => {
     const statusText = req.status === 'approved' ? 'อนุมัติแล้ว' : req.status === 'rejected' ? 'ไม่อนุมัติ' : 'รออนุมัติ';
     const approvedDate = req.reviewedAt ? format(new Date(req.reviewedAt), 'dd/MM/yyyy HH:mm') : '-';
-    
+    const typeInfo = getOTTypeInfo(req.otType);
+    const h = Number(req.hours) || 0;
+
+    if (req.status === 'approved') {
+      grandTotalHours += h;
+      if (req.otType === 'holiday_in_hours') {
+        totalHolidayInHours += h;
+      } else if (req.otType === 'holiday_after_hours') {
+        totalHolidayAfterHours += h;
+      } else if (req.otType === 'workday') {
+        totalWorkday += h;
+      } else {
+        totalUnspecified += h;
+      }
+    }
+
     return [
       idx + 1,
       req.date,
+      `"${typeInfo.label}"`,
       req.employeeUsername ? `@${req.employeeUsername}` : req.employeeId,
       `"${(req.employeeName || '').replace(/"/g, '""')}"`,
       req.startTime,
@@ -198,11 +303,27 @@ export function exportOTToExcelCsv(
     ];
   });
 
+  // ท้ายไฟล์เพิ่มแถวสรุปชั่วโมงแยกตามประเภท
+  const summaryRows = [
+    [],
+    ['--- สรุปชั่วโมง OT ที่อนุมัติแล้ว แยกตามประเภท ---'],
+    ['ประเภท OT', 'จำนวนชั่วโมง (ชม.)'],
+    ['OT วันหยุด ในเวลางาน (สีแดง)', (Math.round(totalHolidayInHours * 100) / 100).toFixed(2)],
+    ['OT วันหยุด หลังเวลางาน (สีเขียว)', (Math.round(totalHolidayAfterHours * 100) / 100).toFixed(2)],
+    ['OT วันทำงานปกติ (สีฟ้า)', (Math.round(totalWorkday * 100) / 100).toFixed(2)],
+  ];
+
+  if (totalUnspecified > 0) {
+    summaryRows.push(['ไม่ระบุประเภท (สีเทา)', (Math.round(totalUnspecified * 100) / 100).toFixed(2)]);
+  }
+  summaryRows.push(['รวมชั่วโมง OT ทั้งหมด', (Math.round(grandTotalHours * 100) / 100).toFixed(2)]);
+
   // UTF-8 BOM for Thai Excel compatibility
   const BOM = '\uFEFF';
   const csvContent = BOM + [
     headers.join(','),
-    ...rows.map(e => e.join(','))
+    ...rows.map(e => e.join(',')),
+    ...summaryRows.map(e => e.join(','))
   ].join('\r\n');
 
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

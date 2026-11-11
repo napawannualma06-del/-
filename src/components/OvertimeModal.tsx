@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
-import { OvertimeRequest, OvertimeStatus } from '../types';
+import { OvertimeRequest, OvertimeStatus, OvertimeType } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { recordSystemAction } from '../lib/activityService';
 import { 
@@ -47,7 +47,9 @@ import {
   getAvailableOTCycles, 
   calculateHoursBetween, 
   exportOTToExcelCsv, 
-  OTCycleInfo 
+  OTCycleInfo,
+  OT_TYPE_CONFIG,
+  getOTTypeInfo
 } from '../lib/otUtils';
 
 interface OvertimeModalProps {
@@ -128,6 +130,44 @@ export function OvertimeModal({
 
   const effectiveHours = manualHours !== '' ? parseFloat(manualHours) || 0 : autoHours;
 
+  // Allowed date range: not more than 7 days back or 7 days in the future from today
+  const { minDateStr, maxDateStr, minDateLabel, maxDateLabel } = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const minD = new Date(today);
+    minD.setDate(minD.getDate() - 7);
+
+    const maxD = new Date(today);
+    maxD.setDate(maxD.getDate() + 7);
+
+    return {
+      minDateStr: format(minD, 'yyyy-MM-dd'),
+      maxDateStr: format(maxD, 'yyyy-MM-dd'),
+      minDateLabel: format(minD, 'd MMM yyyy', { locale: th }),
+      maxDateLabel: format(maxD, 'd MMM yyyy', { locale: th }),
+    };
+  }, []);
+
+  const dateError = useMemo(() => {
+    if (!date) return 'กรุณาระบุวันที่ทำ OT ค่ะ';
+    if (date < minDateStr) {
+      return `ห้ามเลือกวันที่ย้อนหลังเกิน 7 วัน (เลือกได้ตั้งแต่วันที่ ${minDateLabel} ถึง ${maxDateLabel})`;
+    }
+    if (date > maxDateStr) {
+      return `ห้ามเลือกวันที่ล่วงหน้าเกิน 7 วัน (เลือกได้ตั้งแต่วันที่ ${minDateLabel} ถึง ${maxDateLabel})`;
+    }
+    return null;
+  }, [date, minDateStr, maxDateStr, minDateLabel, maxDateLabel]);
+
+  // OT Type (3 Colors: holiday_in_hours=แดง, holiday_after_hours=เขียว, workday=ฟ้า)
+  const [otType, setOtType] = useState<OvertimeType | null>(null);
+
+  // Admin Change OT Type State
+  const [editingOtTypeRequest, setEditingOtTypeRequest] = useState<OvertimeRequest | null>(null);
+  const [selectedNewOtType, setSelectedNewOtType] = useState<OvertimeType>('workday');
+  const [isSavingOtType, setIsSavingOtType] = useState(false);
+
   // Search & Filter
   const [statusFilter, setStatusFilter] = useState<'all' | OvertimeStatus>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -191,6 +231,14 @@ export function OvertimeModal({
   // Submit Form: ขอทำ OT
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (dateError) {
+      return;
+    }
+
+    if (!otType) {
+      return;
+    }
+
     if (!user) {
       alert('กรุณาเข้าสู่ระบบก่อนทำรายการค่ะ');
       return;
@@ -218,6 +266,7 @@ export function OvertimeModal({
         employeeId: user.uid,
         employeeName: user.name || 'พนักงาน',
         date,
+        otType,
         startTime,
         endTime,
         hours: effectiveHours,
@@ -243,6 +292,7 @@ export function OvertimeModal({
       setSubmitSuccess(true);
       setReason('');
       setManualHours('');
+      setOtType(null);
       setTimeout(() => {
         setSubmitSuccess(false);
         setActiveTab('my');
@@ -252,6 +302,32 @@ export function OvertimeModal({
       alert('เกิดข้อผิดพลาดในการบันทึกคำขอ: ' + (error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้งค่ะ'));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Admin Change OT Type Handler
+  const handleSaveOtType = async (newType: OvertimeType) => {
+    if (!editingOtTypeRequest || !isAdmin || !user) return;
+    setIsSavingOtType(true);
+    try {
+      const reqRef = doc(db, 'overtime_requests', editingOtTypeRequest.id);
+      const updatePayload = {
+        otType: newType,
+        otTypeModifiedBy: user.name || 'แอดมิน',
+        otTypeModifiedAt: Date.now(),
+        previousOtType: editingOtTypeRequest.otType || null,
+        updatedAt: Date.now(),
+      };
+      await updateDoc(reqRef, updatePayload);
+      setRequests((prev) =>
+        prev.map((r) => (r.id === editingOtTypeRequest.id ? { ...r, ...updatePayload } : r))
+      );
+      setEditingOtTypeRequest(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `overtime_requests/${editingOtTypeRequest.id}`);
+      alert('เกิดข้อผิดพลาดในการบันทึกประเภท OT ค่ะ');
+    } finally {
+      setIsSavingOtType(false);
     }
   };
 
@@ -358,9 +434,27 @@ export function OvertimeModal({
   // Total summary for current cycle (Admin & Employee)
   const cycleSummary = useMemo(() => {
     const list = isAdmin && activeTab === 'admin' ? cycleFilteredRequests : cycleFilteredMyRequests;
-    const totalApprovedHours = list
-      .filter(r => r.status === 'approved')
+    const approvedList = list.filter(r => r.status === 'approved');
+    const totalApprovedHours = approvedList
       .reduce((sum, r) => sum + (Number(r.hours) || 0), 0);
+
+    let holidayInHours = 0;
+    let holidayAfterHours = 0;
+    let workdayHours = 0;
+    let unspecifiedHours = 0;
+
+    approvedList.forEach(r => {
+      const h = Number(r.hours) || 0;
+      if (r.otType === 'holiday_in_hours') {
+        holidayInHours += h;
+      } else if (r.otType === 'holiday_after_hours') {
+        holidayAfterHours += h;
+      } else if (r.otType === 'workday') {
+        workdayHours += h;
+      } else {
+        unspecifiedHours += h;
+      }
+    });
     
     // For admin, pending requests should reflect ALL pending requests requiring approval across all cycles
     const pendingList = isAdmin && activeTab === 'admin' 
@@ -374,6 +468,10 @@ export function OvertimeModal({
 
     return {
       totalApprovedHours: Math.round(totalApprovedHours * 100) / 100,
+      holidayInHours: Math.round(holidayInHours * 100) / 100,
+      holidayAfterHours: Math.round(holidayAfterHours * 100) / 100,
+      workdayHours: Math.round(workdayHours * 100) / 100,
+      unspecifiedHours: Math.round(unspecifiedHours * 100) / 100,
       totalPendingHours: Math.round(totalPendingHours * 100) / 100,
       totalRequestsCount,
       pendingCount,
@@ -638,16 +736,111 @@ export function OvertimeModal({
                       <div className="relative">
                         <input
                           type="date"
+                          min={minDateStr}
+                          max={maxDateStr}
                           value={date}
                           onChange={(e) => setDate(e.target.value)}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                          className={clsx(
+                            "w-full px-3 py-2 bg-white dark:bg-slate-900 border rounded-xl text-xs font-medium text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2",
+                            dateError
+                              ? "border-rose-400 dark:border-rose-600 focus:ring-rose-500"
+                              : "border-slate-300 dark:border-slate-700 focus:ring-indigo-500"
+                          )}
                           required
                         />
                       </div>
-                      {date && (
+                      {dateError ? (
+                        <div className="mt-1.5 p-2 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-1.5 animate-in fade-in">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                          <span className="font-semibold">{dateError}</span>
+                        </div>
+                      ) : date ? (
                         <div className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1 flex items-center gap-1 font-medium">
                           <CalendarCheck className="w-3 h-3 shrink-0" />
                           <span>จะถูกนับรวมใน: <strong>{getOTCycleFromDate(date).cycleLabel}</strong> ({getOTCycleFromDate(date).periodLabel})</span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* ประเภท OT (3 สี: แดง เขียว ฟ้า) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                          ประเภท OT <span className="text-rose-500">* (บังคับเลือก)</span>
+                        </label>
+                        {otType && (
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            เลือก: <strong className={OT_TYPE_CONFIG[otType].textClass}>{OT_TYPE_CONFIG[otType].label}</strong>
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {/* 1. holiday_in_hours = สีแดง */}
+                        <button
+                          type="button"
+                          onClick={() => setOtType('holiday_in_hours')}
+                          className={clsx(
+                            "p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between",
+                            otType === 'holiday_in_hours'
+                              ? OT_TYPE_CONFIG.holiday_in_hours.buttonSelectedClass
+                              : OT_TYPE_CONFIG.holiday_in_hours.buttonBorderClass
+                          )}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold text-xs">
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                            <span className="text-rose-700 dark:text-rose-300">OT วันหยุด ในเวลางาน</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-tight">
+                            {OT_TYPE_CONFIG.holiday_in_hours.description}
+                          </p>
+                        </button>
+
+                        {/* 2. holiday_after_hours = สีเขียว */}
+                        <button
+                          type="button"
+                          onClick={() => setOtType('holiday_after_hours')}
+                          className={clsx(
+                            "p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between",
+                            otType === 'holiday_after_hours'
+                              ? OT_TYPE_CONFIG.holiday_after_hours.buttonSelectedClass
+                              : OT_TYPE_CONFIG.holiday_after_hours.buttonBorderClass
+                          )}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold text-xs">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                            <span className="text-emerald-700 dark:text-emerald-300">OT วันหยุด หลังเวลางาน</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-tight">
+                            {OT_TYPE_CONFIG.holiday_after_hours.description}
+                          </p>
+                        </button>
+
+                        {/* 3. workday = สีฟ้า */}
+                        <button
+                          type="button"
+                          onClick={() => setOtType('workday')}
+                          className={clsx(
+                            "p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between",
+                            otType === 'workday'
+                              ? OT_TYPE_CONFIG.workday.buttonSelectedClass
+                              : OT_TYPE_CONFIG.workday.buttonBorderClass
+                          )}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold text-xs">
+                            <span className="w-2.5 h-2.5 rounded-full bg-sky-500 shrink-0" />
+                            <span className="text-sky-700 dark:text-sky-300">OT วันทำงานปกติ</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-tight">
+                            {OT_TYPE_CONFIG.workday.description}
+                          </p>
+                        </button>
+                      </div>
+
+                      {!otType && (
+                        <div className="mt-1.5 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-1.5 animate-in fade-in">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                          <span className="font-semibold">กรุณาเลือกประเภท OT (สีแดง / เขียว / ฟ้า) ด้านบนก่อนกดส่งคำขอค่ะ</span>
                         </div>
                       )}
                     </div>
@@ -739,16 +932,26 @@ export function OvertimeModal({
                     <div className="pt-2">
                       <button
                         type="submit"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !!dateError || !otType || effectiveHours <= 0 || !reason.trim()}
                         className={clsx(
-                          "w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white transition flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-98",
-                          isSubmitting
-                            ? "bg-indigo-400 cursor-not-allowed"
-                            : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20"
+                          "w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white transition flex items-center justify-center gap-2 shadow-md active:scale-98",
+                          isSubmitting || !!dateError || !otType || effectiveHours <= 0 || !reason.trim()
+                            ? "bg-slate-300 dark:bg-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed shadow-none"
+                            : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20 cursor-pointer"
                         )}
                       >
                         {isSubmitting ? (
                           <>กำลังบันทึกข้อมูล...</>
+                        ) : dateError ? (
+                          <>
+                            <AlertCircle className="w-4 h-4" />
+                            วันที่ไม่อยู่ในช่วงที่อนุญาต (เลือกได้ ±7 วัน)
+                          </>
+                        ) : !otType ? (
+                          <>
+                            <AlertCircle className="w-4 h-4" />
+                            กรุณาเลือกประเภท OT (สีแดง / เขียว / ฟ้า) ด้านบน
+                          </>
                         ) : (
                           <>
                             <Send className="w-4 h-4" />
@@ -778,7 +981,22 @@ export function OvertimeModal({
                     {cycleSummary.totalApprovedHours}
                     <span className="text-xs font-normal text-slate-400 ml-1">ชม.</span>
                   </div>
-                  <span className="text-[10px] text-slate-400">ใน {selectedCycleInfo.cycleLabel}</span>
+                  <div className="mt-2 pt-2 border-t border-indigo-200/60 dark:border-indigo-900/40 flex flex-wrap gap-1 text-[10px]">
+                    <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 font-bold" title="OT วันหยุด ในเวลางาน">
+                      แดง {cycleSummary.holidayInHours}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold" title="OT วันหยุด หลังเวลางาน">
+                      เขียว {cycleSummary.holidayAfterHours}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300 font-bold" title="OT วันทำงานปกติ">
+                      ฟ้า {cycleSummary.workdayHours}
+                    </span>
+                    {cycleSummary.unspecifiedHours > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 font-bold" title="ไม่ระบุ">
+                        เทา {cycleSummary.unspecifiedHours}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div 
@@ -911,6 +1129,15 @@ export function OvertimeModal({
                                     <Calendar className="w-3.5 h-3.5" />
                                     {req.date}
                                   </span>
+                                  {(() => {
+                                    const tInfo = getOTTypeInfo(req.otType);
+                                    return (
+                                      <span className={clsx("px-2 py-0.5 rounded-md text-[10px] font-bold border inline-flex items-center gap-1", tInfo.badgeClass)}>
+                                        <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", tInfo.dotClass)} />
+                                        {tInfo.label}
+                                      </span>
+                                    );
+                                  })()}
                                   <span className="flex items-center gap-1">
                                     <Clock className="w-3.5 h-3.5 text-slate-400" />
                                     {req.startTime} - {req.endTime} น.
@@ -931,7 +1158,20 @@ export function OvertimeModal({
 
                             <div className="flex items-center gap-1.5 self-start">
                               {!isReviewingThis ? (
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingOtTypeRequest(req);
+                                        setSelectedNewOtType(req.otType || 'workday');
+                                      }}
+                                      className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                                      title="เปลี่ยนประเภท OT"
+                                    >
+                                      เปลี่ยนประเภท
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => handleReviewAction(req.id, 'approved')}
@@ -1132,6 +1372,15 @@ export function OvertimeModal({
                                   <Calendar className="w-3.5 h-3.5" />
                                   {req.date}
                                 </span>
+                                {(() => {
+                                  const tInfo = getOTTypeInfo(req.otType);
+                                  return (
+                                    <span className={clsx("px-2 py-0.5 rounded-md text-[10px] font-bold border inline-flex items-center gap-1", tInfo.badgeClass)}>
+                                      <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", tInfo.dotClass)} />
+                                      {tInfo.label}
+                                    </span>
+                                  );
+                                })()}
                                 <span className="flex items-center gap-1">
                                   <Clock className="w-3.5 h-3.5 text-slate-400" />
                                   {req.startTime} - {req.endTime} น.
@@ -1168,6 +1417,21 @@ export function OvertimeModal({
 
                           {/* Right: Actions */}
                           <div className="flex items-center gap-1.5 self-start">
+                            {/* Admin Change OT Type Button */}
+                            {isAdmin && activeTab === 'admin' && !isReviewingThis && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingOtTypeRequest(req);
+                                  setSelectedNewOtType(req.otType || 'workday');
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                                title="เปลี่ยนประเภท OT"
+                              >
+                                เปลี่ยนประเภท
+                              </button>
+                            )}
+
                             {/* Admin Review Action Buttons */}
                             {isAdmin && activeTab === 'admin' && req.status === 'pending' && !isReviewingThis && (
                               <div className="flex items-center gap-1">
@@ -1275,6 +1539,73 @@ export function OvertimeModal({
         </div>
 
       </div>
+
+      {/* Modal สำหรับแอดมินเปลี่ยนประเภท OT (3 สี) */}
+      {editingOtTypeRequest && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-5 overflow-hidden">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>เปลี่ยนประเภท OT</span>
+                <span className="text-xs font-normal text-slate-400">({editingOtTypeRequest.employeeName})</span>
+              </h4>
+              <button
+                type="button"
+                onClick={() => setEditingOtTypeRequest(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-2.5">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                เลือกประเภท OT ใหม่สำหรับวันที่ <strong>{editingOtTypeRequest.date}</strong> ({editingOtTypeRequest.hours} ชม.):
+              </p>
+              
+              {(['holiday_in_hours', 'holiday_after_hours', 'workday'] as OvertimeType[]).map((t) => {
+                const cfg = OT_TYPE_CONFIG[t];
+                const isSelected = selectedNewOtType === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setSelectedNewOtType(t)}
+                    className={clsx(
+                      "w-full p-3 rounded-xl border text-left transition cursor-pointer flex items-start gap-2.5",
+                      isSelected ? cfg.buttonSelectedClass : cfg.buttonBorderClass
+                    )}
+                  >
+                    <span className={clsx("w-3 h-3 rounded-full mt-0.5 shrink-0", cfg.dotClass)} />
+                    <div>
+                      <span className="text-xs font-bold block">{cfg.label}</span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">{cfg.description}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingOtTypeRequest(null)}
+                className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={isSavingOtType}
+                onClick={() => handleSaveOtType(selectedNewOtType)}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md cursor-pointer disabled:opacity-50 transition"
+              >
+                {isSavingOtType ? 'กำลังบันทึก...' : 'บันทึกประเภทใหม่'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

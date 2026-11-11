@@ -43,7 +43,8 @@ import {
   Gauge,
   ArrowUpDown,
   Hourglass,
-  Key
+  Key,
+  CalendarCheck
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -56,6 +57,7 @@ import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { AdminOTDashboard } from './AdminOTDashboard';
 import { AdminAdvanceDashboard } from './AdminAdvanceDashboard';
 import { AdminApiIntegration } from './AdminApiIntegration';
+import { AdminShiftDashboard } from './AdminShiftDashboard';
 import { UserManagementModal } from './UserManagementModal';
 import { 
   getPreviousAssignee, 
@@ -153,7 +155,7 @@ export function AdminDashboard() {
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [pendingOTCount, setPendingOTCount] = useState(0);
   const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
-  const [mainTab, setMainTab] = useState<'cases' | 'ot' | 'advance' | 'api'>('cases');
+  const [mainTab, setMainTab] = useState<'cases' | 'ot' | 'advance' | 'api' | 'shifts'>('cases');
   const [leaderboardSortBy, setLeaderboardSortBy] = useState<'closed' | 'speed_fast' | 'speed_slow'>('closed');
   const [showTimeAnalytics, setShowTimeAnalytics] = useState(false);
 
@@ -608,6 +610,20 @@ export function AdminDashboard() {
 
                 <button
                   type="button"
+                  onClick={() => setMainTab('shifts')}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
+                    mainTab === 'shifts'
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  )}
+                >
+                  <CalendarCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>ตารางกะ</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setMainTab('api')}
                   className={clsx(
                     "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
@@ -833,6 +849,8 @@ export function AdminDashboard() {
         <AdminOTDashboard />
       ) : isAdmin && mainTab === 'advance' ? (
         <AdminAdvanceDashboard />
+      ) : isAdmin && mainTab === 'shifts' ? (
+        <AdminShiftDashboard />
       ) : isAdmin && mainTab === 'api' ? (
         <AdminApiIntegration currentAdminName={user?.name || 'Admin'} cases={cases} />
       ) : (

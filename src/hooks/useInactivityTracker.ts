@@ -259,21 +259,18 @@ export function useInactivityTracker(): InactivityState {
     return () => clearInterval(timer);
   }, [user, isWarning]);
 
-  // Item 4: Run distributed maintenance sweep every 10 minutes across any active browser client
+  // Item 4: Distributed maintenance task running every 10 minutes across open browser tabs
   useEffect(() => {
     if (!user?.uid) return;
 
-    const uid = user.uid;
-    const uname = user.name || user.username || uid;
-
-    // Initial check 20s after mount (once store listeners have populated cases & registeredUsers)
+    // Run once after 20 seconds of initial page load
     const initialTimeout = setTimeout(() => {
-      tryRunDistributedBrowserMaintenance(uid, uname);
+      tryRunDistributedBrowserMaintenance(user.uid, user.name || user.username || 'System');
     }, 20 * 1000);
 
-    // Every 10 minutes
+    // And then sweep every 10 minutes
     const sweepInterval = setInterval(() => {
-      tryRunDistributedBrowserMaintenance(uid, uname);
+      tryRunDistributedBrowserMaintenance(user.uid, user.name || user.username || 'System');
     }, MAINTENANCE_LOCK_INTERVAL_MS);
 
     return () => {

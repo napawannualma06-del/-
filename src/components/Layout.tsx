@@ -31,7 +31,8 @@ import {
   Bike,
   QrCode,
   Building2,
-  KeyRound
+  KeyRound,
+  CalendarCheck
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
@@ -39,6 +40,7 @@ import { OvertimeModal } from './OvertimeModal';
 import { AdvanceModal } from './AdvanceModal';
 import { MessengerDirectoryModal } from './MessengerDirectoryModal';
 import { EmployeeQRModal } from './EmployeeQRModal';
+import { EmployeeShiftModal } from './EmployeeShiftModal';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { MobileBottomNav } from './MobileBottomNav';
 import { isUserAdmin } from '../store/useStore';
@@ -99,6 +101,7 @@ export function Layout() {
   const [refinanceModalModel, setRefinanceModalModel] = useState<string | undefined>(undefined);
   const [showMessengerModal, setShowMessengerModal] = useState(false);
   const [messengerInitialProvince, setMessengerInitialProvince] = useState<string>('all');
+  const [showShiftModal, setShowShiftModal] = useState(false);
   const [showEmployeeQRModal, setShowEmployeeQRModal] = useState(false);
   const [employeeQRDefaultTab, setEmployeeQRDefaultTab] = useState<'directory' | 'my_qr' | 'history'>('directory');
   const [selectedEmployeeQRId, setSelectedEmployeeQRId] = useState<string | undefined>(undefined);
@@ -520,7 +523,31 @@ export function Layout() {
                         )}
                       </button>
 
-                      {/* 3. ตารางรีไฟแนนซ์ iPhone */}
+                      {/* 3. ตารางกะการทำงาน */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          setShowShiftModal(true);
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 shrink-0">
+                            <CalendarCheck className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                              ตารางกะการทำงาน
+                            </span>
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              เช็คกะงาน วันหยุด และวันนักขัตฤกษ์
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* 4. ตารางรีไฟแนนซ์ iPhone */}
                       <button
                         type="button"
                         onClick={() => {
@@ -873,6 +900,14 @@ export function Layout() {
         initialTab={employeeQRDefaultTab}
       />
 
+      {/* Employee Shift Schedule Modal */}
+      {user && (
+        <EmployeeShiftModal
+          isOpen={showShiftModal}
+          onClose={() => setShowShiftModal(false)}
+        />
+      )}
+
       {/* Floating Status Notification for Employee */}
       {activeTechToast && (
         <div className="fixed top-20 right-3 sm:right-6 z-50 max-w-sm sm:max-w-md w-[calc(100vw-1.5rem)] animate-in slide-in-from-top-4 fade-in duration-300">
@@ -985,6 +1020,9 @@ export function Layout() {
           onOpenAdvance={() => {
             setAdvanceDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
             setShowAdvanceModal(true);
+          }}
+          onOpenShift={() => {
+            setShowShiftModal(true);
           }}
           onOpenRefinance={() => {
             setRefinanceModalModel(undefined);
