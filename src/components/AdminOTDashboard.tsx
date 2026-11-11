@@ -708,13 +708,21 @@ export function AdminOTDashboard() {
                           {/* OT Type badge */}
                           {(() => {
                             const otTypeInfo = getOTTypeInfo(req.otType);
+                            const suggestedInfo = req.otTypeSuggested ? getOTTypeInfo(req.otTypeSuggested) : null;
                             return (
-                              <span className={clsx(
-                                "px-2 py-0.5 rounded-md text-[10px] font-bold border",
-                                otTypeInfo.badgeClass
-                              )} title={otTypeInfo.description}>
-                                {otTypeInfo.label}
-                              </span>
+                              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                                <span className={clsx(
+                                  "px-2 py-0.5 rounded-md text-[10px] font-bold border",
+                                  otTypeInfo.badgeClass
+                                )} title={otTypeInfo.description}>
+                                  {otTypeInfo.label}
+                                </span>
+                                {req.otTypeChangedByEmployee && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                    พนักงานเปลี่ยนจากที่ระบบแนะนำ (ระบบแนะนำ: {suggestedInfo ? suggestedInfo.label : 'ไม่ระบุ'})
+                                  </span>
+                                )}
+                              </div>
                             );
                           })()}
                           <span className="flex items-center gap-1">
@@ -1100,13 +1108,21 @@ export function AdminOTDashboard() {
                           {/* OT Type badge */}
                           {(() => {
                             const otTypeInfo = getOTTypeInfo(req.otType);
+                            const suggestedInfo = req.otTypeSuggested ? getOTTypeInfo(req.otTypeSuggested) : null;
                             return (
-                              <span className={clsx(
-                                "px-2 py-0.5 rounded-md text-[10px] font-bold border",
-                                otTypeInfo.badgeClass
-                              )} title={otTypeInfo.description}>
-                                {otTypeInfo.label}
-                              </span>
+                              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                                <span className={clsx(
+                                  "px-2 py-0.5 rounded-md text-[10px] font-bold border",
+                                  otTypeInfo.badgeClass
+                                )} title={otTypeInfo.description}>
+                                  {otTypeInfo.label}
+                                </span>
+                                {req.otTypeChangedByEmployee && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                    พนักงานเปลี่ยนจากที่ระบบแนะนำ (ระบบแนะนำ: {suggestedInfo ? suggestedInfo.label : 'ไม่ระบุ'})
+                                  </span>
+                                )}
+                              </div>
                             );
                           })()}
                           <span className="flex items-center gap-1">

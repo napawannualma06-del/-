@@ -162,7 +162,7 @@ export function calculateHoursBetween(startTime: string, endTime: string): numbe
  * - workday: OT วันทำงานปกติ = สีฟ้า
  * - คำขอเดิมที่ไม่มีประเภท = "ไม่ระบุ" สีเทา
  */
-import { OvertimeType } from '../types';
+import { OvertimeType, ShiftTemplate, EmployeeShiftPref } from '../types';
 
 export interface OTTypeConfig {
   key: OvertimeType;
@@ -336,3 +336,211 @@ export function exportOTToExcelCsv(
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * ผลลัพธ์การแนะนำประเภท OT อัตโนมัติจากตารางกะ
+ */
+export interface OTSuggestionResult {
+  suggestedType: OvertimeType | null;
+  reason: string;
+  isSpanning?: boolean;
+}
+
+/**
+ * วิเคราะห์ประเภท OT อัตโนมัติจากตารางกะของพนักงาน
+ * 
+ * กฎการเลือก:
+ * 1. ตารางวันนั้นเป็น "off" หรือ "holiday" = วันหยุด
+ *    - เทียบเวลา OT กับเวลาของกะประจำ (defaultShiftId ใน shift_prefs)
+ *    - OT อยู่ในช่วงเวลากะทั้งหมด = holiday_in_hours (แดง)
+ *    - OT อยู่นอกช่วงเวลากะทั้งหมด = holiday_after_hours (เขียว)
+ *    - OT คร่อมทั้งในและนอกเวลากะ = ไม่เลือกให้ (null) และขึ้นข้อความแนะนำให้แยกเป็น 2 คำขอ พร้อมบอกช่วงเวลาที่ควรแยก
+ *    - ถ้าไม่มีกะประจำ = ไม่เลือกให้ (null)
+ * 2. ตารางวันนั้นเป็นรหัสกะ (มีกะทำงาน) = workday (ฟ้า)
+ * 3. ตารางวันนั้นเป็น "leave" หรือยังไม่มีตาราง = ไม่เลือกให้ (null) ให้พนักงานเลือกเอง
+ * 
+ * รองรับกะที่ข้ามเที่ยงคืน (เช่น 17:00 ถึง 02:00 หรือ 22:00 ถึง 07:00) และ OT ที่ข้ามเที่ยงคืน
+ */
+export function determineSuggestedOTType(params: {
+  date: string;
+  startTime: string;
+  endTime: string;
+  employeeId: string;
+  shiftPrefs: Record<string, EmployeeShiftPref>;
+  scheduleDays: Record<string, Record<string, string>>;
+  shiftTemplates: ShiftTemplate[];
+}): OTSuggestionResult {
+  const { date, startTime, endTime, employeeId, shiftPrefs, scheduleDays, shiftTemplates } = params;
+
+  if (!date || !startTime || !endTime) {
+    return { suggestedType: null, reason: '' };
+  }
+
+  // แปลงวันที่เป็นภาษาไทยแบบสั้น (เช่น "7 พ.ย.")
+  let thaiDate = date;
+  try {
+    const [y, m, d] = date.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    thaiDate = format(dateObj, 'd MMM', { locale: th });
+  } catch {
+    thaiDate = date;
+  }
+
+  const empSchedule = scheduleDays[employeeId] || {};
+  const cellVal = empSchedule[date];
+
+  // ถ้ายังไม่มีตารางวันนั้น
+  if (!cellVal) {
+    return {
+      suggestedType: null,
+      reason: `วันที่ ${thaiDate} ยังไม่มีข้อมูลในตารางกะ กรุณาเลือกประเภท OT ด้วยตนเองค่ะ`,
+    };
+  }
+
+  // ถ้าเป็น "leave" (ลางาน)
+  if (cellVal === 'leave') {
+    return {
+      suggestedType: null,
+      reason: `วันที่ ${thaiDate} คุณบันทึกลางาน กรุณาเลือกประเภท OT ด้วยตนเองค่ะ`,
+    };
+  }
+
+  const templateMap = new Map<string, ShiftTemplate>();
+  shiftTemplates.forEach((t) => templateMap.set(t.id, t));
+
+  // ถ้าเป็นรหัสกะ (มีกะทำงาน) = workday (ฟ้า)
+  if (cellVal !== 'off' && cellVal !== 'holiday') {
+    const shift = templateMap.get(cellVal);
+    const shiftText = shift
+      ? `${shift.name} (${shift.startTime}-${shift.endTime} น.)`
+      : `กะทำงาน [${cellVal}]`;
+    return {
+      suggestedType: 'workday',
+      reason: `ระบบเลือกให้: วันที่ ${thaiDate} คุณมีกะทำงาน ${shiftText} (OT วันทำงานปกติ)`,
+    };
+  }
+
+  // กรณี cellVal เป็น "off" หรือ "holiday" (วันหยุด)
+  const dayOffLabel = cellVal === 'off' ? 'OFF' : 'วันนักขัตฤกษ์';
+  const userPref = shiftPrefs[employeeId];
+  const defaultShiftId = userPref?.defaultShiftId;
+
+  if (!defaultShiftId) {
+    return {
+      suggestedType: null,
+      reason: `วันที่ ${thaiDate} คุณหยุด (${dayOffLabel}) แต่ยังไม่ได้ตั้งค่ากะประจำ จึงไม่สามารถเลือกประเภทให้อัตโนมัติได้ กรุณาเลือกประเภท OT ด้วยตนเองค่ะ`,
+    };
+  }
+
+  const defaultShift = templateMap.get(defaultShiftId);
+  if (!defaultShift) {
+    return {
+      suggestedType: null,
+      reason: `วันที่ ${thaiDate} คุณหยุด (${dayOffLabel}) แต่ไม่พบข้อมูลกะประจำในระบบ กรุณาเลือกประเภท OT ด้วยตนเองค่ะ`,
+    };
+  }
+
+  // ฟังก์ชันแปลง "HH:mm" เป็นจำนวนนาทีจาก 00:00 (0 - 1439)
+  const toMinutes = (timeStr: string): number => {
+    const [h, m] = timeStr.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return 0;
+    return h * 60 + m;
+  };
+
+  const sStart = toMinutes(defaultShift.startTime);
+  const sEnd = toMinutes(defaultShift.endTime);
+
+  const otStart = toMinutes(startTime);
+  const otEnd = toMinutes(endTime);
+
+  // คำนวณระยะเวลา OT ทั้งหมด (นาที) รองรับการข้ามเที่ยงคืน
+  const otDuration = otEnd < otStart ? (otEnd + 1440 - otStart) : (otEnd - otStart);
+  if (otDuration <= 0) {
+    return { suggestedType: null, reason: '' };
+  }
+
+  // ตรวจสอบว่านาที m (0..1439) อยู่ในกะหรือไม่
+  const isInsideShift = (m: number): boolean => {
+    if (sEnd > sStart) {
+      return m >= sStart && m < sEnd;
+    } else {
+      // กะข้ามเที่ยงคืน (เช่น 17:00 ถึง 02:00 หรือ 22:00 ถึง 07:00)
+      return m >= sStart || m < sEnd;
+    }
+  };
+
+  let inMinutes = 0;
+  let outMinutes = 0;
+
+  for (let k = 0; k < otDuration; k++) {
+    const m = (otStart + k) % 1440;
+    if (isInsideShift(m)) {
+      inMinutes++;
+    } else {
+      outMinutes++;
+    }
+  }
+
+  const shiftLabel = `${defaultShift.name} (${defaultShift.startTime}-${defaultShift.endTime})`;
+
+  // 1. OT อยู่ในช่วงเวลากะทั้งหมด = holiday_in_hours (แดง)
+  if (outMinutes === 0 && inMinutes > 0) {
+    return {
+      suggestedType: 'holiday_in_hours',
+      reason: `ระบบเลือกให้: วันที่ ${thaiDate} คุณหยุด (${dayOffLabel}) และ OT ${startTime}-${endTime} อยู่ในเวลากะ ${shiftLabel}`,
+    };
+  }
+
+  // 2. OT อยู่นอกช่วงเวลากะทั้งหมด = holiday_after_hours (เขียว)
+  if (inMinutes === 0 && outMinutes > 0) {
+    return {
+      suggestedType: 'holiday_after_hours',
+      reason: `ระบบเลือกให้: วันที่ ${thaiDate} คุณหยุด (${dayOffLabel}) และ OT ${startTime}-${endTime} อยู่นอกเวลากะ ${shiftLabel}`,
+    };
+  }
+
+  // 3. OT คร่อมทั้งในและนอกเวลากะ = ไม่เลือกให้ และขึ้นข้อความแนะนำให้แยกเป็น 2 คำขอ พร้อมบอกช่วงเวลาที่ควรแยก
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const formatMins = (mins: number) => {
+    const norm = ((mins % 1440) + 1440) % 1440;
+    return `${pad(Math.floor(norm / 60))}:${pad(norm % 60)}`;
+  };
+
+  interface Segment {
+    inside: boolean;
+    startK: number;
+    endK: number;
+  }
+  const segments: Segment[] = [];
+  let curInside = isInsideShift((otStart + 0) % 1440);
+  let curStart = 0;
+
+  for (let k = 1; k < otDuration; k++) {
+    const inside = isInsideShift((otStart + k) % 1440);
+    if (inside !== curInside) {
+      segments.push({ inside: curInside, startK: curStart, endK: k });
+      curInside = inside;
+      curStart = k;
+    }
+  }
+  segments.push({ inside: curInside, startK: curStart, endK: otDuration });
+
+  const insideRanges = segments
+    .filter((s) => s.inside)
+    .map((s) => `${formatMins(otStart + s.startK)}-${formatMins(otStart + s.endK)}`)
+    .join(', ');
+
+  const outsideRanges = segments
+    .filter((s) => !s.inside)
+    .map((s) => `${formatMins(otStart + s.startK)}-${formatMins(otStart + s.endK)}`)
+    .join(', ');
+
+  const adviceText = `คำแนะนำ: OT ช่วงเวลา ${startTime}-${endTime} น. คร่อมทั้งในและนอกเวลากะ ${shiftLabel} แนะนำให้แยกเป็น 2 คำขอ: ในเวลากะ ${insideRanges} น. (OT วันหยุด ในเวลางาน) และนอกเวลากะ ${outsideRanges} น. (OT วันหยุด หลังเวลางาน)`;
+
+  return {
+    suggestedType: null,
+    reason: adviceText,
+    isSpanning: true,
+  };
+}
+

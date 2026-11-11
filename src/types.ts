@@ -156,6 +156,8 @@ export interface OvertimeRequest {
   reason: string;             // Reason
   status: OvertimeStatus;     // 'pending' | 'approved' | 'rejected'
   otType?: OvertimeType;      // holiday_in_hours (แดง) | holiday_after_hours (เขียว) | workday (ฟ้า)
+  otTypeSuggested?: OvertimeType | null;
+  otTypeChangedByEmployee?: boolean;
   otTypeModifiedBy?: string;
   otTypeModifiedAt?: number;
   previousOtType?: OvertimeType;

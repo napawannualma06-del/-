@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, 
   addDoc, 
@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
-import { OvertimeRequest, OvertimeStatus, OvertimeType } from '../types';
+import { OvertimeRequest, OvertimeStatus, OvertimeType, ShiftTemplate, EmployeeShiftPref } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { recordSystemAction } from '../lib/activityService';
 import { 
@@ -49,8 +49,14 @@ import {
   exportOTToExcelCsv, 
   OTCycleInfo,
   OT_TYPE_CONFIG,
-  getOTTypeInfo
+  getOTTypeInfo,
+  determineSuggestedOTType
 } from '../lib/otUtils';
+import {
+  fetchCycleSchedule,
+  fetchShiftPrefs,
+  fetchShiftTemplates
+} from '../lib/shiftScheduleService';
 
 interface OvertimeModalProps {
   isOpen: boolean;
@@ -162,6 +168,91 @@ export function OvertimeModal({
 
   // OT Type (3 Colors: holiday_in_hours=แดง, holiday_after_hours=เขียว, workday=ฟ้า)
   const [otType, setOtType] = useState<OvertimeType | null>(null);
+  const [otTypeSuggested, setOtTypeSuggested] = useState<OvertimeType | null>(null);
+  const prevSuggestedRef = useRef<OvertimeType | null>(null);
+  const [otSuggestionReason, setOtSuggestionReason] = useState<string | null>(null);
+  const [isSpanningAdvice, setIsSpanningAdvice] = useState<boolean>(false);
+  const [isLoadingShiftData, setIsLoadingShiftData] = useState<boolean>(false);
+
+  // Cached cycle shift data: cycleKey -> { templates, prefs, scheduleDays }
+  const cycleDataCacheRef = useRef<Record<string, {
+    templates: ShiftTemplate[];
+    prefs: Record<string, EmployeeShiftPref>;
+    scheduleDays: Record<string, Record<string, string>>;
+  }>>({});
+
+  // Auto-detect OT Type from employee shift schedule
+  useEffect(() => {
+    if (!user?.uid || !date || !startTime || !endTime) return;
+
+    let isCancelled = false;
+    const cycleKey = getOTCycleFromDate(date).cycleKey;
+
+    async function evaluateShift() {
+      try {
+        let cached = cycleDataCacheRef.current[cycleKey];
+        if (!cached) {
+          setIsLoadingShiftData(true);
+          const [loadedTemplates, loadedPrefs, loadedSchedule] = await Promise.all([
+            fetchShiftTemplates(),
+            fetchShiftPrefs(),
+            fetchCycleSchedule(cycleKey),
+          ]);
+          cached = {
+            templates: loadedTemplates,
+            prefs: loadedPrefs,
+            scheduleDays: loadedSchedule.days || {},
+          };
+          cycleDataCacheRef.current[cycleKey] = cached;
+        }
+
+        if (isCancelled) return;
+
+        const result = determineSuggestedOTType({
+          date,
+          startTime,
+          endTime,
+          employeeId: user.uid,
+          shiftPrefs: cached.prefs,
+          scheduleDays: cached.scheduleDays,
+          shiftTemplates: cached.templates,
+        });
+
+        if (isCancelled) return;
+
+        const prevSuggested = prevSuggestedRef.current ?? otTypeSuggested;
+
+        setOtTypeSuggested(result.suggestedType);
+        setOtSuggestionReason(result.reason || null);
+        setIsSpanningAdvice(!!result.isSpanning);
+
+        // Auto-select type if suggested
+        if (result.suggestedType) {
+          setOtType(result.suggestedType);
+        } else if (result.isSpanning) {
+          setOtType(null);
+        } else {
+          // ถ้าประเภทที่เลือกอยู่ตอนนี้มาจากระบบ (ตรงกับ otTypeSuggested ครั้งก่อน) และผลใหม่ไม่ได้แนะนำ ให้ล้างการเลือก (setOtType(null)) เพื่อให้พนักงานเลือกเอง
+          // แต่ถ้าพนักงานกดเลือกเองไว้แล้ว ไม่ต้องล้าง
+          setOtType((prev) => (prev && prev === prevSuggested ? null : prev));
+        }
+
+        prevSuggestedRef.current = result.suggestedType;
+      } catch (err) {
+        console.error('Error evaluating shift schedule for OT:', err);
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingShiftData(false);
+        }
+      }
+    }
+
+    evaluateShift();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [date, startTime, endTime, user?.uid]);
 
   // Admin Change OT Type State
   const [editingOtTypeRequest, setEditingOtTypeRequest] = useState<OvertimeRequest | null>(null);
@@ -262,11 +353,14 @@ export function OvertimeModal({
     setIsSubmitting(true);
     try {
       const cycleInfo = getOTCycleFromDate(date);
+      const isChanged = Boolean(otTypeSuggested && otType !== otTypeSuggested);
       const newOT: any = {
         employeeId: user.uid,
         employeeName: user.name || 'พนักงาน',
         date,
         otType,
+        otTypeSuggested: otTypeSuggested || null,
+        otTypeChangedByEmployee: isChanged,
         startTime,
         endTime,
         hours: effectiveHours,
@@ -293,6 +387,10 @@ export function OvertimeModal({
       setReason('');
       setManualHours('');
       setOtType(null);
+      setOtTypeSuggested(null);
+      prevSuggestedRef.current = null;
+      setOtSuggestionReason(null);
+      setIsSpanningAdvice(false);
       setTimeout(() => {
         setSubmitSuccess(false);
         setActiveTab('my');
@@ -837,6 +935,40 @@ export function OvertimeModal({
                         </button>
                       </div>
 
+                      {/* ข้อมูลแนะนำประเภท OT จากตารางกะ */}
+                      {isLoadingShiftData ? (
+                        <div className="mt-2 p-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 text-[11px] text-slate-500 flex items-center gap-1.5 animate-pulse">
+                          <Clock className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                          <span>กำลังตรวจสอบตารางกะงานเพื่อแนะนำประเภท OT...</span>
+                        </div>
+                      ) : isSpanningAdvice && otSuggestionReason ? (
+                        <div className="mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 animate-in fade-in flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <span className="font-bold text-[11px] block text-amber-900 dark:text-amber-100">
+                              ตรวจพบ OT คร่อมทั้งในและนอกเวลากะ:
+                            </span>
+                            <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-0.5 leading-relaxed">
+                              {otSuggestionReason}
+                            </p>
+                          </div>
+                        </div>
+                      ) : otSuggestionReason ? (
+                        <div className="mt-2 p-2.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-xs text-indigo-950 dark:text-indigo-200 animate-in fade-in flex items-start gap-2">
+                          <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-medium leading-relaxed">
+                              {otSuggestionReason}
+                            </p>
+                            {otType && otTypeSuggested && otType !== otTypeSuggested && (
+                              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 block mt-0.5">
+                                (คุณเลือกเปลี่ยนเป็น: {OT_TYPE_CONFIG[otType].label})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+
                       {!otType && (
                         <div className="mt-1.5 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-1.5 animate-in fade-in">
                           <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -1131,11 +1263,19 @@ export function OvertimeModal({
                                   </span>
                                   {(() => {
                                     const tInfo = getOTTypeInfo(req.otType);
+                                    const suggestedInfo = req.otTypeSuggested ? getOTTypeInfo(req.otTypeSuggested) : null;
                                     return (
-                                      <span className={clsx("px-2 py-0.5 rounded-md text-[10px] font-bold border inline-flex items-center gap-1", tInfo.badgeClass)}>
-                                        <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", tInfo.dotClass)} />
-                                        {tInfo.label}
-                                      </span>
+                                      <div className="inline-flex items-center gap-1.5 flex-wrap">
+                                        <span className={clsx("px-2 py-0.5 rounded-md text-[10px] font-bold border inline-flex items-center gap-1", tInfo.badgeClass)}>
+                                          <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", tInfo.dotClass)} />
+                                          {tInfo.label}
+                                        </span>
+                                        {req.otTypeChangedByEmployee && (
+                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                            พนักงานเปลี่ยนจากที่ระบบแนะนำ (ระบบแนะนำ: {suggestedInfo ? suggestedInfo.label : 'ไม่ระบุ'})
+                                          </span>
+                                        )}
+                                      </div>
                                     );
                                   })()}
                                   <span className="flex items-center gap-1">
@@ -1374,11 +1514,19 @@ export function OvertimeModal({
                                 </span>
                                 {(() => {
                                   const tInfo = getOTTypeInfo(req.otType);
+                                  const suggestedInfo = req.otTypeSuggested ? getOTTypeInfo(req.otTypeSuggested) : null;
                                   return (
-                                    <span className={clsx("px-2 py-0.5 rounded-md text-[10px] font-bold border inline-flex items-center gap-1", tInfo.badgeClass)}>
-                                      <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", tInfo.dotClass)} />
-                                      {tInfo.label}
-                                    </span>
+                                    <div className="inline-flex items-center gap-1.5 flex-wrap">
+                                      <span className={clsx("px-2 py-0.5 rounded-md text-[10px] font-bold border inline-flex items-center gap-1", tInfo.badgeClass)}>
+                                        <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", tInfo.dotClass)} />
+                                        {tInfo.label}
+                                      </span>
+                                      {req.otTypeChangedByEmployee && (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                          พนักงานเปลี่ยนจากที่ระบบแนะนำ (ระบบแนะนำ: {suggestedInfo ? suggestedInfo.label : 'ไม่ระบุ'})
+                                        </span>
+                                      )}
+                                    </div>
                                   );
                                 })()}
                                 <span className="flex items-center gap-1">
