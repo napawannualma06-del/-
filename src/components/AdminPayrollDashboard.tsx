@@ -1,0 +1,2713 @@
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {
+  AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  Banknote,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  CreditCard,
+  Edit3,
+  Eye,
+  EyeOff,
+  FileCheck2,
+  FileText,
+  KeyRound,
+  Lock,
+  Mail,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Search,
+  Settings,
+  ShieldAlert,
+  Trash2,
+  Unlock,
+  X,
+} from 'lucide-react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { format } from 'date-fns';
+import { clsx } from 'clsx';
+import { auth } from '../lib/firebase';
+import { useStore, isUserAdmin } from '../store/useStore';
+import {
+  HRPrivateData,
+  HRProfile,
+  PayrollItemDefinition,
+  PayrollItemType,
+  PayrollSettingsDoc,
+  PayrollSlip,
+  PayrollSlipItem,
+} from '../types';
+import {
+  HR_PRIVATE_IDLE_TIMEOUT_MS,
+  fetchHRPrivateEmployee,
+  fetchHRProfiles,
+  getDefaultHRProfile,
+  lockHrAdminEmailSession,
+  maskSensitiveNumber,
+  signInHrAdminEmail,
+} from '../lib/hrService';
+import {
+  ApprovedOTHoursByType,
+  areOTMultipliersComplete,
+  calculatePayrollSlipValues,
+  calculateYTDTotals,
+  checkPayItemUsedInConfirmedSlips,
+  fetchEmployeeCycleApprovedAdvance,
+  fetchEmployeeCycleApprovedOT,
+  fetchEmployeeYearConfirmedSlips,
+  fetchPayrollSettings,
+  fetchPayrollSlip,
+  getDefaultPayrollSettings,
+  getYearFromCycleKey,
+  round2,
+  savePayrollSettings,
+  savePayrollSlip,
+  unconfirmPayrollSlip,
+} from '../lib/payrollService';
+import { getAvailableOTCycles, getOTCycleFromDate } from '../lib/otUtils';
+import { AnimalAvatar } from './AnimalAvatar';
+
+interface EmployeeRowComputedData {
+  privateData: HRPrivateData;
+  otHours: ApprovedOTHoursByType;
+  approvedAdvance: number;
+  slip: PayrollSlip | null;
+}
+
+export function AdminPayrollDashboard() {
+  const { user, registeredUsers } = useStore();
+  const isAdmin = isUserAdmin(user);
+
+  // Cycle & Pay Date
+  const availableCycles = useMemo(() => getAvailableOTCycles(), []);
+  const [selectedCycleKey, setSelectedCycleKey] = useState<string>(() => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    return getOTCycleFromDate(todayStr).cycleKey;
+  });
+
+  const selectedCycleInfo = useMemo(() => {
+    return (
+      availableCycles.find((c) => c.cycleKey === selectedCycleKey) ||
+      availableCycles[1] ||
+      availableCycles[0]
+    );
+  }, [availableCycles, selectedCycleKey]);
+
+  const [payDate, setPayDate] = useState<string>(() => `${selectedCycleKey}-25`);
+
+  // Basic HR Profiles & Payroll Settings (system_settings)
+  const [profiles, setProfiles] = useState<Record<string, HRProfile>>({});
+  const [settings, setSettings] = useState<PayrollSettingsDoc>(() => getDefaultPayrollSettings());
+  const [baseLoading, setBaseLoading] = useState<boolean>(true);
+  const [baseLoadError, setBaseLoadError] = useState<boolean>(false);
+  const [baseReloadCount, setBaseReloadCount] = useState<number>(0);
+
+  // HR Confidential Unlock State (Firebase Email/Password Auth)
+  const [isHrUnlocked, setIsHrUnlocked] = useState<boolean>(false);
+  const [hrUnlockedEmail, setHrUnlockedEmail] = useState<string | null>(null);
+  const [showUnlockModal, setShowUnlockModal] = useState<boolean>(false);
+  const lastHrActivityRef = useRef<number>(Date.now());
+
+  // Employee Confidential & Cycle Payroll Data (loaded per employee when unlocked)
+  const [rowDataMap, setRowDataMap] = useState<Record<string, EmployeeRowComputedData>>({});
+  const [rowsLoading, setRowsLoading] = useState<boolean>(false);
+  const [rowsLoadError, setRowsLoadError] = useState<string | null>(null);
+  const [rowsReloadCount, setRowsReloadCount] = useState<number>(0);
+
+  // UI State
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'not_created' | 'draft' | 'confirmed'>(
+    'all'
+  );
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [activeEmployeeId, setActiveEmployeeId] = useState<string | null>(null);
+  const [statusNotice, setStatusNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  // Sync Firebase Auth state for email/password provider
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      const isPasswordProvider = fbUser?.providerData?.some((p) => p.providerId === 'password');
+      if (fbUser && !fbUser.isAnonymous && isPasswordProvider && fbUser.email) {
+        setIsHrUnlocked(true);
+        setHrUnlockedEmail(fbUser.email);
+        lastHrActivityRef.current = Date.now();
+      } else {
+        setIsHrUnlocked(false);
+        setHrUnlockedEmail(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleLockHrPrivate = useCallback(async (isAutoTimeout = false) => {
+    await lockHrAdminEmailSession();
+    setIsHrUnlocked(false);
+    setHrUnlockedEmail(null);
+    setActiveEmployeeId(null);
+    setRowDataMap({});
+    if (isAutoTimeout) {
+      setStatusNotice({
+        type: 'error',
+        message: 'ล็อกข้อมูลสลิปเงินเดือนอัตโนมัติเนื่องจากไม่มีการใช้งานเกิน 15 นาที',
+      });
+    } else {
+      setStatusNotice({
+        type: 'success',
+        message: 'ล็อกข้อมูลลับสลิปเงินเดือนและออกจากระบบยืนยันตัวตนอีเมลเรียบร้อยแล้ว',
+      });
+      setTimeout(() => setStatusNotice(null), 4000);
+    }
+  }, []);
+
+  // Auto-lock after 15 minutes of inactivity
+  useEffect(() => {
+    if (!isHrUnlocked) return;
+
+    lastHrActivityRef.current = Date.now();
+    const updateActivity = () => {
+      lastHrActivityRef.current = Date.now();
+    };
+
+    const events = ['mousedown', 'keydown', 'touchstart', 'click', 'scroll'];
+    events.forEach((ev) => window.addEventListener(ev, updateActivity, { passive: true }));
+
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastHrActivityRef.current >= HR_PRIVATE_IDLE_TIMEOUT_MS) {
+        handleLockHrPrivate(true);
+      }
+    }, 15000);
+
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, updateActivity));
+      window.clearInterval(timer);
+    };
+  }, [isHrUnlocked, handleLockHrPrivate]);
+
+  // Load basic HR profiles & payroll_settings once on mount
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadBaseSettings() {
+      setBaseLoading(true);
+      setBaseLoadError(false);
+      try {
+        const [hrDoc, payrollCfg] = await Promise.all([
+          fetchHRProfiles(),
+          fetchPayrollSettings(),
+        ]);
+        if (isCancelled) return;
+        setProfiles(hrDoc.profiles || {});
+        setSettings(payrollCfg);
+        const savedPayDate = payrollCfg.defaultPayDates?.[selectedCycleKey];
+        if (savedPayDate) {
+          setPayDate(savedPayDate);
+        } else {
+          setPayDate(`${selectedCycleKey}-25`);
+        }
+      } catch (err) {
+        console.error('Error loading payroll base settings:', err);
+        if (!isCancelled) {
+          setBaseLoadError(true);
+        }
+      } finally {
+        if (!isCancelled) {
+          setBaseLoading(false);
+        }
+      }
+    }
+
+    loadBaseSettings();
+    return () => {
+      isCancelled = true;
+    };
+  }, [baseReloadCount]);
+
+  // Update payDate default when cycle changes
+  useEffect(() => {
+    const saved = settings.defaultPayDates?.[selectedCycleKey];
+    setPayDate(saved || `${selectedCycleKey}-25`);
+  }, [selectedCycleKey, settings.defaultPayDates]);
+
+  // Active employees excluding rejected and notEmployee
+  const visibleEmployees = useMemo(() => {
+    return (registeredUsers || [])
+      .filter((u) => u.accountStatus !== 'rejected')
+      .filter((u) => !profiles[u.uid]?.notEmployee)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [registeredUsers, profiles]);
+
+  // Load per-employee confidential salary, slip, approved OT, and approved advance for selectedCycleKey when unlocked
+  useEffect(() => {
+    if (!isHrUnlocked || baseLoading || baseLoadError) {
+      setRowDataMap({});
+      setRowsLoadError(null);
+      setRowsLoading(false);
+      return;
+    }
+
+    if (visibleEmployees.length === 0) {
+      setRowDataMap({});
+      setRowsLoadError(null);
+      setRowsLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadCycleEmployeeData() {
+      setRowsLoading(true);
+      setRowsLoadError(null);
+      try {
+        const entries = await Promise.all(
+          visibleEmployees.map(async (emp) => {
+            const p = profiles[emp.uid] || getDefaultHRProfile(emp.name);
+            const fallbackName = p.fullName || emp.name;
+            const [priv, slip, otHours, advTotal] = await Promise.all([
+              fetchHRPrivateEmployee(emp.uid, fallbackName),
+              fetchPayrollSlip(selectedCycleKey, emp.uid),
+              fetchEmployeeCycleApprovedOT(emp.uid, selectedCycleKey),
+              fetchEmployeeCycleApprovedAdvance(emp.uid, selectedCycleKey),
+            ]);
+            return [
+              emp.uid,
+              {
+                privateData: priv,
+                otHours,
+                approvedAdvance: advTotal,
+                slip,
+              } as EmployeeRowComputedData,
+            ] as const;
+          })
+        );
+
+        if (isCancelled) return;
+        const nextMap: Record<string, EmployeeRowComputedData> = {};
+        entries.forEach(([uid, data]) => {
+          nextMap[uid] = data;
+        });
+        setRowDataMap(nextMap);
+
+        // If any existing slip in this cycle has a payDate, sync if not set
+        const firstSlipWithDate = entries.find(([, d]) => d.slip?.payDate)?.[1].slip?.payDate;
+        if (firstSlipWithDate && !settings.defaultPayDates?.[selectedCycleKey]) {
+          setPayDate(firstSlipWithDate);
+        }
+      } catch (err: any) {
+        console.error('Error loading payroll rows:', err);
+        if (!isCancelled) {
+          const code = err?.code || '';
+          if (code === 'permission-denied' || String(err?.message || '').includes('permission')) {
+            setRowsLoadError(
+              'ไม่มีสิทธิ์เข้าถึงข้อมูลสลิปเงินเดือนและข้อมูลลับ HR (เฉพาะอีเมลแอดมินที่ได้รับอนุญาตเท่านั้น) ระบบปิดปุ่มบันทึกและยืนยัน'
+            );
+          } else {
+            setRowsLoadError(
+              'โหลดข้อมูลสลิปเงินเดือนไม่สำเร็จ กรุณากดโหลดใหม่ (ระบบปิดปุ่มบันทึกและยืนยันเพื่อป้องกันข้อมูลผิดพลาด)'
+            );
+          }
+        }
+      } finally {
+        if (!isCancelled) {
+          setRowsLoading(false);
+        }
+      }
+    }
+
+    loadCycleEmployeeData();
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    isHrUnlocked,
+    baseLoading,
+    baseLoadError,
+    visibleEmployees,
+    profiles,
+    selectedCycleKey,
+    rowsReloadCount,
+  ]);
+
+  const multipliersReady = useMemo(() => areOTMultipliersComplete(settings), [settings]);
+
+  // Compute display row values for each employee
+  const computedRows = useMemo(() => {
+    return visibleEmployees.map((emp) => {
+      const p = profiles[emp.uid] || getDefaultHRProfile(emp.name);
+      const rowData = rowDataMap[emp.uid];
+      const slip = rowData?.slip || null;
+      const priv = rowData?.privateData;
+      const hasSalary = Boolean(priv && Number(priv.salary) > 0);
+      const status: 'not_created' | 'draft' | 'confirmed' = slip ? slip.status : 'not_created';
+
+      // If slip is already confirmed or saved as draft, we can show its stored values or live preview
+      let salary = 0;
+      let otTotal = 0;
+      let totalEarnings = 0;
+      let totalDeductions = 0;
+      let netPay = 0;
+      let canDisplayNumbers = false;
+
+      if (slip && slip.status === 'confirmed') {
+        salary = slip.salary;
+        otTotal = slip.otTotal;
+        totalEarnings = slip.totalEarnings;
+        totalDeductions = slip.totalDeductions;
+        netPay = slip.netPay;
+        canDisplayNumbers = true;
+      } else if (rowData && multipliersReady) {
+        // Build default items from existing draft slip or 0
+        const existingItemMap = new Map<string, number>();
+        slip?.items?.forEach((it) => existingItemMap.set(it.id, Number(it.amount) || 0));
+
+        const activeItems: PayrollSlipItem[] = settings.payItems
+          .filter((def) => def.enabled || existingItemMap.has(def.id))
+          .map((def) => ({
+            id: def.id,
+            name: def.name,
+            nameEn: def.nameEn,
+            type: def.type,
+            amount: existingItemMap.get(def.id) || 0,
+          }));
+
+        const calc = calculatePayrollSlipValues({
+          privateData: rowData.privateData,
+          otHours: rowData.otHours,
+          settings,
+          approvedAdvanceAmount: rowData.approvedAdvance,
+          withholdingTax: slip?.withholdingTax || 0,
+          items: activeItems,
+        });
+
+        salary = calc.salary;
+        otTotal = calc.otTotal;
+        totalEarnings = calc.totalEarnings;
+        totalDeductions = calc.totalDeductions;
+        netPay = calc.netPay;
+        canDisplayNumbers = true;
+      } else if (priv) {
+        salary = round2(Number(priv.salary) || 0);
+      }
+
+      return {
+        emp,
+        profile: p,
+        rowData,
+        slip,
+        status,
+        hasSalary,
+        salary,
+        otTotal,
+        totalEarnings,
+        totalDeductions,
+        netPay,
+        canDisplayNumbers,
+      };
+    });
+  }, [visibleEmployees, profiles, rowDataMap, multipliersReady, settings]);
+
+  const filteredRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return computedRows.filter((r) => {
+      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+      if (!q) return true;
+      return (
+        (r.emp.name || '').toLowerCase().includes(q) ||
+        (r.emp.username || '').toLowerCase().includes(q) ||
+        (r.profile.fullName || '').toLowerCase().includes(q) ||
+        (r.profile.nickname || '').toLowerCase().includes(q) ||
+        (r.profile.position || '').toLowerCase().includes(q)
+      );
+    });
+  }, [computedRows, searchQuery, statusFilter]);
+
+  const cycleSummary = useMemo(() => {
+    let totalEmps = computedRows.length;
+    let notCreatedCount = 0;
+    let draftCount = 0;
+    let confirmedCount = 0;
+    let sumNetPay = 0;
+
+    computedRows.forEach((r) => {
+      if (r.status === 'confirmed') confirmedCount++;
+      else if (r.status === 'draft') draftCount++;
+      else notCreatedCount++;
+
+      if (r.canDisplayNumbers) {
+        sumNetPay = round2(sumNetPay + r.netPay);
+      }
+    });
+
+    return {
+      totalEmps,
+      notCreatedCount,
+      draftCount,
+      confirmedCount,
+      sumNetPay,
+    };
+  }, [computedRows]);
+
+  // Save Payroll Settings Handler
+  const handleSaveSettings = async (nextSettings: PayrollSettingsDoc) => {
+    if (!user || baseLoadError) return;
+    const actorName = hrUnlockedEmail || user.name || user.username || 'Admin';
+    const saved = await savePayrollSettings(nextSettings, actorName);
+    setSettings(saved);
+    setShowSettingsModal(false);
+    setStatusNotice({
+      type: 'success',
+      message: 'บันทึกการตั้งค่าสลิปเงินเดือนและตัวคูณ OT เรียบร้อยแล้ว',
+    });
+    setTimeout(() => setStatusNotice(null), 4000);
+  };
+
+  const loadedSlipsMap = useMemo(() => {
+    const m: Record<string, PayrollSlip | null> = {};
+    Object.entries(rowDataMap).forEach(([uid, d]) => {
+      m[uid] = d.slip;
+    });
+    return m;
+  }, [rowDataMap]);
+
+  if (!isAdmin) return null;
+
+  const activeRow = activeEmployeeId
+    ? computedRows.find((r) => r.emp.uid === activeEmployeeId) || null
+    : null;
+
+  return (
+    <div className="space-y-4 sm:space-y-5">
+      {/* Top Card: Header, Auth Lock/Unlock, Settings Button, Cycle & Pay Date Selector */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-5 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>ระบบสลิปเงินเดือน ({settings.companyName || 'Thunder Cloud'})</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                ตั้งค่าตัวคูณ OT รายการเงินได้/รายการหัก และคำนวณสลิปเงินเดือนรายบุคคลตามรอบ 26 ถึง 25
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Confidential HR Unlock / Lock Controls */}
+            {!isHrUnlocked ? (
+              <button
+                type="button"
+                onClick={() => setShowUnlockModal(true)}
+                className="px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+              >
+                <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>ยืนยันตัวตนแอดมินเพื่อดูข้อมูลลับ</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 px-2.5 py-1.5 rounded-xl">
+                <Unlock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                  ปลดล็อกข้อมูลลับ: {hrUnlockedEmail}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleLockHrPrivate(false)}
+                  className="ml-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shadow-2xs"
+                  title="ล็อกข้อมูลลับทันที (ล็อกอัตโนมัติเมื่อไม่มีการใช้งาน 15 นาที)"
+                >
+                  <Lock className="w-3 h-3" />
+                  <span>ล็อกข้อมูลลับ</span>
+                </button>
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={baseLoading || baseLoadError}
+              onClick={() => setShowSettingsModal(true)}
+              className={clsx(
+                'px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50',
+                !multipliersReady
+                  ? 'border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100'
+                  : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
+              )}
+            >
+              <Settings className="w-3.5 h-3.5 text-indigo-500" />
+              <span>ตั้งค่าสลิป / ตัวคูณ OT / รายการเงินได้-หัก</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Settings Summary Strip */}
+        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-200">
+              <Building2 className="w-3.5 h-3.5 text-indigo-500" />
+              <span>บริษัท: {settings.companyName || 'Thunder Cloud'}</span>
+            </span>
+            <span className="text-slate-300 dark:text-slate-700">|</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-500 dark:text-slate-400 font-semibold">ตัวคูณ OT:</span>
+              <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 font-bold">
+                แดง (วันหยุดในเวลา):{' '}
+                {settings.otMultiplierHolidayInHours !== null
+                  ? `×${settings.otMultiplierHolidayInHours}`
+                  : 'ยังไม่ระบุ'}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 font-bold">
+                เขียว (วันหยุดหลังเวลา):{' '}
+                {settings.otMultiplierHolidayAfterHours !== null
+                  ? `×${settings.otMultiplierHolidayAfterHours}`
+                  : 'ยังไม่ระบุ'}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300 font-bold">
+                ฟ้า (วันทำงานปกติ):{' '}
+                {settings.otMultiplierWorkday !== null
+                  ? `×${settings.otMultiplierWorkday}`
+                  : 'ยังไม่ระบุ'}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 font-bold">
+                ไม่ระบุ:{' '}
+                {settings.otMultiplierUnspecified !== null
+                  ? `×${settings.otMultiplierUnspecified}`
+                  : 'ยังไม่ระบุ'}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={baseLoading || baseLoadError}
+            onClick={() => setShowSettingsModal(true)}
+            className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>แก้ไขการตั้งค่า ({settings.payItems.filter((i) => i.enabled).length} รายการเปิดใช้)</span>
+          </button>
+        </div>
+
+        {/* Warning if OT Multipliers are not complete */}
+        {!baseLoading && !baseLoadError && !multipliersReady && (
+          <div className="p-3.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start sm:items-center gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+              <div>
+                <div className="font-bold">
+                  ยังไม่ได้กรอกตัวคูณ OT ครบทั้ง 4 ประเภท — ระบบจะยังไม่คำนวณสลิปเงินเดือน
+                </div>
+                <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                  กรุณากดปุ่มตั้งค่าเพื่อระบุตัวคูณ OT (สีแดง, สีเขียว, สีฟ้า และไม่ระบุ) ให้ครบทั้ง 4 ค่าก่อนคำนวณและสร้างสลิป
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-2xs"
+            >
+              กรอกตัวคูณ OT ตอนนี้
+            </button>
+          </div>
+        )}
+
+        {/* Cycle Selector & Pay Date Selector */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40">
+            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+              เลือกรอบเงินเดือน (26 ถึง 25)
+            </label>
+            <select
+              value={selectedCycleKey}
+              onChange={(e) => setSelectedCycleKey(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+            >
+              {availableCycles.map((c) => (
+                <option key={c.cycleKey} value={c.cycleKey}>
+                  {c.cycleLabel} ({c.periodLabel})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40">
+            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+              วันที่จ่ายเงินเดือน (Pay Date)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={payDate}
+                onChange={(e) => setPayDate(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* Search & Status Filter */}
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 flex flex-col justify-between gap-2">
+            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300">
+              ค้นหาพนักงาน / กรองสถานะสลิป
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="ชื่อ, ชื่อเล่น, ตำแหน่ง..."
+                  className="w-full pl-8 pr-6 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer"
+              >
+                <option value="all">ทั้งหมด ({cycleSummary.totalEmps})</option>
+                <option value="not_created">ยังไม่สร้าง ({cycleSummary.notCreatedCount})</option>
+                <option value="draft">ร่าง ({cycleSummary.draftCount})</option>
+                <option value="confirmed">ยืนยันแล้ว ({cycleSummary.confirmedCount})</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Base Load Error */}
+        {baseLoadError && (
+          <div className="p-3 rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>
+                โหลดการตั้งค่าสลิปเงินเดือนไม่สำเร็จ กรุณากดโหลดใหม่ (ระบบปิดปุ่มบันทึกและยืนยันชั่วคราว)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBaseReloadCount((c) => c + 1)}
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>โหลดใหม่</span>
+            </button>
+          </div>
+        )}
+
+        {/* Rows Load Error */}
+        {rowsLoadError && (
+          <div className="p-3 rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{rowsLoadError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRowsReloadCount((c) => c + 1)}
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>โหลดใหม่</span>
+            </button>
+          </div>
+        )}
+
+        {/* Status Notice */}
+        {statusNotice && (
+          <div
+            className={clsx(
+              'p-3 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2',
+              statusNotice.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                : 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+            )}
+          >
+            <div className="flex items-center gap-2">
+              {statusNotice.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0" />
+              )}
+              <span>{statusNotice.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStatusNotice(null)}
+              className="text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Main Content: Locked State vs Unlocked Payroll Table */}
+      {!isHrUnlocked ? (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-amber-300 dark:border-amber-800 p-8 sm:p-12 text-center space-y-4 shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 flex items-center justify-center text-amber-600 dark:text-amber-400 mx-auto">
+            <Lock className="w-7 h-7" />
+          </div>
+          <div className="max-w-md mx-auto space-y-1.5">
+            <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white">
+              ข้อมูลสลิปเงินเดือนและฐานเงินเดือนถูกล็อกไว้
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              สลิปเงินเดือน (`payroll_slips`) และข้อมูลเงินเดือน (`hr_private`) เป็นความลับเฉพาะแอดมิน HR
+              กรุณายืนยันตัวตนด้วยอีเมลแอดมินเพื่อดูตารางคำนวณและจัดการสลิปเงินเดือน (ล็อกอัตโนมัติเมื่อไม่ใช้งาน 15 นาที)
+            </p>
+          </div>
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowUnlockModal(true)}
+              className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-md transition cursor-pointer"
+            >
+              <KeyRound className="w-4 h-4" />
+              <span>ยืนยันตัวตนแอดมินเพื่อดูข้อมูลลับ</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
+          {/* Summary Bar above table */}
+          <div className="px-4 py-3 bg-slate-50/70 dark:bg-slate-800/50 border-b border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-3 font-semibold text-slate-600 dark:text-slate-300">
+              <span>
+                รอบ: <strong className="text-slate-900 dark:text-white">{selectedCycleInfo.cycleLabel}</strong>
+              </span>
+              <span>•</span>
+              <span>
+                พนักงานทั้งหมด: <strong className="text-slate-900 dark:text-white">{cycleSummary.totalEmps} คน</strong>
+              </span>
+              <span>•</span>
+              <span className="text-emerald-600 dark:text-emerald-400">
+                ยืนยันแล้ว: <strong>{cycleSummary.confirmedCount}</strong>
+              </span>
+              <span className="text-amber-600 dark:text-amber-400">
+                ร่าง: <strong>{cycleSummary.draftCount}</strong>
+              </span>
+              <span className="text-slate-500">
+                ยังไม่สร้าง: <strong>{cycleSummary.notCreatedCount}</strong>
+              </span>
+            </div>
+
+            {multipliersReady && (
+              <div className="font-bold text-indigo-700 dark:text-indigo-300 tabular-nums">
+                รวมยอดจ่ายสุทธิรอบนี้:{' '}
+                <span className="text-sm font-black">
+                  {cycleSummary.sumNetPay.toLocaleString('th-TH', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{' '}
+                  บาท
+                </span>
+              </div>
+            )}
+          </div>
+
+          {baseLoading || rowsLoading ? (
+            <div className="p-12 text-center text-slate-400 dark:text-slate-500 text-sm">
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+              กำลังโหลดข้อมูลสลิปเงินเดือนและคำนวณยอดรายบุคคล...
+            </div>
+          ) : baseLoadError || rowsLoadError ? (
+            <div className="p-12 text-center space-y-3">
+              <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+              <div className="text-sm font-bold text-rose-700 dark:text-rose-400">
+                {rowsLoadError || 'โหลดข้อมูลไม่สำเร็จ กรุณากดโหลดใหม่'}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (baseLoadError) setBaseReloadCount((c) => c + 1);
+                  setRowsReloadCount((c) => c + 1);
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>โหลดใหม่</span>
+              </button>
+            </div>
+          ) : filteredRows.length === 0 ? (
+            <div className="p-12 text-center text-slate-400 dark:text-slate-500 text-sm">
+              ไม่พบรายชื่อพนักงานตามเงื่อนไขที่ค้นหา
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                    <th className="px-4 py-3 text-left min-w-[210px]">ชื่อพนักงาน</th>
+                    <th className="px-3 py-3 text-right min-w-[120px]">เงินเดือน</th>
+                    <th className="px-3 py-3 text-right min-w-[120px]">OT</th>
+                    <th className="px-3 py-3 text-right min-w-[120px]">รวมเงินได้</th>
+                    <th className="px-3 py-3 text-right min-w-[120px]">รวมหัก</th>
+                    <th className="px-3 py-3 text-right min-w-[130px]">สุทธิ</th>
+                    <th className="px-4 py-3 text-center min-w-[140px]">สถานะ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
+                  {filteredRows.map((row) => {
+                    const {
+                      emp,
+                      profile,
+                      rowData,
+                      status,
+                      hasSalary,
+                      salary,
+                      otTotal,
+                      totalEarnings,
+                      totalDeductions,
+                      netPay,
+                      canDisplayNumbers,
+                    } = row;
+
+                    const fmtMoney = (n: number) =>
+                      n.toLocaleString('th-TH', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      });
+
+                    return (
+                      <tr
+                        key={emp.uid}
+                        onClick={() => setActiveEmployeeId(emp.uid)}
+                        className="hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition cursor-pointer group"
+                      >
+                        {/* ชื่อพนักงาน */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <AnimalAvatar
+                              avatarEmoji={emp.avatarEmoji}
+                              identifier={emp.username || emp.uid}
+                              name={emp.name}
+                              size="sm"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition truncate flex items-center gap-1.5">
+                                <span>{profile.fullName || emp.name}</span>
+                                {profile.nickname && (
+                                  <span className="text-[11px] font-normal text-slate-400">
+                                    ({profile.nickname})
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate">
+                                {profile.position ? `${profile.position} • ` : ''}@{emp.username || emp.uid}
+                              </div>
+                              {!hasSalary && (
+                                <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/80 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-[10px] font-bold">
+                                  <AlertCircle className="w-3 h-3 shrink-0" />
+                                  <span>ยังไม่มีเงินเดือนในข้อมูลลับ (ห้ามยืนยัน)</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* เงินเดือน */}
+                        <td className="px-3 py-3 text-right font-mono">
+                          {hasSalary ? (
+                            <span className="font-bold text-slate-800 dark:text-slate-200">
+                              {fmtMoney(salary)}
+                            </span>
+                          ) : (
+                            <span className="text-rose-600 dark:text-rose-400 font-bold text-[11px]">
+                              ยังไม่ระบุเงินเดือน
+                            </span>
+                          )}
+                        </td>
+
+                        {/* OT */}
+                        <td className="px-3 py-3 text-right font-mono">
+                          {canDisplayNumbers ? (
+                            <div>
+                              <div className="font-semibold text-indigo-600 dark:text-indigo-400">
+                                {fmtMoney(otTotal)}
+                              </div>
+                              {rowData && rowData.otHours.totalHours > 0 && (
+                                <div className="text-[10px] text-slate-400">
+                                  {rowData.otHours.totalHours} ชม.
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-amber-600 dark:text-amber-400 text-[11px]">
+                              รอตัวคูณ OT
+                            </span>
+                          )}
+                        </td>
+
+                        {/* รวมเงินได้ */}
+                        <td className="px-3 py-3 text-right font-mono">
+                          {canDisplayNumbers ? (
+                            <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                              {fmtMoney(totalEarnings)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+
+                        {/* รวมหัก */}
+                        <td className="px-3 py-3 text-right font-mono">
+                          {canDisplayNumbers ? (
+                            <span className="font-bold text-rose-600 dark:text-rose-400">
+                              {fmtMoney(totalDeductions)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+
+                        {/* สุทธิ */}
+                        <td className="px-3 py-3 text-right font-mono">
+                          {canDisplayNumbers ? (
+                            <span className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">
+                              {fmtMoney(netPay)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+
+                        {/* สถานะ */}
+                        <td className="px-4 py-3 text-center">
+                          {status === 'confirmed' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>ยืนยันแล้ว</span>
+                            </span>
+                          ) : status === 'draft' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800">
+                              <Clock className="w-3 h-3" />
+                              <span>ร่าง</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
+                              <span>ยังไม่สร้าง</span>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL 1: Payroll Settings Modal (Company Name, 4 OT Multipliers, PayItems CRUD & Reorder) */}
+      {showSettingsModal && (
+        <PayrollSettingsModal
+          initialSettings={settings}
+          loadedSlipsMap={loadedSlipsMap}
+          disabledSave={baseLoadError || baseLoading}
+          onClose={() => setShowSettingsModal(false)}
+          onSave={handleSaveSettings}
+        />
+      )}
+
+      {/* MODAL 2: Employee Payroll Slip Detail & Live Calculator Modal */}
+      {activeRow && isHrUnlocked && (
+        <EmployeePayrollSlipModal
+          employee={activeRow.emp}
+          profile={activeRow.profile}
+          cycleKey={selectedCycleKey}
+          cycleLabel={selectedCycleInfo.cycleLabel}
+          periodLabel={selectedCycleInfo.periodLabel}
+          defaultPayDate={payDate}
+          settings={settings}
+          multipliersReady={multipliersReady}
+          initialRowData={activeRow.rowData}
+          actorName={hrUnlockedEmail || user?.name || user?.username || 'Admin'}
+          onOpenSettings={() => {
+            setActiveEmployeeId(null);
+            setShowSettingsModal(true);
+          }}
+          onClose={() => setActiveEmployeeId(null)}
+          onSavedSlip={async (savedSlip, newlyUsedItemIds) => {
+            // Update local rowDataMap immediately
+            setRowDataMap((prev) => {
+              const cur = prev[activeRow.emp.uid];
+              if (!cur) return prev;
+              return {
+                ...prev,
+                [activeRow.emp.uid]: {
+                  ...cur,
+                  slip: savedSlip,
+                },
+              };
+            });
+
+            // If confirmed and has used payItems, persist usedPayItemIds in payroll_settings
+            if (savedSlip.status === 'confirmed' && newlyUsedItemIds.length > 0) {
+              const mergedUsed = Array.from(
+                new Set([...(settings.usedPayItemIds || []), ...newlyUsedItemIds])
+              );
+              if (mergedUsed.length !== (settings.usedPayItemIds || []).length) {
+                try {
+                  const nextSettings = await savePayrollSettings(
+                    {
+                      ...settings,
+                      usedPayItemIds: mergedUsed,
+                    },
+                    hrUnlockedEmail || user?.name || 'Admin'
+                  );
+                  setSettings(nextSettings);
+                } catch (e) {
+                  console.warn('Could not update usedPayItemIds in payroll_settings:', e);
+                }
+              }
+            }
+
+            setStatusNotice({
+              type: 'success',
+              message:
+                savedSlip.status === 'confirmed'
+                  ? `ยืนยันสลิปเงินเดือนของ "${activeRow.profile.fullName || activeRow.emp.name}" เรียบร้อยแล้ว`
+                  : `บันทึกร่างสลิปเงินเดือนของ "${activeRow.profile.fullName || activeRow.emp.name}" เรียบร้อยแล้ว`,
+            });
+            setTimeout(() => setStatusNotice(null), 4000);
+          }}
+        />
+      )}
+
+      {/* MODAL 3: HR Admin Email & Password Verification Modal */}
+      {showUnlockModal && (
+        <PayrollAdminUnlockModal
+          onClose={() => setShowUnlockModal(false)}
+          onSuccess={(email) => {
+            setIsHrUnlocked(true);
+            setHrUnlockedEmail(email);
+            lastHrActivityRef.current = Date.now();
+            setShowUnlockModal(false);
+            setStatusNotice({
+              type: 'success',
+              message: `ยืนยันตัวตนสำเร็จ (${email}) สามารถดูและจัดการสลิปเงินเดือนได้แล้ว`,
+            });
+            setTimeout(() => setStatusNotice(null), 4000);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ===============================================================
+// Sub-Modal 1: Payroll Settings Modal
+// ===============================================================
+
+function PayrollSettingsModal({
+  initialSettings,
+  loadedSlipsMap,
+  disabledSave,
+  onClose,
+  onSave,
+}: {
+  initialSettings: PayrollSettingsDoc;
+  loadedSlipsMap: Record<string, PayrollSlip | null>;
+  disabledSave: boolean;
+  onClose: () => void;
+  onSave: (settings: PayrollSettingsDoc) => Promise<void>;
+}) {
+  const [companyName, setCompanyName] = useState(initialSettings.companyName || 'Thunder Cloud');
+  const [multRed, setMultRed] = useState<string>(
+    initialSettings.otMultiplierHolidayInHours !== null &&
+      initialSettings.otMultiplierHolidayInHours !== undefined
+      ? String(initialSettings.otMultiplierHolidayInHours)
+      : ''
+  );
+  const [multGreen, setMultGreen] = useState<string>(
+    initialSettings.otMultiplierHolidayAfterHours !== null &&
+      initialSettings.otMultiplierHolidayAfterHours !== undefined
+      ? String(initialSettings.otMultiplierHolidayAfterHours)
+      : ''
+  );
+  const [multBlue, setMultBlue] = useState<string>(
+    initialSettings.otMultiplierWorkday !== null &&
+      initialSettings.otMultiplierWorkday !== undefined
+      ? String(initialSettings.otMultiplierWorkday)
+      : ''
+  );
+  const [multGray, setMultGray] = useState<string>(
+    initialSettings.otMultiplierUnspecified !== null &&
+      initialSettings.otMultiplierUnspecified !== undefined
+      ? String(initialSettings.otMultiplierUnspecified)
+      : ''
+  );
+
+  const [payItems, setPayItems] = useState<PayrollItemDefinition[]>(() =>
+    initialSettings.payItems.map((it) => ({ ...it }))
+  );
+  const [usedPayItemIds, setUsedPayItemIds] = useState<string[]>(
+    () => initialSettings.usedPayItemIds || []
+  );
+
+  // Add new item state
+  const [newNameTh, setNewNameTh] = useState('');
+  const [newNameEn, setNewNameEn] = useState('');
+  const [newType, setNewType] = useState<PayrollItemType>('earning');
+
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleAddItem = () => {
+    const trimmed = newNameTh.trim();
+    if (!trimmed) {
+      setErrorMsg('กรุณาระบุชื่อรายการ (ภาษาไทย)');
+      return;
+    }
+    setErrorMsg(null);
+    const id = `${newType}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    setPayItems((prev) => [
+      ...prev,
+      {
+        id,
+        name: trimmed,
+        nameEn: newNameEn.trim(),
+        type: newType,
+        enabled: true,
+      },
+    ]);
+    setNewNameTh('');
+    setNewNameEn('');
+  };
+
+  const handleMoveItem = (index: number, direction: -1 | 1) => {
+    const targetIdx = index + direction;
+    if (targetIdx < 0 || targetIdx >= payItems.length) return;
+    setPayItems((prev) => {
+      const copy = [...prev];
+      const temp = copy[index];
+      copy[index] = copy[targetIdx];
+      copy[targetIdx] = temp;
+      return copy;
+    });
+  };
+
+  const handleDeleteOrDisableItem = async (item: PayrollItemDefinition) => {
+    setNotice(null);
+    setErrorMsg(null);
+    const isUsed = await checkPayItemUsedInConfirmedSlips(
+      item.id,
+      { ...initialSettings, usedPayItemIds },
+      loadedSlipsMap
+    );
+
+    if (isUsed) {
+      // ห้ามลบจริง ให้เปลี่ยนเป็นปิดใช้งานแทน เพื่อให้สลิปเก่ายังแสดงถูก
+      setPayItems((prev) =>
+        prev.map((it) => (it.id === item.id ? { ...it, enabled: false } : it))
+      );
+      setUsedPayItemIds((prev) => Array.from(new Set([...prev, item.id])));
+      setNotice(
+        `รายการ "${item.name}" เคยถูกใช้ในสลิปที่ยืนยันแล้ว ระบบจึงเปลี่ยนเป็น "ปิดใช้งาน" แทนการลบจริง เพื่อให้สลิปเก่ายังแสดงผลได้ถูกต้อง`
+      );
+    } else {
+      setPayItems((prev) => prev.filter((it) => it.id !== item.id));
+    }
+  };
+
+  const parseMultiplierInput = (raw: string): number | null => {
+    const trimmed = raw.trim();
+    if (trimmed === '') return null;
+    const n = Number(trimmed);
+    return Number.isFinite(n) && n >= 0 ? round2(n) : null;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (disabledSave || saving) return;
+
+    setSaving(true);
+    setErrorMsg(null);
+    try {
+      const nextDoc: PayrollSettingsDoc = {
+        ...initialSettings,
+        companyName: companyName.trim() || 'Thunder Cloud',
+        otMultiplierHolidayInHours: parseMultiplierInput(multRed),
+        otMultiplierHolidayAfterHours: parseMultiplierInput(multGreen),
+        otMultiplierWorkday: parseMultiplierInput(multBlue),
+        otMultiplierUnspecified: parseMultiplierInput(multGray),
+        payItems: payItems.filter((it) => it.name.trim() !== ''),
+        usedPayItemIds,
+      };
+      await onSave(nextDoc);
+    } catch (err) {
+      console.error('Error saving payroll settings:', err);
+      setErrorMsg('เกิดข้อผิดพลาดในการบันทึกการตั้งค่า กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-3xl p-5 space-y-4 max-h-[92vh] overflow-y-auto">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400">
+              <Settings className="w-5 h-5" />
+            </span>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                ตั้งค่าระบบสลิปเงินเดือน (`system_settings/payroll_settings`)
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                กำหนดชื่อบริษัท ตัวคูณ OT ทั้ง 4 ประเภท และจัดการรายการเงินได้ / รายการหัก
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          {/* 1. Company Name */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
+            <label className="block font-bold text-slate-800 dark:text-slate-200">
+              1. ชื่อบริษัท (แสดงบนสลิปเงินเดือน)
+            </label>
+            <input
+              type="text"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="Thunder Cloud"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
+            />
+          </div>
+
+          {/* 2. OT Multipliers (4 values) */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-3">
+            <div>
+              <div className="font-bold text-slate-800 dark:text-slate-200">
+                2. ตัวคูณ OT ทั้ง 4 ประเภท (แอดมินต้องกรอกให้ครบทั้ง 4 ค่าจึงจะคำนวณสลิปได้)
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                สูตรค่า OT แต่ละประเภท = ชั่วโมง OT ที่อนุมัติแล้ว × ค่าแรงต่อชั่วโมง (salary ÷ 30 ÷ 8) × ตัวคูณ
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* แดง: holiday_in_hours */}
+              <div className="p-3 rounded-xl border border-rose-200 dark:border-rose-900/70 bg-rose-50/50 dark:bg-rose-950/30">
+                <label className="block font-bold text-rose-800 dark:text-rose-300 mb-1">
+                  OT วันหยุด ในเวลางาน (สีแดง)
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-rose-600 dark:text-rose-400 font-bold">×</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={multRed}
+                    onChange={(e) => setMultRed(e.target.value)}
+                    placeholder="ระบุตัวคูณ เช่น 1 หรือ 2"
+                    className="w-full px-3 py-1.5 rounded-lg border border-rose-300 dark:border-rose-800 bg-white dark:bg-slate-900 font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {/* เขียว: holiday_after_hours */}
+              <div className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/50 dark:bg-emerald-950/30">
+                <label className="block font-bold text-emerald-800 dark:text-emerald-300 mb-1">
+                  OT วันหยุด หลังเวลางาน (สีเขียว)
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">×</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={multGreen}
+                    onChange={(e) => setMultGreen(e.target.value)}
+                    placeholder="ระบุตัวคูณ เช่น 3"
+                    className="w-full px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {/* ฟ้า: workday */}
+              <div className="p-3 rounded-xl border border-sky-200 dark:border-sky-900/70 bg-sky-50/50 dark:bg-sky-950/30">
+                <label className="block font-bold text-sky-800 dark:text-sky-300 mb-1">
+                  OT วันทำงานปกติ (สีฟ้า)
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sky-600 dark:text-sky-400 font-bold">×</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={multBlue}
+                    onChange={(e) => setMultBlue(e.target.value)}
+                    placeholder="ระบุตัวคูณ เช่น 1.5"
+                    className="w-full px-3 py-1.5 rounded-lg border border-sky-300 dark:border-sky-800 bg-white dark:bg-slate-900 font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {/* เทา: unspecified */}
+              <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  OT ไม่ระบุประเภท (สีเทา)
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500 font-bold">×</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={multGray}
+                    onChange={(e) => setMultGray(e.target.value)}
+                    placeholder="ระบุตัวคูณ เช่น 1.5"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Pay Items Management */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-3">
+            <div>
+              <div className="font-bold text-slate-800 dark:text-slate-200">
+                3. รายการเงินได้ (Earnings) และ รายการหัก (Deductions)
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                เพิ่ม แก้ไข ลบ เปิด/ปิดใช้งาน และจัดเรียงลำดับได้ (รายการที่เคยใช้ในสลิปที่ยืนยันแล้วจะเปลี่ยนเป็นปิดใช้งานแทนการลบจริง)
+              </p>
+            </div>
+
+            {notice && (
+              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-200 font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                <span>{notice}</span>
+              </div>
+            )}
+
+            {/* Add new pay item bar */}
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+              <div className="sm:col-span-4">
+                <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                  ชื่อรายการ (ไทย) *
+                </label>
+                <input
+                  type="text"
+                  value={newNameTh}
+                  onChange={(e) => setNewNameTh(e.target.value)}
+                  placeholder="เช่น ค่าตำแหน่ง, ค่าเดินทาง"
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                />
+              </div>
+
+              <div className="sm:col-span-4">
+                <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                  ชื่อภาษาอังกฤษ (ไม่บังคับ)
+                </label>
+                <input
+                  type="text"
+                  value={newNameEn}
+                  onChange={(e) => setNewNameEn(e.target.value)}
+                  placeholder="e.g. Position Allowance"
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                  ประเภท
+                </label>
+                <select
+                  value={newType}
+                  onChange={(e) => setNewType(e.target.value as PayrollItemType)}
+                  className="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-semibold cursor-pointer"
+                >
+                  <option value="earning">เงินได้ (+)</option>
+                  <option value="deduction">รายการหัก (-)</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-2">
+                <button
+                  type="button"
+                  onClick={handleAddItem}
+                  className="w-full px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>เพิ่มรายการ</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Pay items list */}
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {payItems.map((item, idx) => (
+                <div
+                  key={item.id}
+                  className={clsx(
+                    'p-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 transition',
+                    item.enabled
+                      ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700'
+                      : 'bg-slate-100/70 dark:bg-slate-800/40 border-slate-200/60 dark:border-slate-800 opacity-70'
+                  )}
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap sm:flex-nowrap">
+                    <span
+                      className={clsx(
+                        'px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0',
+                        item.type === 'earning'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                          : 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300'
+                      )}
+                    >
+                      {item.type === 'earning' ? 'เงินได้' : 'รายการหัก'}
+                    </span>
+
+                    <input
+                      type="text"
+                      value={item.name}
+                      onChange={(e) =>
+                        setPayItems((prev) =>
+                          prev.map((it, i) => (i === idx ? { ...it, name: e.target.value } : it))
+                        )
+                      }
+                      placeholder="ชื่อภาษาไทย"
+                      className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent font-bold text-slate-900 dark:text-white min-w-[140px] flex-1"
+                    />
+
+                    <input
+                      type="text"
+                      value={item.nameEn || ''}
+                      onChange={(e) =>
+                        setPayItems((prev) =>
+                          prev.map((it, i) => (i === idx ? { ...it, nameEn: e.target.value } : it))
+                        )
+                      }
+                      placeholder="ชื่ออังกฤษ (ไม่บังคับ)"
+                      className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent text-slate-600 dark:text-slate-300 min-w-[120px] flex-1"
+                    />
+
+                    <select
+                      value={item.type}
+                      onChange={(e) =>
+                        setPayItems((prev) =>
+                          prev.map((it, i) =>
+                            i === idx ? { ...it, type: e.target.value as PayrollItemType } : it
+                          )
+                        )
+                      }
+                      className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] font-semibold cursor-pointer"
+                    >
+                      <option value="earning">เงินได้</option>
+                      <option value="deduction">รายการหัก</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0 justify-end">
+                    <label className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 cursor-pointer text-[11px] font-semibold">
+                      <input
+                        type="checkbox"
+                        checked={item.enabled}
+                        onChange={(e) =>
+                          setPayItems((prev) =>
+                            prev.map((it, i) =>
+                              i === idx ? { ...it, enabled: e.target.checked } : it
+                            )
+                          )
+                        }
+                        className="rounded text-indigo-600 w-3.5 h-3.5 cursor-pointer"
+                      />
+                      <span>{item.enabled ? 'เปิดใช้' : 'ปิดใช้'}</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => handleMoveItem(idx, -1)}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"
+                      title="เลื่อนขึ้น"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={idx === payItems.length - 1}
+                      onClick={() => handleMoveItem(idx, 1)}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 cursor-pointer"
+                      title="เลื่อนลง"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteOrDisableItem(item)}
+                      className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer"
+                      title="ลบรายการ (หากเคยใช้ในสลิปที่ยืนยันแล้วจะเปลี่ยนเป็นปิดใช้งานแทน)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {errorMsg && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-semibold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="submit"
+              disabled={disabledSave || saving}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ===============================================================
+// Sub-Modal 2: Employee Payroll Slip Detail & Live Calculator Modal
+// ===============================================================
+
+function EmployeePayrollSlipModal({
+  employee,
+  profile,
+  cycleKey,
+  cycleLabel,
+  periodLabel,
+  defaultPayDate,
+  settings,
+  multipliersReady,
+  initialRowData,
+  actorName,
+  onOpenSettings,
+  onClose,
+  onSavedSlip,
+}: {
+  employee: { uid: string; name: string; username?: string; avatarEmoji?: string };
+  profile: HRProfile;
+  cycleKey: string;
+  cycleLabel: string;
+  periodLabel: string;
+  defaultPayDate: string;
+  settings: PayrollSettingsDoc;
+  multipliersReady: boolean;
+  initialRowData?: EmployeeRowComputedData;
+  actorName: string;
+  onOpenSettings: () => void;
+  onClose: () => void;
+  onSavedSlip: (savedSlip: PayrollSlip, usedItemIds: string[]) => Promise<void>;
+}) {
+  const year = useMemo(() => getYearFromCycleKey(cycleKey), [cycleKey]);
+
+  const [loading, setLoading] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadCount, setReloadCount] = useState<number>(0);
+
+  const [privateData, setPrivateData] = useState<HRPrivateData | null>(
+    initialRowData?.privateData || null
+  );
+  const [otHours, setOtHours] = useState<ApprovedOTHoursByType>(
+    initialRowData?.otHours || {
+      holiday_in_hours: 0,
+      holiday_after_hours: 0,
+      workday: 0,
+      unspecified: 0,
+      totalHours: 0,
+    }
+  );
+  const [approvedAdvance, setApprovedAdvance] = useState<number>(
+    initialRowData?.approvedAdvance || 0
+  );
+  const [existingSlip, setExistingSlip] = useState<PayrollSlip | null>(
+    initialRowData?.slip || null
+  );
+  const [yearConfirmedSlips, setYearConfirmedSlips] = useState<PayrollSlip[]>([]);
+
+  // Form inputs (live calculation while typing)
+  const [payDate, setPayDate] = useState<string>(
+    initialRowData?.slip?.payDate || defaultPayDate || `${cycleKey}-25`
+  );
+  const [withholdingTaxStr, setWithholdingTaxStr] = useState<string>(
+    initialRowData?.slip?.withholdingTax ? String(initialRowData.slip.withholdingTax) : '0'
+  );
+  const [itemAmounts, setItemAmounts] = useState<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    initialRowData?.slip?.items?.forEach((it) => {
+      map[it.id] = String(it.amount ?? 0);
+    });
+    return map;
+  });
+  const [remark, setRemark] = useState<string>(initialRowData?.slip?.remark || '');
+
+  // Bank account masking toggle
+  const [showFullBankAccount, setShowFullBankAccount] = useState<boolean>(false);
+
+  // Unconfirm state
+  const [showUnconfirmBox, setShowUnconfirmBox] = useState<boolean>(false);
+  const [unconfirmReason, setUnconfirmReason] = useState<string>('');
+  const [savingAction, setSavingAction] = useState<'draft' | 'confirmed' | 'unconfirm' | null>(
+    null
+  );
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Load fresh employee slip data & YTD confirmed slips on modal open
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadDetail() {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const fallbackName = profile.fullName || employee.name;
+        const [priv, slip, ot, adv, ytdSlips] = await Promise.all([
+          fetchHRPrivateEmployee(employee.uid, fallbackName),
+          fetchPayrollSlip(cycleKey, employee.uid),
+          fetchEmployeeCycleApprovedOT(employee.uid, cycleKey),
+          fetchEmployeeCycleApprovedAdvance(employee.uid, cycleKey),
+          fetchEmployeeYearConfirmedSlips(employee.uid, year),
+        ]);
+
+        if (isCancelled) return;
+        setPrivateData(priv);
+        setExistingSlip(slip);
+        setOtHours(ot);
+        setApprovedAdvance(adv);
+        setYearConfirmedSlips(ytdSlips);
+
+        if (slip) {
+          setPayDate(slip.payDate || defaultPayDate || `${cycleKey}-25`);
+          setWithholdingTaxStr(String(slip.withholdingTax ?? 0));
+          const map: Record<string, string> = {};
+          slip.items?.forEach((it) => {
+            map[it.id] = String(it.amount ?? 0);
+          });
+          setItemAmounts(map);
+          setRemark(slip.remark || '');
+        }
+      } catch (err) {
+        console.error('Error loading employee slip modal data:', err);
+        if (!isCancelled) {
+          setLoadError(
+            'โหลดข้อมูลสลิปของพนักงานไม่สำเร็จ กรุณากดโหลดใหม่ (ระบบปิดปุ่มบันทึกและยืนยันเพื่อป้องกันข้อมูลทับหาย)'
+          );
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadDetail();
+    return () => {
+      isCancelled = true;
+    };
+  }, [employee.uid, employee.name, profile.fullName, cycleKey, year, defaultPayDate, reloadCount]);
+
+  const isConfirmed = existingSlip?.status === 'confirmed';
+  const hasSalary = Boolean(privateData && Number(privateData.salary) > 0);
+
+  // Merge active payItems with any historical items stored on this slip
+  const effectivePayItems = useMemo(() => {
+    const list: PayrollItemDefinition[] = [];
+    const seen = new Set<string>();
+
+    settings.payItems.forEach((def) => {
+      if (def.enabled || (existingSlip?.items?.some((i) => i.id === def.id && i.amount > 0))) {
+        list.push(def);
+        seen.add(def.id);
+      }
+    });
+
+    existingSlip?.items?.forEach((oldItem) => {
+      if (!seen.has(oldItem.id)) {
+        list.push({
+          id: oldItem.id,
+          name: oldItem.name,
+          nameEn: oldItem.nameEn,
+          type: oldItem.type,
+          enabled: false,
+        });
+        seen.add(oldItem.id);
+      }
+    });
+
+    return list;
+  }, [settings.payItems, existingSlip]);
+
+  // Live calculation while typing
+  const liveCalc = useMemo(() => {
+    if (!privateData) return null;
+
+    const slipItems: PayrollSlipItem[] = effectivePayItems.map((def) => ({
+      id: def.id,
+      name: def.name,
+      nameEn: def.nameEn,
+      type: def.type,
+      amount: round2(Math.max(0, parseFloat(itemAmounts[def.id] || '0') || 0)),
+    }));
+
+    return calculatePayrollSlipValues({
+      privateData,
+      otHours,
+      settings,
+      approvedAdvanceAmount: approvedAdvance,
+      withholdingTax: round2(Math.max(0, parseFloat(withholdingTaxStr || '0') || 0)),
+      items: slipItems,
+    });
+  }, [privateData, otHours, settings, approvedAdvance, withholdingTaxStr, effectivePayItems, itemAmounts]);
+
+  // Displayed values: if confirmed, show the locked confirmed values; otherwise show liveCalc
+  const displayedValues = useMemo(() => {
+    if (isConfirmed && existingSlip) {
+      return {
+        salary: existingSlip.salary,
+        hourlyRate: existingSlip.hourlyRate,
+        otLines: existingSlip.otLines,
+        otTotal: existingSlip.otTotal,
+        ssoAmount: existingSlip.ssoAmount,
+        advanceAmount: existingSlip.advanceAmount,
+        withholdingTax: existingSlip.withholdingTax,
+        items: existingSlip.items || [],
+        totalEarnings: existingSlip.totalEarnings,
+        totalDeductions: existingSlip.totalDeductions,
+        netPay: existingSlip.netPay,
+      };
+    }
+    return liveCalc;
+  }, [isConfirmed, existingSlip, liveCalc]);
+
+  // YTD Totals (including this cycle's slip!)
+  const ytdTotals = useMemo(() => {
+    if (!displayedValues) {
+      return { ytdEarnings: 0, ytdTax: 0, ytdSso: 0, previousConfirmedCount: 0 };
+    }
+    return calculateYTDTotals(yearConfirmedSlips, cycleKey, {
+      totalEarnings: displayedValues.totalEarnings,
+      withholdingTax: displayedValues.withholdingTax,
+      ssoAmount: displayedValues.ssoAmount,
+    });
+  }, [yearConfirmedSlips, cycleKey, displayedValues]);
+
+  const handleSave = async (targetStatus: 'draft' | 'confirmed') => {
+    if (loading || loadError || !liveCalc || !privateData || !multipliersReady) return;
+    if (targetStatus === 'confirmed' && !hasSalary) {
+      setActionError('ไม่สามารถยืนยันสลิปได้ เนื่องจากพนักงานยังไม่มีข้อมูลเงินเดือนในข้อมูลลับ HR');
+      return;
+    }
+
+    setSavingAction(targetStatus);
+    setActionError(null);
+    try {
+      const snapshot = {
+        fullName: profile.fullName || employee.name,
+        nickname: profile.nickname || '',
+        position: profile.position || '',
+        bankName: privateData.bankName || '',
+        accountNumber: privateData.accountNumber || '',
+        accountName: privateData.accountName || profile.fullName || employee.name,
+      };
+
+      const saved = await savePayrollSlip({
+        employeeId: employee.uid,
+        cycleKey,
+        payDate: payDate || `${cycleKey}-25`,
+        status: targetStatus,
+        calc: liveCalc,
+        remark,
+        snapshot,
+        actorName,
+        existingSlip,
+      });
+
+      const usedItemIds = liveCalc.items
+        .filter((it) => it.amount > 0)
+        .map((it) => it.id);
+
+      setExistingSlip(saved);
+      await onSavedSlip(saved, usedItemIds);
+      if (targetStatus === 'confirmed') {
+        onClose();
+      }
+    } catch (err) {
+      console.error('Error saving payroll slip:', err);
+      setActionError('บันทึกสลิปเงินเดือนไม่สำเร็จ กรุณาตรวจสอบสิทธิ์หรือลองใหม่อีกครั้ง');
+    } finally {
+      setSavingAction(null);
+    }
+  };
+
+  const handleUnconfirm = async () => {
+    if (!existingSlip || !unconfirmReason.trim()) {
+      setActionError('กรุณาระบุเหตุผลในการยกเลิกการยืนยันสลิป');
+      return;
+    }
+
+    setSavingAction('unconfirm');
+    setActionError(null);
+    try {
+      const updated = await unconfirmPayrollSlip({
+        slip: existingSlip,
+        reason: unconfirmReason.trim(),
+        actorName,
+      });
+      setExistingSlip(updated);
+      setShowUnconfirmBox(false);
+      setUnconfirmReason('');
+      await onSavedSlip(updated, []);
+    } catch (err) {
+      console.error('Error unconfirming payroll slip:', err);
+      setActionError('ไม่สามารถยกเลิกการยืนยันสลิปได้ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setSavingAction(null);
+    }
+  };
+
+  const fmtMoney = (n: number) =>
+    (Number(n) || 0).toLocaleString('th-TH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+  const displaySnapshot = isConfirmed && existingSlip?.snapshot
+    ? existingSlip.snapshot
+    : {
+        fullName: profile.fullName || employee.name,
+        nickname: profile.nickname || '',
+        position: profile.position || '-',
+        bankName: privateData?.bankName || '-',
+        accountNumber: privateData?.accountNumber || '',
+        accountName: privateData?.accountName || profile.fullName || employee.name,
+      };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl p-5 space-y-4 max-h-[93vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <AnimalAvatar
+              avatarEmoji={employee.avatarEmoji}
+              identifier={employee.username || employee.uid}
+              name={employee.name}
+              size="md"
+            />
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white">
+                  สลิปเงินเดือน: {displaySnapshot.fullName}
+                </h3>
+                {isConfirmed ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>ยืนยันแล้ว (ล็อกการแก้ไข)</span>
+                  </span>
+                ) : existingSlip?.status === 'draft' ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800">
+                    ฉบับร่าง (Draft)
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                    ยังไม่สร้างสลิป
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {settings.companyName || 'Thunder Cloud'} • {cycleLabel} ({periodLabel})
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 self-end sm:self-auto"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Load Error Banner */}
+        {loadError && (
+          <div className="p-3 rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{loadError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReloadCount((c) => c + 1)}
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>โหลดใหม่</span>
+            </button>
+          </div>
+        )}
+
+        {/* Missing OT Multipliers Warning */}
+        {!multipliersReady && (
+          <div className="p-3 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 text-xs font-semibold flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>
+                ยังไม่ได้ตั้งค่าตัวคูณ OT ครบทั้ง 4 ประเภท กรุณาตั้งค่าตัวคูณ OT ก่อนคำนวณและบันทึกสลิป
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold shrink-0 cursor-pointer"
+            >
+              ไปที่ตั้งค่าตัวคูณ OT
+            </button>
+          </div>
+        )}
+
+        {/* Missing Salary Warning */}
+        {!loading && !loadError && !hasSalary && (
+          <div className="p-3 rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>
+              คำเตือน: พนักงานคนนี้ยังไม่มีข้อมูลเงินเดือนในข้อมูลลับ HR (salary = 0) กรุณาระบุเงินเดือนในหน้า HR ก่อน ระบบไม่อนุญาตให้กดยืนยันสลิป
+            </span>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="p-12 text-center text-slate-400 text-xs">
+            <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+            กำลังโหลดข้อมูลเงินเดือน OT และยอดสะสมทั้งปี...
+          </div>
+        ) : displayedValues ? (
+          <div className="space-y-4 text-xs">
+            {/* Employee & Bank Snapshot Info + Pay Date */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800">
+              <div>
+                <div className="text-[10px] font-semibold text-slate-400">ชื่อ-นามสกุล / ตำแหน่ง</div>
+                <div className="font-bold text-slate-900 dark:text-white mt-0.5">
+                  {displaySnapshot.fullName}
+                </div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                  ตำแหน่ง: {displaySnapshot.position || '-'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-semibold text-slate-400 flex items-center justify-between">
+                  <span>บัญชีธนาคารรับเงินเดือน</span>
+                  {displaySnapshot.accountNumber && (
+                    <button
+                      type="button"
+                      onClick={() => setShowFullBankAccount((v) => !v)}
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      {showFullBankAccount ? (
+                        <>
+                          <EyeOff className="w-3 h-3" />
+                          <span>ซ่อนเลข</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3 h-3" />
+                          <span>ดูเลขเต็ม</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+                <div className="font-bold text-slate-900 dark:text-white mt-0.5">
+                  {displaySnapshot.bankName || '-'}
+                </div>
+                <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                  เลขบัญชี:{' '}
+                  {displaySnapshot.accountNumber
+                    ? showFullBankAccount
+                      ? displaySnapshot.accountNumber
+                      : maskSensitiveNumber(displaySnapshot.accountNumber)
+                    : '-'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                  วันที่จ่ายเงิน (Pay Date)
+                </label>
+                <input
+                  type="date"
+                  disabled={isConfirmed}
+                  value={payDate}
+                  onChange={(e) => setPayDate(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono font-bold text-slate-900 dark:text-white disabled:opacity-60"
+                />
+              </div>
+            </div>
+
+            {/* Two-Column Breakdown: Earnings (Left) vs Deductions (Right) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* LEFT: EARNINGS */}
+              <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/20 dark:bg-emerald-950/15 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-emerald-200/70 dark:border-emerald-900/50">
+                  <span className="font-extrabold text-emerald-800 dark:text-emerald-300 text-sm">
+                    รายการเงินได้ (Earnings)
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    ค่าแรง/ชม.: {fmtMoney(displayedValues.hourlyRate)} บาท (เงินเดือน ÷ 30 ÷ 8)
+                  </span>
+                </div>
+
+                {/* Base Salary (Read-only calculated from hr_private) */}
+                <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800/70">
+                  <div>
+                    <div className="font-bold text-slate-800 dark:text-slate-200">
+                      เงินเดือนพื้นฐาน (Salary)
+                    </div>
+                    <div className="text-[10px] text-slate-400">ดึงจากข้อมูลลับ HR (แก้ไขไม่ได้ในหน้านี้)</div>
+                  </div>
+                  <div className="font-mono font-bold text-slate-900 dark:text-white text-sm">
+                    {fmtMoney(displayedValues.salary)}
+                  </div>
+                </div>
+
+                {/* OT 4 Types Breakdown (Read-only calculated) */}
+                <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between font-bold text-slate-800 dark:text-slate-200">
+                    <span>ค่าล่วงเวลา (OT อนุมัติแล้วในรอบนี้)</span>
+                    <span className="font-mono text-indigo-600 dark:text-indigo-400">
+                      รวม {fmtMoney(displayedValues.otTotal)} บาท
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 text-[11px] tabular-nums">
+                    {/* แดง */}
+                    <div className="flex items-center justify-between text-rose-700 dark:text-rose-300">
+                      <span>
+                        • OT วันหยุด ในเวลางาน (แดง): {displayedValues.otLines.holiday_in_hours.hours} ชม. ×{' '}
+                        {fmtMoney(displayedValues.hourlyRate)} ×{' '}
+                        {displayedValues.otLines.holiday_in_hours.multiplier}
+                      </span>
+                      <span className="font-mono font-bold">
+                        {fmtMoney(displayedValues.otLines.holiday_in_hours.amount)}
+                      </span>
+                    </div>
+
+                    {/* เขียว */}
+                    <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-300">
+                      <span>
+                        • OT วันหยุด หลังเวลางาน (เขียว): {displayedValues.otLines.holiday_after_hours.hours} ชม. ×{' '}
+                        {fmtMoney(displayedValues.hourlyRate)} ×{' '}
+                        {displayedValues.otLines.holiday_after_hours.multiplier}
+                      </span>
+                      <span className="font-mono font-bold">
+                        {fmtMoney(displayedValues.otLines.holiday_after_hours.amount)}
+                      </span>
+                    </div>
+
+                    {/* ฟ้า */}
+                    <div className="flex items-center justify-between text-sky-700 dark:text-sky-300">
+                      <span>
+                        • OT วันทำงานปกติ (ฟ้า): {displayedValues.otLines.workday.hours} ชม. ×{' '}
+                        {fmtMoney(displayedValues.hourlyRate)} ×{' '}
+                        {displayedValues.otLines.workday.multiplier}
+                      </span>
+                      <span className="font-mono font-bold">
+                        {fmtMoney(displayedValues.otLines.workday.amount)}
+                      </span>
+                    </div>
+
+                    {/* เทา */}
+                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                      <span>
+                        • OT ไม่ระบุประเภท (เทา): {displayedValues.otLines.unspecified.hours} ชม. ×{' '}
+                        {fmtMoney(displayedValues.hourlyRate)} ×{' '}
+                        {displayedValues.otLines.unspecified.multiplier}
+                      </span>
+                      <span className="font-mono font-bold">
+                        {fmtMoney(displayedValues.otLines.unspecified.amount)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Editable Earning PayItems */}
+                <div className="space-y-2 pt-1">
+                  <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                    รายการเงินได้เพิ่มเติม (กรอกจำนวนเงิน)
+                  </div>
+                  {effectivePayItems
+                    .filter((it) => it.type === 'earning')
+                    .map((item) => {
+                      const confirmedVal =
+                        existingSlip?.items?.find((i) => i.id === item.id)?.amount ?? 0;
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between gap-3 py-1"
+                        >
+                          <div className="min-w-0">
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                              {item.name}
+                            </span>
+                            {item.nameEn && (
+                              <span className="ml-1.5 text-[10px] text-slate-400">
+                                ({item.nameEn})
+                              </span>
+                            )}
+                          </div>
+                          {isConfirmed ? (
+                            <span className="font-mono font-bold text-slate-900 dark:text-white">
+                              {fmtMoney(confirmedVal)}
+                            </span>
+                          ) : (
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={itemAmounts[item.id] ?? ''}
+                              onChange={(e) =>
+                                setItemAmounts((prev) => ({
+                                  ...prev,
+                                  [item.id]: e.target.value,
+                                }))
+                              }
+                              placeholder="0.00"
+                              className="w-32 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-right font-mono font-bold text-slate-900 dark:text-white"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* Total Earnings Footer */}
+                <div className="pt-2 border-t border-emerald-200 dark:border-emerald-900/60 flex items-center justify-between font-extrabold text-emerald-800 dark:text-emerald-300 text-sm">
+                  <span>รวมเงินได้ทั้งหมด (Total Earnings)</span>
+                  <span className="font-mono">{fmtMoney(displayedValues.totalEarnings)} บาท</span>
+                </div>
+              </div>
+
+              {/* RIGHT: DEDUCTIONS */}
+              <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/15 space-y-3 flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-rose-200/70 dark:border-rose-900/50">
+                    <span className="font-extrabold text-rose-800 dark:text-rose-300 text-sm">
+                      รายการหัก (Deductions)
+                    </span>
+                    <span className="text-[11px] text-slate-500">คำนวณอัตโนมัติ + กรอกเพิ่มเติม</span>
+                  </div>
+
+                  {/* SSO Deduction (Read-only calculated from hr_private) */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800/70">
+                    <div>
+                      <div className="font-bold text-slate-800 dark:text-slate-200">
+                        ประกันสังคม (SSO)
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {privateData?.ssoStatus === 'not_enrolled'
+                          ? 'สถานะ: ไม่เข้าประกันสังคม (0 บาท)'
+                          : `คำนวณจาก min(salary × ${privateData?.ssoRatePercent ?? 5}% ÷ 100, ${privateData?.ssoCapAmount ?? 875})`}
+                      </div>
+                    </div>
+                    <div className="font-mono font-bold text-slate-900 dark:text-white text-sm">
+                      {fmtMoney(displayedValues.ssoAmount)}
+                    </div>
+                  </div>
+
+                  {/* Approved Advance in this Cycle (Read-only calculated) */}
+                  <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800/70">
+                    <div>
+                      <div className="font-bold text-slate-800 dark:text-slate-200">
+                        เบิกเงินล่วงหน้า (Advance อนุมัติแล้วในรอบนี้)
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        ดึงยอดที่อนุมัติแล้วในรอบ {cycleKey} อัตโนมัติ
+                      </div>
+                    </div>
+                    <div className="font-mono font-bold text-slate-900 dark:text-white text-sm">
+                      {fmtMoney(displayedValues.advanceAmount)}
+                    </div>
+                  </div>
+
+                  {/* Withholding Tax (Admin input) */}
+                  <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-100 dark:border-slate-800/70">
+                    <div>
+                      <div className="font-bold text-slate-800 dark:text-slate-200">
+                        ภาษีหัก ณ ที่จ่าย (Withholding Tax)
+                      </div>
+                      <div className="text-[10px] text-slate-400">แอดมินกรอกเอง</div>
+                    </div>
+                    {isConfirmed ? (
+                      <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">
+                        {fmtMoney(displayedValues.withholdingTax)}
+                      </span>
+                    ) : (
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={withholdingTaxStr}
+                        onChange={(e) => setWithholdingTaxStr(e.target.value)}
+                        placeholder="0.00"
+                        className="w-32 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-right font-mono font-bold text-slate-900 dark:text-white"
+                      />
+                    )}
+                  </div>
+
+                  {/* Editable Deduction PayItems */}
+                  <div className="space-y-2 pt-1">
+                    <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                      รายการหักอื่นๆ (กรอกจำนวนเงิน)
+                    </div>
+                    {effectivePayItems
+                      .filter((it) => it.type === 'deduction')
+                      .map((item) => {
+                        const confirmedVal =
+                          existingSlip?.items?.find((i) => i.id === item.id)?.amount ?? 0;
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-3 py-1"
+                          >
+                            <div className="min-w-0">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                {item.name}
+                              </span>
+                              {item.nameEn && (
+                                <span className="ml-1.5 text-[10px] text-slate-400">
+                                  ({item.nameEn})
+                                </span>
+                              )}
+                            </div>
+                            {isConfirmed ? (
+                              <span className="font-mono font-bold text-slate-900 dark:text-white">
+                                {fmtMoney(confirmedVal)}
+                              </span>
+                            ) : (
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={itemAmounts[item.id] ?? ''}
+                                onChange={(e) =>
+                                  setItemAmounts((prev) => ({
+                                    ...prev,
+                                    [item.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="0.00"
+                                className="w-32 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-right font-mono font-bold text-slate-900 dark:text-white"
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Total Deductions Footer */}
+                <div className="pt-2 border-t border-rose-200 dark:border-rose-900/60 flex items-center justify-between font-extrabold text-rose-800 dark:text-rose-300 text-sm">
+                  <span>รวมรายการหักทั้งหมด (Total Deductions)</span>
+                  <span className="font-mono">{fmtMoney(displayedValues.totalDeductions)} บาท</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Net Pay & YTD Totals Summary Banner */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
+              {/* Net Pay Card */}
+              <div className="lg:col-span-5 p-4 rounded-xl bg-indigo-600 text-white flex flex-col justify-between shadow-sm">
+                <div className="text-xs font-semibold text-indigo-100">
+                  เงินได้สุทธิ (Net Pay = รวมเงินได้ − รวมรายการหัก)
+                </div>
+                <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight mt-1">
+                  {fmtMoney(displayedValues.netPay)} <span className="text-sm font-bold">บาท</span>
+                </div>
+                <div className="text-[11px] text-indigo-200 mt-1">
+                  {fmtMoney(displayedValues.totalEarnings)} − {fmtMoney(displayedValues.totalDeductions)} บาท
+                </div>
+              </div>
+
+              {/* YTD Accumulated Totals Card */}
+              <div className="lg:col-span-7 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 dark:text-slate-200">
+                    ยอดสะสมทั้งปี ค.ศ. {year} (รวมสลิปที่ยืนยันแล้วในปี {year} + สลิปรอบนี้)
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    สลิปยืนยันก่อนหน้า {ytdTotals.previousConfirmedCount} งวด + งวดนี้
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5 mt-2 tabular-nums">
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                    <div className="text-[10px] text-slate-400">เงินได้สะสมทั้งปี</div>
+                    <div className="font-mono font-extrabold text-emerald-700 dark:text-emerald-400 text-xs sm:text-sm mt-0.5">
+                      {fmtMoney(ytdTotals.ytdEarnings)}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                    <div className="text-[10px] text-slate-400">ภาษีหัก ณ ที่จ่ายสะสม</div>
+                    <div className="font-mono font-extrabold text-rose-600 dark:text-rose-400 text-xs sm:text-sm mt-0.5">
+                      {fmtMoney(ytdTotals.ytdTax)}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                    <div className="text-[10px] text-slate-400">ประกันสังคมสะสม</div>
+                    <div className="font-mono font-extrabold text-amber-700 dark:text-amber-400 text-xs sm:text-sm mt-0.5">
+                      {fmtMoney(ytdTotals.ytdSso)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Remark Field */}
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                หมายเหตุสลิปเงินเดือน (Remark)
+              </label>
+              <textarea
+                rows={2}
+                disabled={isConfirmed}
+                value={remark}
+                onChange={(e) => setRemark(e.target.value)}
+                placeholder="ระบุหมายเหตุเพิ่มเติมในสลิป (ถ้ามี)..."
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white disabled:opacity-60"
+              />
+            </div>
+
+            {/* Previous Unconfirm Info if any */}
+            {existingSlip?.unconfirmReason && (
+              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300">
+                <strong>ประวัติการยกเลิกยืนยันล่าสุด:</strong> เหตุผล "{existingSlip.unconfirmReason}" โดย{' '}
+                {existingSlip.unconfirmedBy || '-'}
+              </div>
+            )}
+
+            {/* Unconfirm Box when slip is confirmed */}
+            {isConfirmed && showUnconfirmBox && (
+              <div className="p-3.5 rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 space-y-2.5">
+                <div className="font-bold text-rose-800 dark:text-rose-200">
+                  ระบุเหตุผลที่ต้องการยกเลิกการยืนยันสลิป (จำเป็นต้องกรอก)
+                </div>
+                <input
+                  type="text"
+                  value={unconfirmReason}
+                  onChange={(e) => setUnconfirmReason(e.target.value)}
+                  placeholder="เช่น แก้ไขยอดค่าคอมมิชชั่น หรือปรับปรุงตัวเลขภาษี..."
+                  className="w-full px-3 py-2 rounded-xl border border-rose-300 dark:border-rose-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUnconfirmBox(false);
+                      setUnconfirmReason('');
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-200/60"
+                  >
+                    ปิด
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingAction !== null || !unconfirmReason.trim()}
+                    onClick={handleUnconfirm}
+                    className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>ยืนยันการปลดล็อกสลิป</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {actionError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{actionError}</span>
+              </div>
+            )}
+
+            {/* Footer Action Buttons */}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[11px] text-slate-400">
+                {isConfirmed && existingSlip?.confirmedAt
+                  ? `ยืนยันเมื่อ ${format(new Date(existingSlip.confirmedAt), 'dd/MM/yyyy HH:mm')} โดย ${existingSlip.confirmedBy || '-'}`
+                  : existingSlip?.updatedAt
+                  ? `อัปเดตล่าสุดเมื่อ ${format(new Date(existingSlip.updatedAt), 'dd/MM/yyyy HH:mm')} โดย ${existingSlip.updatedBy || '-'}`
+                  : 'ยังไม่ได้บันทึกสลิปงวดนี้'}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  ปิดหน้าต่าง
+                </button>
+
+                {isConfirmed ? (
+                  !showUnconfirmBox && (
+                    <button
+                      type="button"
+                      disabled={Boolean(loadError) || loading}
+                      onClick={() => setShowUnconfirmBox(true)}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-sm flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>ยกเลิกการยืนยัน (เพื่อแก้ไข)</span>
+                    </button>
+                  )
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={
+                        Boolean(loadError) ||
+                        loading ||
+                        !multipliersReady ||
+                        savingAction !== null
+                      }
+                      onClick={() => handleSave('draft')}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>
+                        {savingAction === 'draft' ? 'กำลังบันทึกร่าง...' : 'บันทึกร่าง'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={
+                        Boolean(loadError) ||
+                        loading ||
+                        !multipliersReady ||
+                        !hasSalary ||
+                        savingAction !== null
+                      }
+                      onClick={() => handleSave('confirmed')}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                      title={
+                        !hasSalary
+                          ? 'ไม่สามารถยืนยันได้เนื่องจากพนักงานยังไม่มีเงินเดือนในข้อมูลลับ HR'
+                          : 'ยืนยันสลิปเงินเดือน'
+                      }
+                    >
+                      <FileCheck2 className="w-3.5 h-3.5" />
+                      <span>
+                        {savingAction === 'confirmed' ? 'กำลังยืนยันสลิป...' : 'ยืนยันสลิป'}
+                      </span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ===============================================================
+// Sub-Modal 3: Admin Email & Password Verification Modal
+// ===============================================================
+
+function PayrollAdminUnlockModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: (email: string) => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) {
+      setErrorMsg('กรุณากรอกอีเมลและรหัสผ่านให้ครบถ้วน');
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const fbUser = await signInHrAdminEmail(email.trim(), password);
+      setPassword('');
+      onSuccess(fbUser.email || email.trim());
+    } catch (err: any) {
+      console.error('Payroll Admin email verification failed:', err);
+      setPassword('');
+      const code = err?.code || '';
+      if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/user-not-found' ||
+        code === 'auth/invalid-email'
+      ) {
+        setErrorMsg('อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง');
+      } else if (code === 'auth/too-many-requests') {
+        setErrorMsg('มีการลองผิดหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่');
+      } else {
+        setErrorMsg('ไม่สามารถยืนยันตัวตนได้ กรุณาตรวจสอบอีเมลและรหัสผ่าน');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-amber-300 dark:border-amber-800 w-full max-w-md p-5 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400">
+              <KeyRound className="w-4 h-4" />
+            </span>
+            <div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                ยืนยันตัวตนแอดมินเพื่อดูข้อมูลลับสลิปเงินเดือน
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                เข้าสู่ระบบด้วยอีเมลแอดมินที่ได้รับสิทธิ์ (ไม่จำรหัสผ่านในเครื่อง)
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setPassword('');
+              onClose();
+            }}
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleUnlock} className="space-y-3.5 text-xs" autoComplete="off">
+          <div>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              อีเมลแอดมิน HR
+            </label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="email"
+                required
+                autoComplete="off"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="ระบุอีเมลแอดมิน"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              รหัสผ่าน
+            </label>
+            <div className="relative">
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="password"
+                required
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="ระบุรหัสผ่าน"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+
+          {errorMsg && (
+            <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 flex items-center gap-2 font-semibold">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <div className="text-[11px] text-slate-400 leading-relaxed">
+            ระบบจะล็อกข้อมูลลับอัตโนมัติเมื่อไม่มีการใช้งานเกิน 15 นาที หรือเมื่อกดปุ่ม "ล็อกข้อมูลลับ"
+          </div>
+
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setPassword('');
+                onClose();
+              }}
+              className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+            >
+              <Unlock className="w-3.5 h-3.5" />
+              <span>{submitting ? 'กำลังยืนยันตัวตน...' : 'ยืนยันตัวตน'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

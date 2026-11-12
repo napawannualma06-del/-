@@ -322,5 +322,9 @@ service cloud.firestore {
     match /hr_private/{employeeId} {
       allow read, write: if isHrAdmin();
     }
+
+    match /payroll_slips/{slipId} {
+      allow read, write: if isHrAdmin();
+    }
   }
 }

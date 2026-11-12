@@ -312,4 +312,98 @@ export interface HRPrivateData {
   updatedBy?: string;
 }
 
+// ===============================================================
+// Payroll Settings (system_settings/payroll_settings) & Slips (payroll_slips/{cycleKey}_{employeeId})
+// ===============================================================
+
+export type PayrollItemType = 'earning' | 'deduction';
+
+export interface PayrollItemDefinition {
+  id: string;
+  name: string;        // ชื่อ (ไทย)
+  nameEn?: string;     // ชื่ออังกฤษ (ไม่บังคับ)
+  type: PayrollItemType; // 'earning' = เงินได้ | 'deduction' = รายการหัก
+  enabled: boolean;    // เปิด/ปิดใช้งาน
+}
+
+export interface PayrollSettingsDoc {
+  companyName: string; // ค่าเริ่ม "Thunder Cloud"
+  otMultiplierHolidayInHours: number | null;     // แดง
+  otMultiplierHolidayAfterHours: number | null;  // เขียว
+  otMultiplierWorkday: number | null;            // ฟ้า
+  otMultiplierUnspecified: number | null;        // ไม่ระบุ
+  payItems: PayrollItemDefinition[];
+  usedPayItemIds?: string[]; // รายการที่เคยใช้ในสลิปที่ยืนยันแล้ว (ห้ามลบจริง ให้ปิดใช้งานแทน)
+  defaultPayDates?: Record<string, string>; // วันที่จ่ายของแต่ละรอบ (ถ้าบันทึกไว้)
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
+export type PayrollSlipStatus = 'draft' | 'confirmed';
+
+export interface PayrollOTLine {
+  hours: number;
+  multiplier: number;
+  amount: number;
+}
+
+export interface PayrollOTLines {
+  holiday_in_hours: PayrollOTLine;
+  holiday_after_hours: PayrollOTLine;
+  workday: PayrollOTLine;
+  unspecified: PayrollOTLine;
+}
+
+export interface PayrollSlipItem {
+  id: string;
+  name: string;
+  nameEn?: string;
+  type: PayrollItemType;
+  amount: number;
+}
+
+export interface PayrollEmployeeSnapshot {
+  fullName: string;
+  nickname?: string;
+  position: string;
+  bankName: string;
+  accountNumber: string;
+  accountName?: string;
+}
+
+export interface PayrollSlip {
+  id?: string; // <cycleKey>_<employeeId>
+  employeeId: string;
+  cycleKey: string;
+  year: number; // ปี ค.ศ. ของ cycleKey
+  payDate: string; // YYYY-MM-DD แอดมินเลือก
+  status: PayrollSlipStatus; // 'draft' | 'confirmed'
+  salary: number;
+  hourlyRate: number;
+  otLines: PayrollOTLines;
+  otTotal: number;
+  ssoAmount: number;
+  advanceAmount: number;
+  withholdingTax: number;
+  items: PayrollSlipItem[];
+  totalEarnings: number;
+  totalDeductions: number;
+  netPay: number;
+  remark: string;
+  snapshot?: PayrollEmployeeSnapshot;
+  employeeName?: string;
+  position?: string;
+  bankName?: string;
+  accountNumber?: string;
+  accountName?: string;
+  confirmedAt?: number | null;
+  confirmedBy?: string | null;
+  unconfirmedAt?: number;
+  unconfirmedBy?: string;
+  unconfirmReason?: string;
+  updatedAt: number;
+  updatedBy: string;
+}
+
+
 
