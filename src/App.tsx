@@ -10,6 +10,7 @@ import { Login } from './components/Login';
 import { Queue } from './components/Queue';
 import { AdminDashboard } from './components/AdminDashboard';
 import { AgentManagement } from './components/AgentManagement';
+import { HRPage } from './components/HRPage';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="/" element={<Queue />} />
             <Route path="/agents" element={<AgentManagement />} />
             <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/hr" element={<HRPage />} />
           </Route>
         </Routes>
       </HashRouter>

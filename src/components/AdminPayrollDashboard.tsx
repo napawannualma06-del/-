@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock,
   CreditCard,
+  Download,
   Edit3,
   Eye,
   EyeOff,
@@ -71,6 +72,12 @@ import {
 } from '../lib/payrollService';
 import { getAvailableOTCycles, getOTCycleFromDate } from '../lib/otUtils';
 import { AnimalAvatar } from './AnimalAvatar';
+import {
+  PayslipDocument,
+  PayslipYTDInfo,
+  downloadBatchPayslipsPdf,
+  downloadSinglePayslipPdf,
+} from './PayslipDocument';
 
 interface EmployeeRowComputedData {
   privateData: HRPrivateData;
@@ -131,6 +138,33 @@ export function AdminPayrollDashboard() {
     message: string;
   } | null>(null);
 
+  // PDF Preview & Download States
+  const [previewSlipData, setPreviewSlipData] = useState<{
+    slip: PayrollSlip;
+    employeeUsername?: string;
+    ytdTotals: PayslipYTDInfo;
+  } | null>(null);
+  const [loadingPreviewEmpId, setLoadingPreviewEmpId] = useState<string | null>(null);
+  const [downloadingSingleEmpId, setDownloadingSingleEmpId] = useState<string | null>(null);
+  const [downloadingBatchPdf, setDownloadingBatchPdf] = useState<boolean>(false);
+
+  const [singlePrintJob, setSinglePrintJob] = useState<{
+    slip: PayrollSlip;
+    employeeUsername?: string;
+    fullName: string;
+    ytdTotals: PayslipYTDInfo;
+  } | null>(null);
+  const singlePrintRef = useRef<HTMLDivElement | null>(null);
+
+  const [batchPrintJobs, setBatchPrintJobs] = useState<
+    Array<{
+      slip: PayrollSlip;
+      employeeUsername?: string;
+      ytdTotals: PayslipYTDInfo;
+    }>
+  >([]);
+  const batchPrintContainerRef = useRef<HTMLDivElement | null>(null);
+
   // Sync Firebase Auth state for email/password provider
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (fbUser) => {
@@ -152,6 +186,9 @@ export function AdminPayrollDashboard() {
     setIsHrUnlocked(false);
     setHrUnlockedEmail(null);
     setActiveEmployeeId(null);
+    setPreviewSlipData(null);
+    setSinglePrintJob(null);
+    setBatchPrintJobs([]);
     setRowDataMap({});
     if (isAutoTimeout) {
       setStatusNotice({
@@ -475,6 +512,196 @@ export function AdminPayrollDashboard() {
     });
     return m;
   }, [rowDataMap]);
+
+  // Execute offscreen single PDF generation when singlePrintJob mounts
+  useEffect(() => {
+    if (!singlePrintJob) return;
+    let isCancelled = false;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        if (singlePrintRef.current && !isCancelled) {
+          await downloadSinglePayslipPdf(
+            singlePrintRef.current,
+            singlePrintJob.fullName,
+            singlePrintJob.slip.cycleKey
+          );
+        }
+      } catch (err) {
+        console.error('Error generating single payslip PDF:', err);
+        if (!isCancelled) {
+          setStatusNotice({
+            type: 'error',
+            message: 'เกิดข้อผิดพลาดในการสร้างไฟล์ PDF กรุณาลองใหม่อีกครั้ง',
+          });
+        }
+      } finally {
+        if (!isCancelled) {
+          setSinglePrintJob(null);
+          setDownloadingSingleEmpId(null);
+        }
+      }
+    }, 120);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [singlePrintJob]);
+
+  // Execute offscreen batch PDF generation when batchPrintJobs mount
+  useEffect(() => {
+    if (batchPrintJobs.length === 0) return;
+    let isCancelled = false;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        if (batchPrintContainerRef.current && !isCancelled) {
+          const pageNodes = Array.from(
+            batchPrintContainerRef.current.querySelectorAll<HTMLElement>('[data-payslip-page="true"]')
+          );
+          if (pageNodes.length > 0) {
+            await downloadBatchPayslipsPdf(pageNodes, selectedCycleKey);
+            setStatusNotice({
+              type: 'success',
+              message: `ดาวน์โหลดสลิปเงินเดือนทั้งรอบ (${pageNodes.length} คน) เรียบร้อยแล้ว`,
+            });
+            setTimeout(() => setStatusNotice(null), 4000);
+          }
+        }
+      } catch (err) {
+        console.error('Error generating batch payslip PDF:', err);
+        if (!isCancelled) {
+          setStatusNotice({
+            type: 'error',
+            message: 'เกิดข้อผิดพลาดในการสร้างไฟล์ PDF รวมทั้งรอบ กรุณาลองใหม่อีกครั้ง',
+          });
+        }
+      } finally {
+        if (!isCancelled) {
+          setBatchPrintJobs([]);
+          setDownloadingBatchPdf(false);
+        }
+      }
+    }, 180);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [batchPrintJobs, selectedCycleKey]);
+
+  const handleOpenSlipPreview = async (
+    slip: PayrollSlip,
+    employeeUsername?: string
+  ) => {
+    if (!isHrUnlocked) return;
+    setLoadingPreviewEmpId(slip.employeeId);
+    try {
+      const year = getYearFromCycleKey(slip.cycleKey);
+      const ytdSlips = await fetchEmployeeYearConfirmedSlips(slip.employeeId, year);
+      const ytd = calculateYTDTotals(ytdSlips, slip.cycleKey, {
+        totalEarnings: slip.totalEarnings,
+        withholdingTax: slip.withholdingTax,
+        ssoAmount: slip.ssoAmount,
+      });
+      setPreviewSlipData({
+        slip,
+        employeeUsername,
+        ytdTotals: {
+          ytdEarnings: ytd.ytdEarnings,
+          ytdTax: ytd.ytdTax,
+          ytdSso: ytd.ytdSso,
+        },
+      });
+    } catch (err) {
+      console.error('Error loading YTD for slip preview:', err);
+      setStatusNotice({
+        type: 'error',
+        message: 'ไม่สามารถโหลดข้อมูลยอดสะสมเพื่อแสดงตัวอย่างสลิปได้ กรุณาลองใหม่อีกครั้ง',
+      });
+    } finally {
+      setLoadingPreviewEmpId(null);
+    }
+  };
+
+  const handleDownloadRowPdf = async (
+    slip: PayrollSlip,
+    employeeUsername: string | undefined,
+    fallbackFullName: string
+  ) => {
+    if (!isHrUnlocked || slip.status !== 'confirmed' || downloadingSingleEmpId) return;
+    setDownloadingSingleEmpId(slip.employeeId);
+    try {
+      const year = getYearFromCycleKey(slip.cycleKey);
+      const ytdSlips = await fetchEmployeeYearConfirmedSlips(slip.employeeId, year);
+      const ytd = calculateYTDTotals(ytdSlips, slip.cycleKey, {
+        totalEarnings: slip.totalEarnings,
+        withholdingTax: slip.withholdingTax,
+        ssoAmount: slip.ssoAmount,
+      });
+      const fullName =
+        slip.snapshot?.fullName || slip.employeeName || fallbackFullName || slip.employeeId;
+      setSinglePrintJob({
+        slip,
+        employeeUsername,
+        fullName,
+        ytdTotals: {
+          ytdEarnings: ytd.ytdEarnings,
+          ytdTax: ytd.ytdTax,
+          ytdSso: ytd.ytdSso,
+        },
+      });
+    } catch (err) {
+      console.error('Error preparing single PDF download:', err);
+      setDownloadingSingleEmpId(null);
+      setStatusNotice({
+        type: 'error',
+        message: 'โหลดข้อมูลสำหรับสร้าง PDF ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+      });
+    }
+  };
+
+  const handleDownloadAllConfirmedInCycle = async () => {
+    if (!isHrUnlocked || downloadingBatchPdf) return;
+    const confirmedRows = computedRows.filter(
+      (r) => r.slip && r.slip.status === 'confirmed'
+    );
+    if (confirmedRows.length === 0) return;
+
+    setDownloadingBatchPdf(true);
+    try {
+      const year = getYearFromCycleKey(selectedCycleKey);
+      const jobs = await Promise.all(
+        confirmedRows.map(async (r) => {
+          const slip = r.slip!;
+          const ytdSlips = await fetchEmployeeYearConfirmedSlips(slip.employeeId, year);
+          const ytd = calculateYTDTotals(ytdSlips, slip.cycleKey, {
+            totalEarnings: slip.totalEarnings,
+            withholdingTax: slip.withholdingTax,
+            ssoAmount: slip.ssoAmount,
+          });
+          return {
+            slip,
+            employeeUsername: r.emp.username || r.emp.uid,
+            ytdTotals: {
+              ytdEarnings: ytd.ytdEarnings,
+              ytdTax: ytd.ytdTax,
+              ytdSso: ytd.ytdSso,
+            },
+          };
+        })
+      );
+      setBatchPrintJobs(jobs);
+    } catch (err) {
+      console.error('Error preparing batch cycle PDF:', err);
+      setDownloadingBatchPdf(false);
+      setStatusNotice({
+        type: 'error',
+        message: 'ไม่สามารถโหลดข้อมูลเพื่อสร้าง PDF ทั้งรอบได้ กรุณาลองใหม่อีกครั้ง',
+      });
+    }
+  };
 
   if (!isAdmin) return null;
 
@@ -808,18 +1035,47 @@ export function AdminPayrollDashboard() {
               </span>
             </div>
 
-            {multipliersReady && (
-              <div className="font-bold text-indigo-700 dark:text-indigo-300 tabular-nums">
-                รวมยอดจ่ายสุทธิรอบนี้:{' '}
-                <span className="text-sm font-black">
-                  {cycleSummary.sumNetPay.toLocaleString('th-TH', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}{' '}
-                  บาท
+            <div className="flex flex-wrap items-center gap-3">
+              {multipliersReady && (
+                <div className="font-bold text-indigo-700 dark:text-indigo-300 tabular-nums">
+                  รวมยอดจ่ายสุทธิรอบนี้:{' '}
+                  <span className="text-sm font-black">
+                    {cycleSummary.sumNetPay.toLocaleString('th-TH', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{' '}
+                    บาท
+                  </span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={
+                  !isHrUnlocked ||
+                  baseLoading ||
+                  rowsLoading ||
+                  Boolean(baseLoadError) ||
+                  Boolean(rowsLoadError) ||
+                  cycleSummary.confirmedCount === 0 ||
+                  downloadingBatchPdf
+                }
+                onClick={handleDownloadAllConfirmedInCycle}
+                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer disabled:opacity-50"
+                title={
+                  cycleSummary.confirmedCount === 0
+                    ? 'ยังไม่มีสลิปที่ยืนยันแล้วในรอบนี้'
+                    : `ดาวน์โหลดสลิปที่ยืนยันแล้วทั้งหมดในรอบนี้ (${cycleSummary.confirmedCount} คน)`
+                }
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>
+                  {downloadingBatchPdf
+                    ? 'กำลังสร้างไฟล์ PDF ทั้งรอบ...'
+                    : `ดาวน์โหลดทั้งรอบ (PDF ไฟล์เดียว 1 หน้าต่อคน)`}
                 </span>
-              </div>
-            )}
+              </button>
+            </div>
           </div>
 
           {baseLoading || rowsLoading ? (
@@ -855,12 +1111,13 @@ export function AdminPayrollDashboard() {
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 font-bold">
                     <th className="px-4 py-3 text-left min-w-[210px]">ชื่อพนักงาน</th>
-                    <th className="px-3 py-3 text-right min-w-[120px]">เงินเดือน</th>
-                    <th className="px-3 py-3 text-right min-w-[120px]">OT</th>
-                    <th className="px-3 py-3 text-right min-w-[120px]">รวมเงินได้</th>
-                    <th className="px-3 py-3 text-right min-w-[120px]">รวมหัก</th>
-                    <th className="px-3 py-3 text-right min-w-[130px]">สุทธิ</th>
-                    <th className="px-4 py-3 text-center min-w-[140px]">สถานะ</th>
+                    <th className="px-3 py-3 text-right min-w-[115px]">เงินเดือน</th>
+                    <th className="px-3 py-3 text-right min-w-[115px]">OT</th>
+                    <th className="px-3 py-3 text-right min-w-[115px]">รวมเงินได้</th>
+                    <th className="px-3 py-3 text-right min-w-[115px]">รวมหัก</th>
+                    <th className="px-3 py-3 text-right min-w-[125px]">สุทธิ</th>
+                    <th className="px-3 py-3 text-center min-w-[120px]">สถานะ</th>
+                    <th className="px-4 py-3 text-right min-w-[140px]">จัดการ / PDF</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
@@ -989,7 +1246,7 @@ export function AdminPayrollDashboard() {
                         </td>
 
                         {/* สถานะ */}
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-3 text-center">
                           {status === 'confirmed' ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800">
                               <CheckCircle2 className="w-3 h-3" />
@@ -1005,6 +1262,62 @@ export function AdminPayrollDashboard() {
                               <span>ยังไม่สร้าง</span>
                             </span>
                           )}
+                        </td>
+
+                        {/* ปุ่มดาวน์โหลด PDF ท้ายแถว */}
+                        <td
+                          className="px-4 py-3 text-right"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            {row.slip && (
+                              <button
+                                type="button"
+                                disabled={!isHrUnlocked || loadingPreviewEmpId === emp.uid}
+                                onClick={() =>
+                                  handleOpenSlipPreview(row.slip!, emp.username || emp.uid)
+                                }
+                                className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold inline-flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
+                                title="ดูตัวอย่างสลิป"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>ดูตัวอย่าง</span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              disabled={
+                                !isHrUnlocked ||
+                                status !== 'confirmed' ||
+                                !row.slip ||
+                                downloadingSingleEmpId !== null
+                              }
+                              onClick={() =>
+                                row.slip &&
+                                handleDownloadRowPdf(
+                                  row.slip,
+                                  emp.username || emp.uid,
+                                  profile.fullName || emp.name
+                                )
+                              }
+                              className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              title={
+                                status === 'confirmed'
+                                  ? 'ดาวน์โหลดสลิปเงินเดือนเป็นไฟล์ PDF'
+                                  : status === 'draft'
+                                  ? 'สลิปสถานะร่างยังไม่สามารถดาวน์โหลด PDF ได้ กรุณายืนยันสลิปก่อน'
+                                  : 'ยังไม่ได้สร้างและยืนยันสลิป'
+                              }
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>
+                                {downloadingSingleEmpId === emp.uid
+                                  ? 'กำลังโหลด...'
+                                  : 'ดาวน์โหลด PDF'}
+                              </span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1040,6 +1353,32 @@ export function AdminPayrollDashboard() {
           multipliersReady={multipliersReady}
           initialRowData={activeRow.rowData}
           actorName={hrUnlockedEmail || user?.name || user?.username || 'Admin'}
+          isHrUnlocked={isHrUnlocked}
+          downloadingPdf={downloadingSingleEmpId === activeRow.emp.uid}
+          onPreviewSlip={(slip, ytd) => {
+            if (!isHrUnlocked) return;
+            setPreviewSlipData({
+              slip,
+              employeeUsername: activeRow.emp.username || activeRow.emp.uid,
+              ytdTotals: ytd,
+            });
+          }}
+          onDownloadSlipPdf={(slip, ytd) => {
+            if (!isHrUnlocked || slip.status !== 'confirmed' || downloadingSingleEmpId) return;
+            const fullName =
+              slip.snapshot?.fullName ||
+              slip.employeeName ||
+              activeRow.profile.fullName ||
+              activeRow.emp.name ||
+              slip.employeeId;
+            setDownloadingSingleEmpId(slip.employeeId);
+            setSinglePrintJob({
+              slip,
+              employeeUsername: activeRow.emp.username || activeRow.emp.uid,
+              fullName,
+              ytdTotals: ytd,
+            });
+          }}
           onOpenSettings={() => {
             setActiveEmployeeId(null);
             setShowSettingsModal(true);
@@ -1108,6 +1447,66 @@ export function AdminPayrollDashboard() {
             setTimeout(() => setStatusNotice(null), 4000);
           }}
         />
+      )}
+
+      {/* MODAL 4: Full Bilingual Payslip Preview Modal */}
+      {previewSlipData && isHrUnlocked && (
+        <PayslipPreviewModal
+          companyName={settings.companyName || 'Thunder Cloud'}
+          slip={previewSlipData.slip}
+          employeeUsername={previewSlipData.employeeUsername}
+          ytdTotals={previewSlipData.ytdTotals}
+          isHrUnlocked={isHrUnlocked}
+          onClose={() => setPreviewSlipData(null)}
+        />
+      )}
+
+      {/* Offscreen Render Container for Single PDF Download */}
+      {singlePrintJob && isHrUnlocked && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            left: '-10000px',
+            top: '0px',
+            zIndex: -100,
+            pointerEvents: 'none',
+          }}
+        >
+          <PayslipDocument
+            ref={singlePrintRef}
+            companyName={settings.companyName || 'Thunder Cloud'}
+            slip={singlePrintJob.slip}
+            employeeUsername={singlePrintJob.employeeUsername}
+            ytdTotals={singlePrintJob.ytdTotals}
+          />
+        </div>
+      )}
+
+      {/* Offscreen Render Container for Batch Cycle PDF Download (1 Page Per Confirmed Employee) */}
+      {batchPrintJobs.length > 0 && isHrUnlocked && (
+        <div
+          ref={batchPrintContainerRef}
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            left: '-10000px',
+            top: '0px',
+            zIndex: -100,
+            pointerEvents: 'none',
+          }}
+        >
+          {batchPrintJobs.map((job) => (
+            <div key={job.slip.id} data-payslip-page="true">
+              <PayslipDocument
+                companyName={settings.companyName || 'Thunder Cloud'}
+                slip={job.slip}
+                employeeUsername={job.employeeUsername}
+                ytdTotals={job.ytdTotals}
+              />
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1625,6 +2024,10 @@ function EmployeePayrollSlipModal({
   multipliersReady,
   initialRowData,
   actorName,
+  isHrUnlocked,
+  downloadingPdf,
+  onPreviewSlip,
+  onDownloadSlipPdf,
   onOpenSettings,
   onClose,
   onSavedSlip,
@@ -1639,6 +2042,10 @@ function EmployeePayrollSlipModal({
   multipliersReady: boolean;
   initialRowData?: EmployeeRowComputedData;
   actorName: string;
+  isHrUnlocked: boolean;
+  downloadingPdf: boolean;
+  onPreviewSlip: (slip: PayrollSlip, ytd: PayslipYTDInfo) => void;
+  onDownloadSlipPdf: (slip: PayrollSlip, ytd: PayslipYTDInfo) => void;
   onOpenSettings: () => void;
   onClose: () => void;
   onSavedSlip: (savedSlip: PayrollSlip, usedItemIds: string[]) => Promise<void>;
@@ -1835,6 +2242,23 @@ function EmployeePayrollSlipModal({
     });
   }, [yearConfirmedSlips, cycleKey, displayedValues]);
 
+  // YTD Totals computed strictly from stored existingSlip in payroll_slips (no recalculation when printing/previewing)
+  const storedSlipYtdTotals = useMemo<PayslipYTDInfo>(() => {
+    if (!existingSlip) {
+      return { ytdEarnings: 0, ytdTax: 0, ytdSso: 0 };
+    }
+    const ytd = calculateYTDTotals(yearConfirmedSlips, existingSlip.cycleKey, {
+      totalEarnings: existingSlip.totalEarnings,
+      withholdingTax: existingSlip.withholdingTax,
+      ssoAmount: existingSlip.ssoAmount,
+    });
+    return {
+      ytdEarnings: ytd.ytdEarnings,
+      ytdTax: ytd.ytdTax,
+      ytdSso: ytd.ytdSso,
+    };
+  }, [yearConfirmedSlips, existingSlip]);
+
   const handleSave = async (targetStatus: 'draft' | 'confirmed') => {
     if (loading || loadError || !liveCalc || !privateData || !multipliersReady) return;
     if (targetStatus === 'confirmed' && !hasSalary) {
@@ -1872,9 +2296,6 @@ function EmployeePayrollSlipModal({
 
       setExistingSlip(saved);
       await onSavedSlip(saved, usedItemIds);
-      if (targetStatus === 'confirmed') {
-        onClose();
-      }
     } catch (err) {
       console.error('Error saving payroll slip:', err);
       setActionError('บันทึกสลิปเงินเดือนไม่สำเร็จ กรุณาตรวจสอบสิทธิ์หรือลองใหม่อีกครั้ง');
@@ -1964,13 +2385,56 @@ function EmployeePayrollSlipModal({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 self-end sm:self-auto"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+            <button
+              type="button"
+              disabled={!isHrUnlocked || !existingSlip || loading || Boolean(loadError)}
+              onClick={() => existingSlip && onPreviewSlip(existingSlip, storedSlipYtdTotals)}
+              className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              title={
+                existingSlip
+                  ? existingSlip.status === 'draft'
+                    ? 'ดูตัวอย่างสลิปฉบับร่าง (แสดงลายน้ำ ร่าง - ยังไม่ยืนยัน)'
+                    : 'ดูตัวอย่างสลิปเงินเดือนหน้าตาจริง'
+                  : 'กรุณากดบันทึกร่างหรือยืนยันสลิปก่อนดูตัวอย่างสลิป'
+              }
+            >
+              <Eye className="w-3.5 h-3.5 text-indigo-500" />
+              <span>ดูตัวอย่างสลิป</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={
+                !isHrUnlocked ||
+                !isConfirmed ||
+                !existingSlip ||
+                downloadingPdf ||
+                loading ||
+                Boolean(loadError)
+              }
+              onClick={() => existingSlip && onDownloadSlipPdf(existingSlip, storedSlipYtdTotals)}
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              title={
+                isConfirmed
+                  ? 'ดาวน์โหลดสลิปเงินเดือนเป็นไฟล์ PDF'
+                  : existingSlip?.status === 'draft'
+                  ? 'สลิปที่ยังเป็นร่างไม่สามารถดาวน์โหลด PDF ได้ กรุณายืนยันสลิปก่อน'
+                  : 'ยังไม่ได้สร้างและยืนยันสลิป'
+              }
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{downloadingPdf ? 'กำลังสร้าง PDF...' : 'ดาวน์โหลด PDF'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Load Error Banner */}
@@ -2495,6 +2959,47 @@ function EmployeePayrollSlipModal({
                   ปิดหน้าต่าง
                 </button>
 
+                <button
+                  type="button"
+                  disabled={!isHrUnlocked || !existingSlip || loading || Boolean(loadError)}
+                  onClick={() => existingSlip && onPreviewSlip(existingSlip, storedSlipYtdTotals)}
+                  className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={
+                    existingSlip
+                      ? existingSlip.status === 'draft'
+                        ? 'ดูตัวอย่างสลิปฉบับร่าง (แสดงลายน้ำ ร่าง - ยังไม่ยืนยัน)'
+                        : 'ดูตัวอย่างสลิปเงินเดือนหน้าตาจริง'
+                      : 'กรุณากดบันทึกร่างหรือยืนยันสลิปก่อนดูตัวอย่างสลิป'
+                  }
+                >
+                  <Eye className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>ดูตัวอย่างสลิป</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={
+                    !isHrUnlocked ||
+                    !isConfirmed ||
+                    !existingSlip ||
+                    downloadingPdf ||
+                    loading ||
+                    Boolean(loadError)
+                  }
+                  onClick={() => existingSlip && onDownloadSlipPdf(existingSlip, storedSlipYtdTotals)}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={
+                    isConfirmed
+                      ? 'ดาวน์โหลดสลิปเงินเดือนเป็นไฟล์ PDF'
+                      : existingSlip?.status === 'draft'
+                      ? 'สลิปที่ยังเป็นร่างไม่สามารถดาวน์โหลด PDF ได้ กรุณายืนยันสลิปก่อน'
+                      : 'ยังไม่ได้สร้างและยืนยันสลิป'
+                  }
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{downloadingPdf ? 'กำลังสร้าง PDF...' : 'ดาวน์โหลด PDF'}</span>
+                </button>
+
                 {isConfirmed ? (
                   !showUnconfirmBox && (
                     <button
@@ -2707,6 +3212,119 @@ function PayrollAdminUnlockModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ===============================================================
+// Sub-Modal 4: Full Bilingual Payslip Preview & PDF Download Modal
+// ===============================================================
+
+function PayslipPreviewModal({
+  companyName,
+  slip,
+  employeeUsername,
+  ytdTotals,
+  isHrUnlocked,
+  onClose,
+}: {
+  companyName: string;
+  slip: PayrollSlip;
+  employeeUsername?: string;
+  ytdTotals: PayslipYTDInfo;
+  isHrUnlocked: boolean;
+  onClose: () => void;
+}) {
+  const docRef = useRef<HTMLDivElement | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const isConfirmed = slip.status === 'confirmed';
+  const fullName = slip.snapshot?.fullName || slip.employeeName || slip.employeeId;
+
+  const handleDownloadPdf = async () => {
+    if (!isHrUnlocked || !isConfirmed || downloading || !docRef.current) return;
+    setDownloading(true);
+    setPdfError(null);
+    try {
+      await downloadSinglePayslipPdf(docRef.current, fullName, slip.cycleKey);
+    } catch (err) {
+      console.error('Error downloading PDF from preview modal:', err);
+      setPdfError('ไม่สามารถสร้างไฟล์ PDF ได้ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150">
+      <div className="bg-slate-100 dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-300 dark:border-slate-700 w-full max-w-[1190px] max-h-[95vh] flex flex-col overflow-hidden">
+        {/* Top Control Bar */}
+        <div className="px-4 py-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white">
+              ตัวอย่างสลิปเงินเดือน: {fullName} ({slip.cycleKey})
+            </span>
+            {isConfirmed ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                <span>ยืนยันแล้ว</span>
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800">
+                ฉบับร่าง (แสดงลายน้ำ — ยังดาวน์โหลด PDF ไม่ได้)
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={!isHrUnlocked || !isConfirmed || downloading}
+              onClick={handleDownloadPdf}
+              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              title={
+                isConfirmed
+                  ? `ดาวน์โหลดไฟล์ สลิปเงินเดือน_${fullName}_${slip.cycleKey}.pdf`
+                  : 'สลิปสถานะร่างยังไม่สามารถดาวน์โหลดเป็น PDF ได้ กรุณายืนยันสลิปก่อน'
+              }
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{downloading ? 'กำลังสร้างไฟล์ PDF...' : 'ดาวน์โหลด PDF'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+              <span>ปิด</span>
+            </button>
+          </div>
+        </div>
+
+        {pdfError && (
+          <div className="mx-4 mt-3 p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{pdfError}</span>
+          </div>
+        )}
+
+        {/* Payslip Document Canvas Area */}
+        <div className="p-4 sm:p-6 overflow-auto flex-1 flex justify-center items-start bg-slate-200/70 dark:bg-slate-950/70">
+          <div className="shadow-xl border border-slate-300 bg-white shrink-0">
+            <PayslipDocument
+              ref={docRef}
+              companyName={companyName}
+              slip={slip}
+              employeeUsername={employeeUsername}
+              ytdTotals={ytdTotals}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

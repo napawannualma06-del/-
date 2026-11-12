@@ -18,7 +18,8 @@ import {
   Key,
   ShieldCheck,
   ChevronRight,
-  CalendarCheck
+  CalendarCheck,
+  Users
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -77,7 +78,10 @@ export function MobileBottomNav({
         aria-label="Mobile Navigation"
         className="fixed bottom-0 inset-x-0 z-40 md:hidden bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800/80 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-1.5 transition-all"
       >
-        <div className="grid grid-cols-4 items-center h-14 px-2 max-w-md mx-auto">
+        <div className={clsx(
+          "grid items-center h-14 px-2 max-w-md mx-auto",
+          isAdmin ? "grid-cols-4" : "grid-cols-3"
+        )}>
           {/* Tab 1: คิวงาน */}
           <Link
             to="/"
@@ -128,30 +132,32 @@ export function MobileBottomNav({
             )}
           </Link>
 
-          {/* Tab 3: Agent */}
-          <Link
-            to="/agents"
-            onClick={() => setShowDrawer(false)}
-            className={clsx(
-              "flex flex-col items-center justify-center h-full min-h-[44px] rounded-xl transition-all cursor-pointer relative",
-              isActive('/agents')
-                ? "text-indigo-600 dark:text-indigo-400 font-bold"
-                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-            )}
-          >
-            <div className={clsx(
-              "relative p-1 rounded-xl transition-all",
-              isActive('/agents') && "bg-indigo-50 dark:bg-indigo-950/60"
-            )}>
-              <Building2 className="w-5 h-5 shrink-0" />
-            </div>
-            <span className="text-[11px] font-medium tracking-tight mt-0.5">
-              Agent
-            </span>
-            {isActive('/agents') && (
-              <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-indigo-600 dark:bg-indigo-400" />
-            )}
-          </Link>
+          {/* Tab 3: HR (แสดงเฉพาะแอดมิน) */}
+          {isAdmin && (
+            <Link
+              to="/hr"
+              onClick={() => setShowDrawer(false)}
+              className={clsx(
+                "flex flex-col items-center justify-center h-full min-h-[44px] rounded-xl transition-all cursor-pointer relative",
+                isActive('/hr')
+                  ? "text-indigo-600 dark:text-indigo-400 font-bold"
+                  : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              )}
+            >
+              <div className={clsx(
+                "relative p-1 rounded-xl transition-all",
+                isActive('/hr') && "bg-indigo-50 dark:bg-indigo-950/60"
+              )}>
+                <Users className="w-5 h-5 shrink-0" />
+              </div>
+              <span className="text-[11px] font-medium tracking-tight mt-0.5">
+                HR
+              </span>
+              {isActive('/hr') && (
+                <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-indigo-600 dark:bg-indigo-400" />
+              )}
+            </Link>
+          )}
 
           {/* Tab 4: เพิ่มเติม / บริการ */}
           <button
@@ -259,6 +265,24 @@ export function MobileBottomNav({
 
             {/* Grid of Quick Actions (Touch targets >= 48px) */}
             <div className="grid grid-cols-2 gap-2.5 mb-4">
+              {/* 0. รายชื่อ Agent & บัญชีธนาคาร */}
+              <Link
+                to="/agents"
+                onClick={() => setShowDrawer(false)}
+                className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200/90 dark:border-slate-700/80 rounded-2xl flex items-start gap-2.5 text-left active:scale-[0.98] transition cursor-pointer shadow-2xs group hover:border-indigo-300 dark:hover:border-indigo-700"
+              >
+                <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 shrink-0">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white block group-hover:text-indigo-600 transition-colors">
+                    รายชื่อ Agent & บัญชีธนาคาร
+                  </span>
+                  <span className="text-[10px] text-slate-400 block truncate mt-0.5">
+                    ข้อมูลตัวแทนและบัญชี
+                  </span>
+                </div>
+              </Link>
               {/* 1. ขอเบิกเงินแอดวานซ์ */}
               <button
                 type="button"

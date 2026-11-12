@@ -538,31 +538,11 @@ export function AdminDashboard() {
             <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
               {mainTab === 'cases' 
                 ? 'แดชบอร์ดและสถิติภาพรวม' 
-                : mainTab === 'ot' 
-                ? 'แดชบอร์ด OT พนักงานทุกคน' 
-                : mainTab === 'advance' 
-                ? 'แดชบอร์ดขอเบิกเงินแอดวานซ์'
-                : mainTab === 'shifts'
-                ? 'ตารางกะงานพนักงาน'
-                : mainTab === 'hr'
-                ? 'ข้อมูลพื้นฐานพนักงาน (HR)'
-                : mainTab === 'payroll'
-                ? 'ระบบสลิปเงินเดือน'
                 : 'API ยืนยันรหัสเคสสำหรับเว็บหลัก'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               {mainTab === 'cases'
                 ? 'สรุปผลการดำเนินงาน สถิติปิดเคส และตารางอันดับผลงาน (ตัดรอบเวลาเที่ยงคืน 00:00 - 23:59 น.)'
-                : mainTab === 'ot'
-                ? 'ตรวจอนุมัติ สรุปยอดชั่วโมง OT รายบุคคล และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
-                : mainTab === 'advance'
-                ? 'ตรวจอนุมัติเบิกเงิน โอนเงิน แนบสลิปหลักฐาน และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
-                : mainTab === 'shifts'
-                ? 'จัดกะ วันหยุด วันลา ตามรอบ 26 ถึง 25'
-                : mainTab === 'hr'
-                ? 'จัดการข้อมูลพนักงาน วันเริ่มงาน อายุงาน และสถานะการทดลองงาน'
-                : mainTab === 'payroll'
-                ? 'ตั้งค่าตัวคูณ OT รายการเงินได้/หัก และคำนวณสลิปเงินเดือนรายบุคคลตามรอบ 26 ถึง 25'
                 : 'จัดการ API Key ตรวจสอบความถูกต้องของเคส และทดสอบการเชื่อมต่อ API กับเว็บหลัก'}
             </p>
           </div>
@@ -588,86 +568,6 @@ export function AdminDashboard() {
 
                 <button
                   type="button"
-                  onClick={() => setMainTab('ot')}
-                  className={clsx(
-                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
-                    mainTab === 'ot'
-                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  )}
-                >
-                  <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                  <span>OT</span>
-                  {pendingOTCount > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white tabular-nums">
-                      {pendingOTCount}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setMainTab('advance')}
-                  className={clsx(
-                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
-                    mainTab === 'advance'
-                      ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  )}
-                >
-                  <Banknote className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span>แอดวานซ์</span>
-                  {pendingAdvanceCount > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-600 text-white tabular-nums">
-                      {pendingAdvanceCount}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setMainTab('shifts')}
-                  className={clsx(
-                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
-                    mainTab === 'shifts'
-                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  )}
-                >
-                  <CalendarCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span>ตารางกะ</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setMainTab('hr')}
-                  className={clsx(
-                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
-                    mainTab === 'hr'
-                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  )}
-                >
-                  <Briefcase className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span>HR</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setMainTab('payroll')}
-                  className={clsx(
-                    "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
-                    mainTab === 'payroll'
-                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                  )}
-                >
-                  <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span>สลิปเงินเดือน</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => setMainTab('api')}
                   className={clsx(
                     "px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap relative shrink-0",
@@ -685,29 +585,6 @@ export function AdminDashboard() {
                 <BarChart3 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <span>ภาพรวมเคส & สถิติผลงาน</span>
               </div>
-            )}
-
-            {/* User Management & Pending Approvals */}
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setShowUserModal(true)}
-                className={clsx(
-                  "h-9 px-3 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap tabular-nums",
-                  registeredUsers.some(u => u.accountStatus === 'pending')
-                    ? "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100"
-                    : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
-                )}
-                title="จัดการบัญชีพนักงานและอนุมัติผู้สมัครใหม่"
-              >
-                <Users className="w-3.5 h-3.5 text-indigo-500" />
-                <span>จัดการพนักงาน</span>
-                {registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-bold">
-                    {registeredUsers.filter(u => u.accountStatus === 'pending').length}
-                  </span>
-                )}
-              </button>
             )}
 
             <button
@@ -889,17 +766,7 @@ export function AdminDashboard() {
       )}
 
       {/* Conditional Rendering based on Main Tab */}
-      {isAdmin && mainTab === 'ot' ? (
-        <AdminOTDashboard />
-      ) : isAdmin && mainTab === 'advance' ? (
-        <AdminAdvanceDashboard />
-      ) : isAdmin && mainTab === 'shifts' ? (
-        <AdminShiftDashboard />
-      ) : isAdmin && mainTab === 'hr' ? (
-        <AdminHRDashboard />
-      ) : isAdmin && mainTab === 'payroll' ? (
-        <AdminPayrollDashboard />
-      ) : isAdmin && mainTab === 'api' ? (
+      {isAdmin && mainTab === 'api' ? (
         <AdminApiIntegration currentAdminName={user?.name || 'Admin'} cases={cases} />
       ) : (
         <>

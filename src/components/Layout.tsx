@@ -32,7 +32,8 @@ import {
   QrCode,
   Building2,
   KeyRound,
-  CalendarCheck
+  CalendarCheck,
+  Users
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
@@ -409,19 +410,21 @@ export function Layout() {
                   <span>แดชบอร์ด</span>
                 </Link>
 
-                <Link
-                  to="/agents"
-                  className={clsx(
-                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
-                    location.pathname === '/agents' 
-                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  )}
-                  title="รายชื่อ Agent & ข้อมูลบัญชีธนาคาร"
-                >
-                  <Building2 className="w-4 h-4 shrink-0" />
-                  <span>Agent</span>
-                </Link>
+                {isUserAdmin(user) && (
+                  <Link
+                    to="/hr"
+                    className={clsx(
+                      'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                      location.pathname === '/hr' 
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    )}
+                    title="ระบบพนักงาน HR"
+                  >
+                    <Users className="w-4 h-4 shrink-0" />
+                    <span>HR</span>
+                  </Link>
+                )}
 
                 {/* เมนูดรอปดาวน์รวมเครื่องมือและบริการ */}
                 <div className="relative" ref={toolsDropdownRef}>
@@ -460,6 +463,27 @@ export function Layout() {
                       <div className="px-3.5 py-2 border-b border-slate-100 dark:border-slate-800/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         บริการและแบบฟอร์มพนักงาน
                       </div>
+
+                      {/* 0. รายชื่อ Agent & บัญชีธนาคาร */}
+                      <Link
+                        to="/agents"
+                        onClick={() => setShowToolsDropdown(false)}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 shrink-0">
+                            <Building2 className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                              รายชื่อ Agent & บัญชีธนาคาร
+                            </span>
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              ข้อมูลตัวแทนและเลขบัญชีโอนเงิน
+                            </span>
+                          </div>
+                        </div>
+                      </Link>
 
                       {/* 1. ขอเบิกเงินแอดวานซ์ */}
                       <button
