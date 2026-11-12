@@ -1,8 +1,19 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from './firebase';
-import { HRProfile, HRProfilesDoc } from '../types';
+import {
+  inMemoryPersistence,
+  setPersistence,
+  signInAnonymously,
+  signInWithEmailAndPassword,
+  signOut,
+  User as FirebaseAuthUser,
+} from 'firebase/auth';
+import { auth, db } from './firebase';
+import { HRPrivateData, HRProfile, HRProfilesDoc } from '../types';
 
 export const DEFAULT_PROBATION_DAYS = 119;
+export const DEFAULT_SSO_RATE_PERCENT = 5;
+export const DEFAULT_SSO_CAP_AMOUNT = 875;
+export const HR_PRIVATE_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 นาที
 
 export function getDefaultHRProfile(fallbackName = ''): HRProfile {
   return {
@@ -248,3 +259,173 @@ export function exportHRProfilesToCsv(
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+// ===============================================================
+// HR Confidential Private Data Operations (hr_private/{employeeId})
+// ===============================================================
+
+export function getDefaultHRPrivateData(fallbackAccountName = ''): HRPrivateData {
+  return {
+    bankName: '',
+    accountNumber: '',
+    accountName: fallbackAccountName,
+    salary: 0,
+    ssoNumber: '',
+    ssoStatus: 'enrolled',
+    ssoRatePercent: DEFAULT_SSO_RATE_PERCENT,
+    ssoCapAmount: DEFAULT_SSO_CAP_AMOUNT,
+  };
+}
+
+/**
+ * โหลดข้อมูลลับ HR รายบุคคลจาก hr_private/{employeeId} ด้วย getDoc ครั้งเดียว
+ * ห้ามดึงทั้ง collection
+ * ถ้ายังไม่มีเอกสาร จะคืนค่าเริ่มต้น
+ * ถ้าไม่มีสิทธิ์หรือโหลดไม่สำเร็จ จะ throw error ออกไปเพื่อให้แสดงข้อความและปิดปุ่มบันทึก
+ */
+export async function fetchHRPrivateEmployee(
+  employeeId: string,
+  fallbackAccountName = ''
+): Promise<HRPrivateData> {
+  try {
+    const snap = await getDoc(doc(db, 'hr_private', employeeId));
+    if (snap.exists()) {
+      const data = snap.data() as Partial<HRPrivateData>;
+      return {
+        bankName: data.bankName ?? '',
+        accountNumber: data.accountNumber ?? '',
+        accountName: data.accountName ?? fallbackAccountName,
+        salary: typeof data.salary === 'number' ? data.salary : Number(data.salary) || 0,
+        ssoNumber: data.ssoNumber ?? '',
+        ssoStatus: data.ssoStatus === 'not_enrolled' ? 'not_enrolled' : 'enrolled',
+        ssoRatePercent:
+          typeof data.ssoRatePercent === 'number'
+            ? data.ssoRatePercent
+            : DEFAULT_SSO_RATE_PERCENT,
+        ssoCapAmount:
+          typeof data.ssoCapAmount === 'number'
+            ? data.ssoCapAmount
+            : DEFAULT_SSO_CAP_AMOUNT,
+        updatedAt: data.updatedAt,
+        updatedBy: data.updatedBy,
+      };
+    }
+    return getDefaultHRPrivateData(fallbackAccountName);
+  } catch (err) {
+    console.error(`Error fetching hr_private/${employeeId}:`, err);
+    throw err;
+  }
+}
+
+/**
+ * บันทึกข้อมูลลับ HR รายบุคคลลงใน hr_private/{employeeId} เท่านั้น
+ * ห้ามบันทึกไว้ใน system_settings หรือ collection อื่นเด็ดขาด
+ */
+export async function saveHRPrivateEmployee(
+  employeeId: string,
+  data: HRPrivateData,
+  updatedBy: string
+): Promise<void> {
+  const payload: HRPrivateData = {
+    bankName: (data.bankName || '').trim(),
+    accountNumber: (data.accountNumber || '').trim(),
+    accountName: (data.accountName || '').trim(),
+    salary: Number(data.salary) || 0,
+    ssoNumber: (data.ssoNumber || '').trim(),
+    ssoStatus: data.ssoStatus === 'not_enrolled' ? 'not_enrolled' : 'enrolled',
+    ssoRatePercent:
+      Number.isFinite(Number(data.ssoRatePercent)) && Number(data.ssoRatePercent) >= 0
+        ? Number(data.ssoRatePercent)
+        : DEFAULT_SSO_RATE_PERCENT,
+    ssoCapAmount:
+      Number.isFinite(Number(data.ssoCapAmount)) && Number(data.ssoCapAmount) >= 0
+        ? Number(data.ssoCapAmount)
+        : DEFAULT_SSO_CAP_AMOUNT,
+    updatedAt: Date.now(),
+    updatedBy,
+  };
+
+  await setDoc(doc(db, 'hr_private', employeeId), payload);
+}
+
+/**
+ * คำนวณยอดหักประกันสังคมต่อเดือน = min(salary × % ÷ 100, เพดาน)
+ */
+export function calculateMonthlySSODeduction(
+  salary: number,
+  ratePercent: number = DEFAULT_SSO_RATE_PERCENT,
+  capAmount: number = DEFAULT_SSO_CAP_AMOUNT
+): number {
+  const cleanSalary = Math.max(0, Number(salary) || 0);
+  const cleanRate = Math.max(0, Number(ratePercent) || 0);
+  const cleanCap = Math.max(0, Number(capAmount) || 0);
+
+  const raw = (cleanSalary * cleanRate) / 100;
+  const result = Math.min(raw, cleanCap);
+  return Math.round(result * 100) / 100;
+}
+
+/**
+ * ซ่อนตัวเลขบางส่วนของเลขบัญชีหรือเลขประกันสังคม เช่น xxx-x-x1234-x
+ */
+export function maskSensitiveNumber(rawValue: string): string {
+  const trimmed = (rawValue || '').trim();
+  if (!trimmed) return '-';
+
+  const digitsOnly = trimmed.replace(/\D/g, '');
+  if (digitsOnly.length === 10) {
+    // รูปแบบเลขบัญชีธนาคาร 10 หลัก: xxx-x-x1234-x
+    const visible4 = digitsOnly.slice(5, 9);
+    return `xxx-x-x${visible4}-x`;
+  }
+
+  if (digitsOnly.length === 13) {
+    // รูปแบบเลขประกันสังคม / เลขบัตร 13 หลัก: x-xxxx-x1234-xx-x
+    const visible4 = digitsOnly.slice(6, 10);
+    return `x-xxxx-x${visible4}-xx-x`;
+  }
+
+  if (trimmed.length <= 4) {
+    return 'xxxx';
+  }
+
+  // กรณีความยาวอื่นๆ แสดงเฉพาะ 4 ตัวท้ายหรือก่อนตัวสุดท้าย
+  const last4 = trimmed.slice(-4);
+  return `${'x'.repeat(Math.max(3, trimmed.length - 4))}${last4}`;
+}
+
+/**
+ * ยืนยันตัวตนแอดมิน HR ด้วยอีเมลและรหัสผ่านผ่าน Firebase Auth (ไม่จำรหัสผ่านไว้ในเครื่อง)
+ */
+export async function signInHrAdminEmail(
+  email: string,
+  password: string
+): Promise<FirebaseAuthUser> {
+  // ใช้ inMemoryPersistence เพื่อไม่ให้จำสถานะล็อกอินอีเมลค้างในเครื่อง
+  try {
+    await setPersistence(auth, inMemoryPersistence);
+  } catch {
+    // fallback if persistence change is restricted
+  }
+  const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return cred.user;
+}
+
+/**
+ * ล็อกข้อมูลลับและออกจากระบบอีเมลทันที พร้อมคืนค่าการเชื่อมต่อปกติของแอป
+ */
+export async function lockHrAdminEmailSession(): Promise<void> {
+  try {
+    await signOut(auth);
+  } catch (err) {
+    console.warn('Error signing out HR admin email session:', err);
+  }
+
+  // คืนค่า anonymous auth ตามปกติของระบบ (ถ้าเปิดใช้งานไว้) โดยไม่กระทบระบบล็อกอิน PIN
+  try {
+    await signInAnonymously(auth);
+  } catch {
+    // ignore if anonymous auth is disabled
+  }
+}
+

@@ -293,3 +293,23 @@ export interface HRProfilesDoc {
   updatedBy?: string;
 }
 
+// ===============================================================
+// HR Confidential Private Data (hr_private/{employeeId})
+// ===============================================================
+
+export type HRSSOStatus = 'enrolled' | 'not_enrolled';
+
+export interface HRPrivateData {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  salary: number;
+  ssoNumber: string;
+  ssoStatus: HRSSOStatus; // 'enrolled' | 'not_enrolled'
+  ssoRatePercent: number; // ค่าเริ่ม 5
+  ssoCapAmount: number;   // ค่าเริ่ม 875
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
+

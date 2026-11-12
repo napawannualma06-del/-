@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   AlertCircle,
   Banknote,
@@ -6,33 +6,55 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
-  Download,
-  Edit3,
+  CreditCard,
+  Eye,
+  EyeOff,
   FileSpreadsheet,
+  KeyRound,
+  Lock,
+  Mail,
   RefreshCw,
   Save,
   Search,
   Settings,
+  ShieldAlert,
   ShieldCheck,
+  Unlock,
   UserCheck,
   UserMinus,
-  Users,
   X,
 } from 'lucide-react';
 import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 import { clsx } from 'clsx';
-import { db } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
-import { AdvanceRequest, HRProfile, HRProbationStatus } from '../types';
+import {
+  AdvanceRequest,
+  HRPrivateData,
+  HRProbationStatus,
+  HRProfile,
+  HRSSOStatus,
+} from '../types';
 import {
   DEFAULT_PROBATION_DAYS,
+  DEFAULT_SSO_CAP_AMOUNT,
+  DEFAULT_SSO_RATE_PERCENT,
+  HR_PRIVATE_IDLE_TIMEOUT_MS,
+  calculateMonthlySSODeduction,
   calculateProbationEndDate,
   calculateTenureText,
   exportHRProfilesToCsv,
+  fetchHRPrivateEmployee,
   fetchHRProfiles,
+  getDefaultHRPrivateData,
   getDefaultHRProfile,
   getProbationBadgeInfo,
+  lockHrAdminEmailSession,
+  maskSensitiveNumber,
+  saveHRPrivateEmployee,
   saveHRProfiles,
+  signInHrAdminEmail,
 } from '../lib/hrService';
 import { getOTCycleFromDate, getOTCycleInfo } from '../lib/otUtils';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -59,6 +81,73 @@ export function AdminHRDashboard() {
   // Modals
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [showNotEmployeeModal, setShowNotEmployeeModal] = useState(false);
+
+  // HR Confidential Unlock State (Firebase Email/Password Auth)
+  const [isHrUnlocked, setIsHrUnlocked] = useState<boolean>(false);
+  const [hrUnlockedEmail, setHrUnlockedEmail] = useState<string | null>(null);
+  const [showUnlockModal, setShowUnlockModal] = useState<boolean>(false);
+  const lastHrActivityRef = useRef<number>(Date.now());
+
+  // Sync Firebase Auth state for email/password provider
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      const isPasswordProvider = fbUser?.providerData?.some(
+        (p) => p.providerId === 'password'
+      );
+      if (fbUser && !fbUser.isAnonymous && isPasswordProvider && fbUser.email) {
+        setIsHrUnlocked(true);
+        setHrUnlockedEmail(fbUser.email);
+        lastHrActivityRef.current = Date.now();
+      } else {
+        setIsHrUnlocked(false);
+        setHrUnlockedEmail(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleLockHrPrivate = useCallback(async (isAutoTimeout = false) => {
+    await lockHrAdminEmailSession();
+    setIsHrUnlocked(false);
+    setHrUnlockedEmail(null);
+    if (isAutoTimeout) {
+      setStatusNotice({
+        type: 'error',
+        message: 'ล็อกข้อมูลลับอัตโนมัติเนื่องจากไม่มีการใช้งานเกิน 15 นาที',
+      });
+    } else {
+      setStatusNotice({
+        type: 'success',
+        message: 'ล็อกข้อมูลลับ HR และออกจากระบบยืนยันตัวตนอีเมลเรียบร้อยแล้ว',
+      });
+      setTimeout(() => setStatusNotice(null), 4000);
+    }
+  }, []);
+
+  // Auto-lock after 15 minutes of inactivity when HR confidential mode is unlocked
+  useEffect(() => {
+    if (!isHrUnlocked) return;
+
+    lastHrActivityRef.current = Date.now();
+
+    const updateActivity = () => {
+      lastHrActivityRef.current = Date.now();
+    };
+
+    const events = ['mousedown', 'keydown', 'touchstart', 'click', 'scroll'];
+    events.forEach((ev) => window.addEventListener(ev, updateActivity, { passive: true }));
+
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastHrActivityRef.current >= HR_PRIVATE_IDLE_TIMEOUT_MS) {
+        handleLockHrPrivate(true);
+      }
+    }, 15000);
+
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, updateActivity));
+      window.clearInterval(timer);
+    };
+  }, [isHrUnlocked, handleLockHrPrivate]);
 
   // Load HR profiles once on mount (or reload trigger)
   useEffect(() => {
@@ -194,29 +283,41 @@ export function AdminHRDashboard() {
     }
   };
 
-  // Save single employee HR profile from modal
-  const handleSaveEmployeeProfile = async (empId: string, updatedProfile: HRProfile) => {
+  // Save single employee HR profile (+ private HR data if unlocked) from modal
+  const handleSaveEmployeeProfile = async (
+    empId: string,
+    updatedProfile: HRProfile,
+    updatedPrivateData?: HRPrivateData
+  ) => {
     if (!user || loadError || loading || isSaving) return;
 
     setIsSaving(true);
     try {
+      const actorName = user.name || user.username || 'Admin';
       const nextProfiles = {
         ...profiles,
         [empId]: updatedProfile,
       };
-      await saveHRProfiles(nextProfiles, user.name || user.username || 'Admin');
+      await saveHRProfiles(nextProfiles, actorName);
+
+      if (isHrUnlocked && updatedPrivateData) {
+        await saveHRPrivateEmployee(empId, updatedPrivateData, hrUnlockedEmail || actorName);
+      }
+
       setProfiles(nextProfiles);
       setEditingEmployeeId(null);
       setStatusNotice({
         type: 'success',
-        message: `บันทึกข้อมูลพนักงาน "${updatedProfile.fullName || 'พนักงาน'}" เรียบร้อยแล้ว`,
+        message: isHrUnlocked && updatedPrivateData
+          ? `บันทึกข้อมูลพื้นฐานและข้อมูลลับ HR ของ "${updatedProfile.fullName || 'พนักงาน'}" เรียบร้อยแล้ว`
+          : `บันทึกข้อมูลพนักงาน "${updatedProfile.fullName || 'พนักงาน'}" เรียบร้อยแล้ว`,
       });
       setTimeout(() => setStatusNotice(null), 4000);
     } catch (err) {
       console.error('Error saving employee HR profile:', err);
       setStatusNotice({
         type: 'error',
-        message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง',
+        message: 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาตรวจสอบสิทธิ์หรือลองใหม่อีกครั้ง',
       });
     } finally {
       setIsSaving(false);
@@ -277,12 +378,40 @@ export function AdminHRDashboard() {
                 ข้อมูลพื้นฐานพนักงาน (HR)
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                คลิกที่แถวรายชื่อเพื่อแก้ไขข้อมูล วันเริ่มงาน วันผ่านโปร และดูยอดเบิกเงินแอดวานซ์รายบุคคล
+                คลิกที่แถวรายชื่อเพื่อแก้ไขข้อมูล วันเริ่มงาน วันผ่านโปร และดูข้อมูลลับ HR รายบุคคล
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Confidential HR Unlock / Lock Controls */}
+            {!isHrUnlocked ? (
+              <button
+                type="button"
+                onClick={() => setShowUnlockModal(true)}
+                className="px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+              >
+                <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>ยืนยันตัวตนแอดมินเพื่อดูข้อมูลลับ</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 px-2.5 py-1.5 rounded-xl">
+                <Unlock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                  ปลดล็อกข้อมูลลับ: {hrUnlockedEmail}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleLockHrPrivate(false)}
+                  className="ml-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shadow-2xs"
+                  title="ล็อกข้อมูลลับทันที (ล็อกอัตโนมัติเมื่อไม่มีการใช้งาน 15 นาที)"
+                >
+                  <Lock className="w-3 h-3" />
+                  <span>ล็อกข้อมูลลับ</span>
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               disabled={loadError || loading}
@@ -298,6 +427,7 @@ export function AdminHRDashboard() {
               disabled={loadError || loading || visibleEmployees.length === 0}
               onClick={() => exportHRProfilesToCsv(visibleEmployees, profiles)}
               className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+              title="ดาวน์โหลดเฉพาะข้อมูลพื้นฐาน (ไม่มีข้อมูลลับ)"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>ดาวน์โหลด Excel</span>
@@ -603,14 +733,20 @@ export function AdminHRDashboard() {
         )}
       </div>
 
-      {/* MODAL 1: Edit Employee HR Profile + Advance Summary */}
+      {/* MODAL 1: Edit Employee HR Profile + Advance Summary + Confidential HR Data */}
       {editingEmployee && (
         <EmployeeHRProfileModal
           employee={editingEmployee}
           initialProfile={profiles[editingEmployee.uid] || getDefaultHRProfile(editingEmployee.name)}
           disabledSave={loadError || loading || isSaving}
+          isHrUnlocked={isHrUnlocked}
+          hrUnlockedEmail={hrUnlockedEmail}
+          onRequestUnlock={() => setShowUnlockModal(true)}
+          onLockHr={() => handleLockHrPrivate(false)}
           onClose={() => setEditingEmployeeId(null)}
-          onSave={(updated) => handleSaveEmployeeProfile(editingEmployee.uid, updated)}
+          onSave={(updatedProfile, updatedPrivate) =>
+            handleSaveEmployeeProfile(editingEmployee.uid, updatedProfile, updatedPrivate)
+          }
         />
       )}
 
@@ -624,26 +760,52 @@ export function AdminHRDashboard() {
           onSave={handleSaveNotEmployeeSettings}
         />
       )}
+
+      {/* MODAL 3: Admin Email + Password Verification for HR Confidential Data */}
+      {showUnlockModal && (
+        <HrAdminUnlockModal
+          onClose={() => setShowUnlockModal(false)}
+          onSuccess={(email) => {
+            setIsHrUnlocked(true);
+            setHrUnlockedEmail(email);
+            lastHrActivityRef.current = Date.now();
+            setShowUnlockModal(false);
+            setStatusNotice({
+              type: 'success',
+              message: `ยืนยันตัวตนสำเร็จ (${email}) สามารถเปิดดูและแก้ไขข้อมูลลับ HR รายบุคคลได้แล้ว`,
+            });
+            setTimeout(() => setStatusNotice(null), 4000);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 // ===============================================================
-// Sub-Modal 1: Employee HR Profile Editor & Approved Advance View
+// Sub-Modal 1: Employee HR Profile Editor, Advance Summary & Confidential HR Data
 // ===============================================================
 
 function EmployeeHRProfileModal({
   employee,
   initialProfile,
   disabledSave,
+  isHrUnlocked,
+  hrUnlockedEmail,
+  onRequestUnlock,
+  onLockHr,
   onClose,
   onSave,
 }: {
   employee: { uid: string; name: string; username?: string; avatarEmoji?: string };
   initialProfile: HRProfile;
   disabledSave: boolean;
+  isHrUnlocked: boolean;
+  hrUnlockedEmail: string | null;
+  onRequestUnlock: () => void;
+  onLockHr: () => void;
   onClose: () => void;
-  onSave: (profile: HRProfile) => Promise<void>;
+  onSave: (profile: HRProfile, privateData?: HRPrivateData) => Promise<void>;
 }) {
   const [fullName, setFullName] = useState(initialProfile.fullName || employee.name || '');
   const [nickname, setNickname] = useState(initialProfile.nickname || '');
@@ -656,6 +818,69 @@ function EmployeeHRProfileModal({
   const [probationStatus, setProbationStatus] = useState<HRProbationStatus>(
     initialProfile.probationStatus || 'probation'
   );
+
+  // Confidential HR Data state (loaded ONLY when isHrUnlocked is true via single getDoc)
+  const [privateData, setPrivateData] = useState<HRPrivateData>(() =>
+    getDefaultHRPrivateData(initialProfile.fullName || employee.name || '')
+  );
+  const [loadingPrivate, setLoadingPrivate] = useState<boolean>(false);
+  const [privateLoadError, setPrivateLoadError] = useState<string | null>(null);
+  const [privateReloadCount, setPrivateReloadCount] = useState<number>(0);
+
+  // Masked view toggles for Account Number and SSO Number
+  const [showFullAccountNum, setShowFullAccountNum] = useState<boolean>(false);
+  const [showFullSsoNum, setShowFullSsoNum] = useState<boolean>(false);
+
+  // Load hr_private/{employee.uid} ONLY when unlocked
+  useEffect(() => {
+    if (!isHrUnlocked) {
+      setPrivateData(getDefaultHRPrivateData(initialProfile.fullName || employee.name || ''));
+      setPrivateLoadError(null);
+      setLoadingPrivate(false);
+      setShowFullAccountNum(false);
+      setShowFullSsoNum(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadPrivateDoc() {
+      setLoadingPrivate(true);
+      setPrivateLoadError(null);
+      try {
+        const loaded = await fetchHRPrivateEmployee(
+          employee.uid,
+          initialProfile.fullName || employee.name || ''
+        );
+        if (!isCancelled) {
+          setPrivateData(loaded);
+        }
+      } catch (err: any) {
+        console.error('Error loading HR private doc:', err);
+        if (!isCancelled) {
+          const code = err?.code || '';
+          if (code === 'permission-denied' || String(err?.message || '').includes('permission')) {
+            setPrivateLoadError(
+              'ไม่มีสิทธิ์เข้าถึงข้อมูลลับ HR (เฉพาะอีเมลแอดมินที่ได้รับอนุญาตเท่านั้น) ระบบปิดปุ่มบันทึกข้อมูล'
+            );
+          } else {
+            setPrivateLoadError(
+              'โหลดข้อมูลลับ HR ไม่สำเร็จ กรุณากดโหลดใหม่ (ระบบปิดปุ่มบันทึกเพื่อป้องกันข้อมูลทับหาย)'
+            );
+          }
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingPrivate(false);
+        }
+      }
+    }
+
+    loadPrivateDoc();
+    return () => {
+      isCancelled = true;
+    };
+  }, [isHrUnlocked, employee.uid, employee.name, initialProfile.fullName, privateReloadCount]);
 
   // When startDate or probationDays changes by user interaction, auto-recalculate probationEndDate
   const handleStartDateChange = (newStart: string) => {
@@ -767,15 +992,27 @@ function EmployeeHRProfileModal({
   const badge = getProbationBadgeInfo(previewProfile);
   const tenureText = calculateTenureText(startDate);
 
+  // Calculated monthly SSO deduction = min(salary × % ÷ 100, เพดาน)
+  const calculatedSsoFormulaAmount = useMemo(() => {
+    return calculateMonthlySSODeduction(
+      privateData.salary,
+      privateData.ssoRatePercent,
+      privateData.ssoCapAmount
+    );
+  }, [privateData.salary, privateData.ssoRatePercent, privateData.ssoCapAmount]);
+
+  const isSaveBlocked =
+    disabledSave || (isHrUnlocked && (loadingPrivate || Boolean(privateLoadError)));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (disabledSave) return;
-    await onSave(previewProfile);
+    if (isSaveBlocked) return;
+    await onSave(previewProfile, isHrUnlocked ? privateData : undefined);
   };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-2xl p-5 space-y-4 max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
@@ -787,7 +1024,7 @@ function EmployeeHRProfileModal({
             />
             <div>
               <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-                ข้อมูลพื้นฐานพนักงาน: {employee.name}
+                ข้อมูลพนักงาน: {employee.name}
               </h3>
               <p className="text-[11px] text-slate-400">
                 @{employee.username || 'member'} • รหัสผู้ใช้: {employee.uid.slice(0, 8)}...
@@ -980,6 +1217,317 @@ function EmployeeHRProfileModal({
             )}
           </div>
 
+          {/* SECTION: HR CONFIDENTIAL DATA (hr_private/{employeeId}) */}
+          <div className="p-4 rounded-xl border-2 border-amber-300/80 dark:border-amber-800/80 bg-amber-50/30 dark:bg-amber-950/20 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-amber-200/70 dark:border-amber-800/60">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    ข้อมูลลับ HR (เงินเดือน บัญชีธนาคาร และประกันสังคม)
+                  </h4>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                    เก็บแยกใน hr_private เฉพาะแอดมินที่ยืนยันตัวตนด้วยอีเมลเท่านั้น
+                  </p>
+                </div>
+              </div>
+
+              {isHrUnlocked ? (
+                <button
+                  type="button"
+                  onClick={onLockHr}
+                  className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shadow-2xs"
+                >
+                  <Lock className="w-3 h-3" />
+                  <span>ล็อกข้อมูลลับ</span>
+                </button>
+              ) : null}
+            </div>
+
+            {!isHrUnlocked ? (
+              <div className="py-5 px-3 text-center space-y-2.5">
+                <Lock className="w-7 h-7 text-amber-500 mx-auto" />
+                <p className="text-xs text-slate-600 dark:text-slate-300 font-medium">
+                  ข้อมูลส่วนนี้ถูกล็อกไว้ กรุณายืนยันตัวตนด้วยอีเมลแอดมินเพื่อเปิดดูหรือแก้ไข
+                </p>
+                <button
+                  type="button"
+                  onClick={onRequestUnlock}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>ยืนยันตัวตนแอดมินเพื่อดูข้อมูลลับ</span>
+                </button>
+              </div>
+            ) : loadingPrivate ? (
+              <div className="py-6 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
+                <span>กำลังโหลดข้อมูลลับเฉพาะบุคคล...</span>
+              </div>
+            ) : privateLoadError ? (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="font-semibold text-xs">{privateLoadError}</span>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setPrivateReloadCount((c) => c + 1)}
+                    className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>ลองโหลดใหม่</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Bank Info & Salary */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      ธนาคาร
+                    </label>
+                    <input
+                      type="text"
+                      value={privateData.bankName}
+                      onChange={(e) =>
+                        setPrivateData((prev) => ({ ...prev, bankName: e.target.value }))
+                      }
+                      placeholder="เช่น กสิกรไทย, ไทยพาณิชย์, กรุงเทพ"
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      ชื่อบัญชี
+                    </label>
+                    <input
+                      type="text"
+                      value={privateData.accountName}
+                      onChange={(e) =>
+                        setPrivateData((prev) => ({ ...prev, accountName: e.target.value }))
+                      }
+                      placeholder="ชื่อ-นามสกุล หน้าสมุดบัญชี"
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                    />
+                  </div>
+
+                  {/* Account Number with Masked Display + Toggle */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        เลขบัญชี
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowFullAccountNum((v) => !v)}
+                        className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        {showFullAccountNum ? (
+                          <>
+                            <EyeOff className="w-3 h-3" />
+                            <span>ซ่อนบางส่วน</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3 h-3" />
+                            <span>กดดูเต็ม / แก้ไข</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {showFullAccountNum ? (
+                      <input
+                        type="text"
+                        value={privateData.accountNumber}
+                        onChange={(e) =>
+                          setPrivateData((prev) => ({ ...prev, accountNumber: e.target.value }))
+                        }
+                        placeholder="กรอกเลขที่บัญชีธนาคาร"
+                        className="w-full px-3 py-1.5 rounded-lg border border-indigo-400 dark:border-indigo-600 bg-white dark:bg-slate-900 font-mono text-xs"
+                      />
+                    ) : (
+                      <div
+                        onClick={() => setShowFullAccountNum(true)}
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800 font-mono text-xs text-slate-700 dark:text-slate-200 flex items-center justify-between cursor-pointer"
+                        title="คลิกเพื่อดูเลขเต็มหรือแก้ไข"
+                      >
+                        <span>{maskSensitiveNumber(privateData.accountNumber)}</span>
+                        <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-sans font-bold">
+                          ดูเต็ม
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Salary */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      อัตราเงินเดือน (บาท)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={privateData.salary}
+                      onChange={(e) =>
+                        setPrivateData((prev) => ({
+                          ...prev,
+                          salary: parseFloat(e.target.value) || 0,
+                        }))
+                      }
+                      placeholder="0"
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs font-bold"
+                    />
+                  </div>
+                </div>
+
+                {/* Social Security (SSO) Info */}
+                <div className="pt-2.5 border-t border-amber-200/60 dark:border-amber-800/50 space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* SSO Number with Masked Display + Toggle */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          เลขประกันสังคม
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowFullSsoNum((v) => !v)}
+                          className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          {showFullSsoNum ? (
+                            <>
+                              <EyeOff className="w-3 h-3" />
+                              <span>ซ่อนบางส่วน</span>
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="w-3 h-3" />
+                              <span>กดดูเต็ม / แก้ไข</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      {showFullSsoNum ? (
+                        <input
+                          type="text"
+                          value={privateData.ssoNumber}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, ssoNumber: e.target.value }))
+                          }
+                          placeholder="กรอกเลขประกันสังคม 13 หลัก"
+                          className="w-full px-3 py-1.5 rounded-lg border border-indigo-400 dark:border-indigo-600 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      ) : (
+                        <div
+                          onClick={() => setShowFullSsoNum(true)}
+                          className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800 font-mono text-xs text-slate-700 dark:text-slate-200 flex items-center justify-between cursor-pointer"
+                          title="คลิกเพื่อดูเลขเต็มหรือแก้ไข"
+                        >
+                          <span>{maskSensitiveNumber(privateData.ssoNumber)}</span>
+                          <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-sans font-bold">
+                            ดูเต็ม
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* SSO Status */}
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        สถานะประกันสังคม
+                      </label>
+                      <select
+                        value={privateData.ssoStatus}
+                        onChange={(e) =>
+                          setPrivateData((prev) => ({
+                            ...prev,
+                            ssoStatus: e.target.value as HRSSOStatus,
+                          }))
+                        }
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold cursor-pointer"
+                      >
+                        <option value="enrolled">เข้าประกันสังคม (enrolled)</option>
+                        <option value="not_enrolled">ยังไม่เข้าประกันสังคม (not_enrolled)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Rate %, Cap Amount & Calculated Monthly SSO Deduction */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        อัตราหักประกันสังคม (%)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.1"
+                        value={privateData.ssoRatePercent}
+                        onChange={(e) =>
+                          setPrivateData((prev) => ({
+                            ...prev,
+                            ssoRatePercent:
+                              e.target.value === ''
+                                ? 0
+                                : parseFloat(e.target.value) || 0,
+                          }))
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        เพดานหักสูงสุด (บาท)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="1"
+                        value={privateData.ssoCapAmount}
+                        onChange={(e) =>
+                          setPrivateData((prev) => ({
+                            ...prev,
+                            ssoCapAmount:
+                              e.target.value === ''
+                                ? 0
+                                : parseFloat(e.target.value) || 0,
+                          }))
+                        }
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                      />
+                    </div>
+
+                    <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800">
+                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                        ยอดหักประกันสังคม/เดือน
+                      </div>
+                      <div className="text-sm font-black text-amber-700 dark:text-amber-400 tabular-nums">
+                        {calculatedSsoFormulaAmount.toLocaleString()} บาท
+                        {privateData.ssoStatus === 'not_enrolled' && (
+                          <span className="ml-1 text-[10px] font-normal text-slate-400">
+                            (ยังไม่เข้า สปส.)
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[9px] text-slate-400">
+                        สูตร: min({(privateData.salary || 0).toLocaleString()} ×{' '}
+                        {privateData.ssoRatePercent}% ÷ 100,{' '}
+                        {(privateData.ssoCapAmount || 0).toLocaleString()})
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Actions */}
           <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
             <button
@@ -991,11 +1539,11 @@ function EmployeeHRProfileModal({
             </button>
             <button
               type="submit"
-              disabled={disabledSave}
+              disabled={isSaveBlocked}
               className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
             >
               <Save className="w-3.5 h-3.5" />
-              <span>บันทึกข้อมูล</span>
+              <span>{isHrUnlocked ? 'บันทึกข้อมูลพื้นฐานและข้อมูลลับ' : 'บันทึกข้อมูลพื้นฐาน'}</span>
             </button>
           </div>
         </form>
@@ -1132,6 +1680,160 @@ function NotEmployeeSettingsModal({
             บันทึกการตั้งค่า
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ===============================================================
+// Sub-Modal 3: HR Admin Email & Password Verification Modal
+// ===============================================================
+
+function HrAdminUnlockModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: (email: string) => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) {
+      setErrorMsg('กรุณากรอกอีเมลและรหัสผ่านให้ครบถ้วน');
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const fbUser = await signInHrAdminEmail(email.trim(), password);
+      // Clear password from memory immediately
+      setPassword('');
+      onSuccess(fbUser.email || email.trim());
+    } catch (err: any) {
+      console.error('HR Admin email verification failed:', err);
+      setPassword('');
+      const code = err?.code || '';
+      if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/user-not-found' ||
+        code === 'auth/invalid-email'
+      ) {
+        setErrorMsg('อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง');
+      } else if (code === 'auth/too-many-requests') {
+        setErrorMsg('มีการลองผิดหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่');
+      } else {
+        setErrorMsg('ไม่สามารถยืนยันตัวตนได้ กรุณาตรวจสอบอีเมลและรหัสผ่าน');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-amber-300 dark:border-amber-800 w-full max-w-md p-5 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400">
+              <KeyRound className="w-4 h-4" />
+            </span>
+            <div>
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                ยืนยันตัวตนแอดมินเพื่อดูข้อมูลลับ HR
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                เข้าสู่ระบบด้วยอีเมลแอดมินที่ได้รับสิทธิ์ (ไม่จำรหัสผ่านในเครื่อง)
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setPassword('');
+              onClose();
+            }}
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <form onSubmit={handleUnlock} className="space-y-3.5 text-xs" autoComplete="off">
+          <div>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              อีเมลแอดมิน HR
+            </label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="email"
+                required
+                autoComplete="off"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="ระบุอีเมลแอดมิน"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              รหัสผ่าน
+            </label>
+            <div className="relative">
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="password"
+                required
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="ระบุรหัสผ่าน"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+
+          {errorMsg && (
+            <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 flex items-center gap-2 font-semibold">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <div className="text-[11px] text-slate-400 leading-relaxed">
+            ระบบจะล็อกข้อมูลลับอัตโนมัติเมื่อไม่มีการใช้งานเกิน 15 นาที หรือเมื่อกดปุ่ม "ล็อกข้อมูลลับ"
+          </div>
+
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setPassword('');
+                onClose();
+              }}
+              className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+            >
+              <Unlock className="w-3.5 h-3.5" />
+              <span>{submitting ? 'กำลังยืนยันตัวตน...' : 'ยืนยันตัวตน'}</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
