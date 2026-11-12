@@ -1453,6 +1453,7 @@ export function AdminPayrollDashboard() {
       {previewSlipData && isHrUnlocked && (
         <PayslipPreviewModal
           companyName={settings.companyName || 'Thunder Cloud'}
+          logoDataUrl={settings.logoDataUrl || ''}
           slip={previewSlipData.slip}
           employeeUsername={previewSlipData.employeeUsername}
           ytdTotals={previewSlipData.ytdTotals}
@@ -1476,6 +1477,7 @@ export function AdminPayrollDashboard() {
           <PayslipDocument
             ref={singlePrintRef}
             companyName={settings.companyName || 'Thunder Cloud'}
+            logoDataUrl={settings.logoDataUrl || ''}
             slip={singlePrintJob.slip}
             employeeUsername={singlePrintJob.employeeUsername}
             ytdTotals={singlePrintJob.ytdTotals}
@@ -1500,6 +1502,7 @@ export function AdminPayrollDashboard() {
             <div key={job.slip.id} data-payslip-page="true">
               <PayslipDocument
                 companyName={settings.companyName || 'Thunder Cloud'}
+                logoDataUrl={settings.logoDataUrl || ''}
                 slip={job.slip}
                 employeeUsername={job.employeeUsername}
                 ytdTotals={job.ytdTotals}
@@ -1530,6 +1533,12 @@ function PayrollSettingsModal({
   onSave: (settings: PayrollSettingsDoc) => Promise<void>;
 }) {
   const [companyName, setCompanyName] = useState(initialSettings.companyName || 'Thunder Cloud');
+  const [logoDataUrl, setLogoDataUrl] = useState<string>(initialSettings.logoDataUrl || '');
+  const [logoSizeBytes, setLogoSizeBytes] = useState<number>(0);
+  const [logoWarning, setLogoWarning] = useState<string | null>(null);
+  const [processingLogo, setProcessingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+
   const [multRed, setMultRed] = useState<string>(
     initialSettings.otMultiplierHolidayInHours !== null &&
       initialSettings.otMultiplierHolidayInHours !== undefined
@@ -1570,6 +1579,115 @@ function PayrollSettingsModal({
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const computeDataUrlByteSize = (dataUrl: string): number => {
+    const commaIdx = dataUrl.indexOf(',');
+    if (commaIdx === -1) return new Blob([dataUrl]).size;
+    const base64 = dataUrl.slice(commaIdx + 1);
+    const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+    return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+  };
+
+  const handleLogoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLogoWarning(null);
+    setErrorMsg(null);
+
+    const isPng = file.type === 'image/png' || /\.png$/i.test(file.name);
+    const isJpg =
+      file.type === 'image/jpeg' ||
+      file.type === 'image/jpg' ||
+      /\.(jpe?g)$/i.test(file.name);
+
+    if (!isPng && !isJpg) {
+      setLogoWarning('รองรับเฉพาะไฟล์รูปภาพ PNG หรือ JPG เท่านั้น');
+      if (logoInputRef.current) logoInputRef.current.value = '';
+      return;
+    }
+
+    setProcessingLogo(true);
+    try {
+      const resizedDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('ไม่สามารถอ่านไฟล์รูปภาพได้'));
+        reader.onload = () => {
+          const srcDataUrl = typeof reader.result === 'string' ? reader.result : '';
+          if (!srcDataUrl) {
+            reject(new Error('ไม่สามารถอ่านไฟล์รูปภาพได้'));
+            return;
+          }
+          const img = new Image();
+          img.onerror = () => reject(new Error('ไฟล์รูปภาพไม่ถูกต้อง'));
+          img.onload = () => {
+            const origW = img.naturalWidth || img.width;
+            const origH = img.naturalHeight || img.height;
+            if (!origW || !origH) {
+              reject(new Error('ขนาดรูปภาพไม่ถูกต้อง'));
+              return;
+            }
+
+            // ย่อรูปในเครื่องให้ด้านยาวไม่เกิน 400 พิกเซล โดยรักษาสัดส่วนเดิม
+            const maxSide = 400;
+            const longest = Math.max(origW, origH);
+            const scale = longest > maxSide ? maxSide / longest : 1;
+            const targetW = Math.max(1, Math.round(origW * scale));
+            const targetH = Math.max(1, Math.round(origH * scale));
+
+            const canvas = document.createElement('canvas');
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error('ไม่สามารถสร้าง Canvas สำหรับย่อรูปได้'));
+              return;
+            }
+
+            // เก็บความโปร่งใสของ PNG ไว้ (clearRect โปร่งใสก่อนวาด)
+            ctx.clearRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+
+            if (isPng) {
+              resolve(canvas.toDataURL('image/png'));
+            } else {
+              resolve(canvas.toDataURL('image/jpeg', 0.9));
+            }
+          };
+          img.src = srcDataUrl;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      const byteSize = computeDataUrlByteSize(resizedDataUrl);
+      const maxBytes = 300 * 1024; // 300 KB
+      setLogoDataUrl(resizedDataUrl);
+      setLogoSizeBytes(byteSize);
+
+      if (byteSize > maxBytes) {
+        const sizeKb = (byteSize / 1024).toFixed(1);
+        setLogoWarning(
+          `ไฟล์โลโก้หลังย่อมีขนาด ${sizeKb} KB ซึ่งเกินกำหนด 300 KB กรุณาเลือกไฟล์ใหม่ที่มีขนาดเล็กลง หรือกดลบโลโก้ก่อนบันทึก`
+        );
+      } else {
+        setLogoWarning(null);
+      }
+    } catch (err: any) {
+      console.error('Error resizing company logo:', err);
+      setLogoWarning(err?.message || 'เกิดข้อผิดพลาดในการย่อรูปโลโก้');
+    } finally {
+      setProcessingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveLogo = () => {
+    setLogoDataUrl('');
+    setLogoSizeBytes(0);
+    setLogoWarning(null);
+    setErrorMsg(null);
+    if (logoInputRef.current) logoInputRef.current.value = '';
+  };
 
   const handleAddItem = () => {
     const trimmed = newNameTh.trim();
@@ -1637,7 +1755,19 @@ function PayrollSettingsModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (disabledSave || saving) return;
+    if (disabledSave || saving || processingLogo) return;
+
+    // ตรวจสอบขนาดไฟล์โลโก้หลังย่อ ถ้าเกิน 300 KB ให้ขึ้นเตือนและไม่บันทึก
+    if (logoDataUrl) {
+      const currentBytes = computeDataUrlByteSize(logoDataUrl);
+      if (currentBytes > 300 * 1024) {
+        const sizeKb = (currentBytes / 1024).toFixed(1);
+        const msg = `ไม่สามารถบันทึกได้: โลโก้บริษัทหลังย่อมีขนาด ${sizeKb} KB เกินกำหนด 300 KB กรุณาเปลี่ยนรูปใหม่หรือลบโลโก้ออก`;
+        setLogoWarning(msg);
+        setErrorMsg(msg);
+        return;
+      }
+    }
 
     setSaving(true);
     setErrorMsg(null);
@@ -1645,6 +1775,7 @@ function PayrollSettingsModal({
       const nextDoc: PayrollSettingsDoc = {
         ...initialSettings,
         companyName: companyName.trim() || 'Thunder Cloud',
+        logoDataUrl: logoDataUrl || '',
         otMultiplierHolidayInHours: parseMultiplierInput(multRed),
         otMultiplierHolidayAfterHours: parseMultiplierInput(multGreen),
         otMultiplierWorkday: parseMultiplierInput(multBlue),
@@ -1674,7 +1805,7 @@ function PayrollSettingsModal({
                 ตั้งค่าระบบสลิปเงินเดือน (`system_settings/payroll_settings`)
               </h3>
               <p className="text-[11px] text-slate-400">
-                กำหนดชื่อบริษัท ตัวคูณ OT ทั้ง 4 ประเภท และจัดการรายการเงินได้ / รายการหัก
+                กำหนดชื่อบริษัท โลโก้บริษัท ตัวคูณ OT ทั้ง 4 ประเภท และจัดการรายการเงินได้ / รายการหัก
               </p>
             </div>
           </div>
@@ -1688,18 +1819,101 @@ function PayrollSettingsModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* 1. Company Name */}
-          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-2">
-            <label className="block font-bold text-slate-800 dark:text-slate-200">
-              1. ชื่อบริษัท (แสดงบนสลิปเงินเดือน)
-            </label>
-            <input
-              type="text"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="Thunder Cloud"
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
-            />
+          {/* 1. Company Name & Company Logo */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-3">
+            <div className="space-y-2">
+              <label className="block font-bold text-slate-800 dark:text-slate-200">
+                1. ชื่อบริษัท (แสดงบนสลิปเงินเดือน)
+              </label>
+              <input
+                type="text"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="Thunder Cloud"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
+              />
+            </div>
+
+            {/* ช่องโลโก้บริษัท */}
+            <div className="pt-2 border-t border-slate-200/80 dark:border-slate-700/80 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <label className="block font-bold text-slate-800 dark:text-slate-200">
+                    โลโก้บริษัท (แสดงมุมบนซ้ายของสลิปเงินเดือน)
+                  </label>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    รองรับไฟล์ PNG หรือ JPG (ย่ออัตโนมัติให้ด้านยาวไม่เกิน 400px รักษาความโปร่งใสของ PNG และขนาดหลังย่อต้องไม่เกิน 300 KB)
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+                    onChange={handleLogoFileChange}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    disabled={processingLogo}
+                    onClick={() => logoInputRef.current?.click()}
+                    className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold transition cursor-pointer disabled:opacity-50"
+                  >
+                    {processingLogo ? 'กำลังย่อรูป...' : logoDataUrl ? 'เปลี่ยนโลโก้' : 'อัปโหลดโลโก้ (PNG / JPG)'}
+                  </button>
+
+                  {logoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-300 font-bold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>ลบโลโก้</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {logoDataUrl ? (
+                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                  <div className="px-3 py-2 rounded-lg bg-slate-100/80 dark:bg-slate-800/80 border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center">
+                    <img
+                      src={logoDataUrl}
+                      alt="ตัวอย่างโลโก้บริษัท"
+                      style={{
+                        height: '56px',
+                        width: 'auto',
+                        maxWidth: '180px',
+                        objectFit: 'contain',
+                        display: 'block',
+                      }}
+                    />
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-0.5">
+                    <div className="font-bold text-slate-800 dark:text-slate-100">
+                      ตัวอย่างโลโก้ที่จะแสดงบนสลิปเงินเดือน (ความสูงประมาณ 56px)
+                    </div>
+                    <div className="text-slate-400">
+                      ขนาดข้อมูลหลังย่อ:{' '}
+                      {((logoSizeBytes || computeDataUrlByteSize(logoDataUrl)) / 1024).toFixed(1)} KB / สูงสุด 300 KB
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-400 italic">
+                  ยังไม่ได้ตั้งค่าโลโก้บริษัท (สลิปเงินเดือนจะแสดงตามรูปแบบเดิม)
+                </div>
+              )}
+
+              {logoWarning && (
+                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{logoWarning}</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 2. OT Multipliers (4 values) */}
@@ -3223,6 +3437,7 @@ function PayrollAdminUnlockModal({
 
 function PayslipPreviewModal({
   companyName,
+  logoDataUrl,
   slip,
   employeeUsername,
   ytdTotals,
@@ -3230,6 +3445,7 @@ function PayslipPreviewModal({
   onClose,
 }: {
   companyName: string;
+  logoDataUrl?: string;
   slip: PayrollSlip;
   employeeUsername?: string;
   ytdTotals: PayslipYTDInfo;
@@ -3319,6 +3535,7 @@ function PayslipPreviewModal({
             <PayslipDocument
               ref={docRef}
               companyName={companyName}
+              logoDataUrl={logoDataUrl}
               slip={slip}
               employeeUsername={employeeUsername}
               ytdTotals={ytdTotals}

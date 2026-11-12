@@ -328,6 +328,7 @@ export interface PayrollItemDefinition {
 
 export interface PayrollSettingsDoc {
   companyName: string; // ค่าเริ่ม "Thunder Cloud"
+  logoDataUrl?: string; // โลโก้บริษัท (data URL PNG/JPG ย่อไม่เกิน 400px และไม่เกิน 300KB)
   otMultiplierHolidayInHours: number | null;     // แดง
   otMultiplierHolidayAfterHours: number | null;  // เขียว
   otMultiplierWorkday: number | null;            // ฟ้า

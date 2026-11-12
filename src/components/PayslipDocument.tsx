@@ -103,6 +103,7 @@ export interface PayslipYTDInfo {
 export interface PayslipDocumentProps {
   slip: PayrollSlip;
   companyName: string;
+  logoDataUrl?: string;
   employeeUsername?: string;
   ytdTotals: PayslipYTDInfo;
 }
@@ -112,7 +113,7 @@ export interface PayslipDocumentProps {
  * ใช้ข้อมูลจากเอกสารใน payroll_slips เท่านั้น (รวม snapshot ชื่อ ตำแหน่ง ธนาคาร เลขบัญชี)
  */
 export const PayslipDocument = React.forwardRef<HTMLDivElement, PayslipDocumentProps>(
-  ({ slip, companyName, employeeUsername, ytdTotals }, ref) => {
+  ({ slip, companyName, logoDataUrl, employeeUsername, ytdTotals }, ref) => {
     const isDraft = slip.status === 'draft';
 
     const displayFullName =
@@ -165,6 +166,8 @@ export const PayslipDocument = React.forwardRef<HTMLDivElement, PayslipDocumentP
         });
       }
     }
+
+    const hasLogo = Boolean(logoDataUrl && logoDataUrl.trim());
 
     return (
       <div
@@ -242,34 +245,85 @@ export const PayslipDocument = React.forwardRef<HTMLDivElement, PayslipDocumentP
           >
             {/* หัวซ้าย: ข้อมูลบริษัท, ชื่อพนักงาน(รหัส), ตำแหน่ง */}
             <div style={{ width: '54%' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  marginBottom: '16px',
-                }}
-              >
+              {hasLogo ? (
                 <div
                   style={{
-                    width: '135px',
-                    fontWeight: 700,
-                    fontSize: '16px',
-                    color: '#111111',
-                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '14px',
+                    marginBottom: '16px',
                   }}
                 >
-                  ข้อมูลบริษัท
+                  <img
+                    src={logoDataUrl}
+                    alt="Company Logo"
+                    style={{
+                      height: '56px',
+                      width: 'auto',
+                      maxWidth: '180px',
+                      objectFit: 'contain',
+                      display: 'block',
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '110px',
+                        fontWeight: 700,
+                        fontSize: '16px',
+                        color: '#111111',
+                        flexShrink: 0,
+                      }}
+                    >
+                      ข้อมูลบริษัท
+                    </div>
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        fontSize: '19px',
+                        color: '#111111',
+                      }}
+                    >
+                      {companyName || 'Thunder Cloud'}
+                    </div>
+                  </div>
                 </div>
+              ) : (
                 <div
                   style={{
-                    fontWeight: 600,
-                    fontSize: '19px',
-                    color: '#111111',
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    marginBottom: '16px',
                   }}
                 >
-                  {companyName || 'Thunder Cloud'}
+                  <div
+                    style={{
+                      width: '135px',
+                      fontWeight: 700,
+                      fontSize: '16px',
+                      color: '#111111',
+                      flexShrink: 0,
+                    }}
+                  >
+                    ข้อมูลบริษัท
+                  </div>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '19px',
+                      color: '#111111',
+                    }}
+                  >
+                    {companyName || 'Thunder Cloud'}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div
                 style={{
@@ -1040,6 +1094,26 @@ async function renderPayslipElementToCanvas(element: HTMLElement): Promise<HTMLC
       // ignore font ready error
     }
   }
+
+  // รอให้รูปภาพทั้งหมดภายในสลิป (เช่น โลโก้บริษัท) โหลดและ decode เสร็จสมบูรณ์ก่อนแคปเจอร์เป็น PDF
+  const images = Array.from(element.querySelectorAll('img'));
+  await Promise.all(
+    images.map(async (img) => {
+      if (!img.complete) {
+        await new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+        });
+      }
+      if (typeof img.decode === 'function') {
+        try {
+          await img.decode();
+        } catch {
+          // ignore decode error
+        }
+      }
+    })
+  );
 
   return html2canvas(element, {
     scale: 2.5,

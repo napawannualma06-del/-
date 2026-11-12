@@ -91,6 +91,7 @@ export function getDefaultPayItems(): PayrollItemDefinition[] {
 export function getDefaultPayrollSettings(): PayrollSettingsDoc {
   return {
     companyName: DEFAULT_COMPANY_NAME,
+    logoDataUrl: '',
     otMultiplierHolidayInHours: null,
     otMultiplierHolidayAfterHours: null,
     otMultiplierWorkday: null,
@@ -134,6 +135,7 @@ export async function fetchPayrollSettings(): Promise<PayrollSettingsDoc> {
           typeof data.companyName === 'string' && data.companyName.trim()
             ? data.companyName.trim()
             : DEFAULT_COMPANY_NAME,
+        logoDataUrl: typeof data.logoDataUrl === 'string' ? data.logoDataUrl : '',
         otMultiplierHolidayInHours: parseMult(data.otMultiplierHolidayInHours),
         otMultiplierHolidayAfterHours: parseMult(data.otMultiplierHolidayAfterHours),
         otMultiplierWorkday: parseMult(data.otMultiplierWorkday),
@@ -164,6 +166,7 @@ export async function savePayrollSettings(
 ): Promise<PayrollSettingsDoc> {
   const payload: PayrollSettingsDoc = {
     companyName: (settings.companyName || '').trim() || DEFAULT_COMPANY_NAME,
+    logoDataUrl: typeof settings.logoDataUrl === 'string' ? settings.logoDataUrl : '',
     otMultiplierHolidayInHours:
       settings.otMultiplierHolidayInHours !== null &&
       settings.otMultiplierHolidayInHours !== undefined &&
