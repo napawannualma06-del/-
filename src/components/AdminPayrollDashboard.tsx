@@ -34,7 +34,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { auth, db } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
 import {
@@ -4034,8 +4034,8 @@ function PayrollCycleSummaryReportSection({
 
   const invalidRows = useMemo(() => reportRows.filter((r) => !r.isValid), [reportRows]);
 
-  // สร้างและดาวน์โหลดไฟล์ Excel (.xlsx จริง ด้วย SheetJS)
-  const executeExportExcel = () => {
+  // สร้างและดาวน์โหลดไฟล์ Excel (.xlsx จริง ด้วย ExcelJS พร้อมจัดรูปแบบสวยงาม)
+  const executeExportExcel = async () => {
     const companyName = (settings.companyName || 'Thunder Cloud').trim();
     const monthYearThai = getCycleThaiMonthYearText(selectedCycleKey);
     const periodRangeThai = getCycleThaiPeriodRangeText(selectedCycleKey);
@@ -4058,123 +4058,267 @@ function PayrollCycleSummaryReportSection({
       'ธนาคาร',
     ];
 
-    // แถว 1 ถึง แถว 6 ตามรูปแบบที่กำหนด
-    const aoa: any[][] = [
-      [`รายงานเงินเดือนรวมเงินได้/ค่าจ้างรายพนักงาน รอบเดือน ${monthYearThai}`], // แถว 1
-      [], // แถว 2
-      ['ชื่อบริษัท', companyName], // แถว 3
-      ['ช่วงเวลา :', periodRangeThai], // แถว 4
-      [], // แถว 5
-      headers, // แถว 6: หัวตาราง
-    ];
+    const totalCols = headers.length;
+    // ตำแหน่งคอลัมน์แบบ 1-based ของ ExcelJS
+    const totalEarningsColNum = 7 + earningColumns.length; // คอลัมน์ "รวมเงินได้ ยื่น ภงด.1"
+    const netPayColNum = totalCols - 2; // คอลัมน์ "ยอดจ่ายพนักงาน"
+    const accountColNum = totalCols - 1; // คอลัมน์ "เลขบัญชี"
+    const bankColNum = totalCols; // คอลัมน์ "ธนาคาร"
+    const numericStartColNum = 4; // คอลัมน์ "เงินเดือน/ค่าจ้าง"
+    const numericEndColNum = netPayColNum; // ถึงคอลัมน์ "ยอดจ่ายพนักงาน"
 
-    // แถว 7 เป็นต้นไป: ข้อมูลพนักงานแต่ละแถว
-    reportRows.forEach((r) => {
-      aoa.push([
-        r.seq,
-        r.employeeCode,
-        r.fullName,
-        r.salary,
-        r.otRegular,
-        r.otHolidayRed,
-        ...earningColumns.map((c) => r.earningAmounts[c.id] || 0),
-        r.totalEarnings,
-        r.ssoAmount,
-        ...deductionColumns.map((c) => r.deductionAmounts[c.id] || 0),
-        r.withholdingTax,
-        r.advanceAmount,
-        r.netPay,
-        r.accountNumber, // ไฟล์ Excel แสดงเลขบัญชีเต็ม
-        r.bankName,
-      ]);
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet('สรุปเงินเดือน', {
+      views: [{ state: 'frozen', xSplit: 3, ySplit: 6 }],
+      pageSetup: {
+        paperSize: 9, // A4
+        orientation: 'landscape',
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0,
+        margins: {
+          left: 0.25,
+          right: 0.25,
+          top: 0.5,
+          bottom: 0.5,
+          header: 0.3,
+          footer: 0.3,
+        },
+      },
     });
 
-    // ต่อด้วยแถวรวม
-    aoa.push([
+    // ตั้งความกว้างคอลัมน์: ลำดับที่ 8, รหัสพนักงาน 12, ชื่อ-สกุล 30, ตัวเลขเงิน 15, เลขบัญชี 18, ธนาคาร 18
+    ws.columns = headers.map((_, idx) => {
+      const colNum = idx + 1;
+      if (colNum === 1) return { width: 8 };
+      if (colNum === 2) return { width: 12 };
+      if (colNum === 3) return { width: 30 };
+      if (colNum === accountColNum) return { width: 18 };
+      if (colNum === bankColNum) return { width: 18 };
+      return { width: 15 };
+    });
+
+    // แถว 1: หัวรายงาน
+    const row1 = ws.getRow(1);
+    row1.getCell(1).value = `รายงานเงินเดือนรวมเงินได้/ค่าจ้างรายพนักงาน รอบเดือน ${monthYearThai}`;
+    ws.mergeCells(1, 1, 1, totalCols);
+    row1.height = 30;
+    row1.getCell(1).font = { name: 'Tahoma', size: 16, bold: true };
+    row1.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // แถว 2: เว้นว่าง
+    ws.getRow(2).values = [];
+
+    // แถว 3: ชื่อบริษัท | companyName (รวมเซลล์ B ถึง E)
+    const row3 = ws.getRow(3);
+    row3.getCell(1).value = 'ชื่อบริษัท';
+    row3.getCell(2).value = companyName;
+    ws.mergeCells(3, 2, 3, 5);
+    row3.getCell(1).font = { name: 'Tahoma', size: 12, bold: true };
+    row3.getCell(2).font = { name: 'Tahoma', size: 12, bold: true };
+    row3.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
+    row3.getCell(2).alignment = { vertical: 'middle', horizontal: 'left' };
+
+    // แถว 4: ช่วงเวลา : | 26 <เดือน> <ปี พ.ศ.> - 25 <เดือน> <ปี พ.ศ.> (รวมเซลล์ B ถึง E)
+    const row4 = ws.getRow(4);
+    row4.getCell(1).value = 'ช่วงเวลา :';
+    row4.getCell(2).value = periodRangeThai;
+    ws.mergeCells(4, 2, 4, 5);
+    row4.getCell(1).font = { name: 'Tahoma', size: 12, bold: true };
+    row4.getCell(2).font = { name: 'Tahoma', size: 12, bold: true };
+    row4.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
+    row4.getCell(2).alignment = { vertical: 'middle', horizontal: 'left' };
+
+    // แถว 5: เว้นว่าง
+    ws.getRow(5).values = [];
+
+    const thinBorder: Partial<ExcelJS.Borders> = {
+      top: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+      left: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+      bottom: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+      right: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+    };
+
+    const moneyNumFmt = '#,##0.00;-#,##0.00;"-"';
+
+    // แถว 6: หัวตาราง (พื้นสีฟ้า #23AEE7 ตัวอักษรขาว ตัวหนา ขนาด 11 จัดกลาง ตัดคำ สูง 36 เส้นขอบบางทุกช่อง)
+    const headerRow = ws.getRow(6);
+    headerRow.height = 36;
+    headers.forEach((hText, idx) => {
+      const cell = headerRow.getCell(idx + 1);
+      cell.value = hText;
+      cell.font = {
+        name: 'Tahoma',
+        size: 11,
+        bold: true,
+        color: { argb: 'FFFFFFFF' },
+      };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF23AEE7' },
+      };
+      cell.alignment = {
+        horizontal: 'center',
+        vertical: 'middle',
+        wrapText: true,
+      };
+      cell.border = thinBorder;
+    });
+
+    // แถว 7 เป็นต้นไป: แถวข้อมูลพนักงาน
+    reportRows.forEach((r, rowIdx) => {
+      const excelRowNum = 7 + rowIdx;
+      const row = ws.getRow(excelRowNum);
+
+      const rowValues: Array<string | number> = [
+        r.seq,
+        String(r.employeeCode ?? ''),
+        r.fullName,
+        round2(r.salary),
+        round2(r.otRegular),
+        round2(r.otHolidayRed),
+        ...earningColumns.map((c) => round2(r.earningAmounts[c.id] || 0)),
+        round2(r.totalEarnings),
+        round2(r.ssoAmount),
+        ...deductionColumns.map((c) => round2(r.deductionAmounts[c.id] || 0)),
+        round2(r.withholdingTax),
+        round2(r.advanceAmount),
+        round2(r.netPay),
+        String(r.accountNumber ?? ''), // เลขบัญชีเก็บเป็นข้อความเต็ม
+        String(r.bankName ?? ''),
+      ];
+
+      rowValues.forEach((val, colIdx) => {
+        const colNum = colIdx + 1;
+        const cell = row.getCell(colNum);
+        cell.value = val;
+        cell.border = thinBorder;
+
+        const isHighlightSummaryCol =
+          colNum === totalEarningsColNum || colNum === netPayColNum;
+
+        cell.font = {
+          name: 'Tahoma',
+          size: 11,
+          bold: isHighlightSummaryCol,
+        };
+
+        // สีพื้นหลัง:
+        // - ถ้าแถวนั้นตรวจยอดไม่ผ่าน: พื้นสีแดงอ่อน #FDE2E2 ทั้งแถว
+        // - ถ้าเป็นคอลัมน์ "รวมเงินได้ ยื่น ภงด.1" หรือ "ยอดจ่ายพนักงาน": พื้นสีเหลืองอ่อน #FFF4CC
+        // - แถวปกติสลับสีพื้นแถวเว้นแถวเป็น #F2F9FD
+        if (!r.isValid) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFDE2E2' },
+          };
+        } else if (isHighlightSummaryCol) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFFF4CC' },
+          };
+        } else if (rowIdx % 2 === 1) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF2F9FD' },
+          };
+        }
+
+        // การจัดตำแหน่งและรูปแบบตัวเลข/ข้อความ
+        if (colNum === 1) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else if (colNum === 2) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          cell.numFmt = '@';
+        } else if (colNum === 3 || colNum === bankColNum) {
+          cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          cell.numFmt = '@';
+        } else if (colNum === accountColNum) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          cell.numFmt = '@';
+        } else if (colNum >= numericStartColNum && colNum <= numericEndColNum) {
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          cell.numFmt = moneyNumFmt;
+        }
+      });
+    });
+
+    // แถวรวมท้ายตาราง
+    const totalExcelRowNum = 7 + reportRows.length;
+    const totalRow = ws.getRow(totalExcelRowNum);
+
+    const totalRowValues: Array<string | number> = [
       'รวม',
       '',
       '',
-      totalsRow.salary,
-      totalsRow.otRegular,
-      totalsRow.otHolidayRed,
-      ...earningColumns.map((c) => totalsRow.earningTotals[c.id] || 0),
-      totalsRow.totalEarnings,
-      totalsRow.ssoAmount,
-      ...deductionColumns.map((c) => totalsRow.deductionTotals[c.id] || 0),
-      totalsRow.withholdingTax,
-      totalsRow.advanceAmount,
-      totalsRow.netPay,
+      round2(totalsRow.salary),
+      round2(totalsRow.otRegular),
+      round2(totalsRow.otHolidayRed),
+      ...earningColumns.map((c) => round2(totalsRow.earningTotals[c.id] || 0)),
+      round2(totalsRow.totalEarnings),
+      round2(totalsRow.ssoAmount),
+      ...deductionColumns.map((c) => round2(totalsRow.deductionTotals[c.id] || 0)),
+      round2(totalsRow.withholdingTax),
+      round2(totalsRow.advanceAmount),
+      round2(totalsRow.netPay),
       '',
       '',
-    ]);
+    ];
 
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    totalRowValues.forEach((val, colIdx) => {
+      const colNum = colIdx + 1;
+      const cell = totalRow.getCell(colNum);
+      cell.value = val;
+      cell.font = {
+        name: 'Tahoma',
+        size: 11,
+        bold: true,
+      };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE7E6E6' },
+      };
+      cell.border = {
+        top: { style: 'double', color: { argb: 'FF595959' } },
+        left: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+        bottom: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+        right: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+      };
 
-    // กำหนดชนิดข้อมูลในเซลล์ให้ถูกต้อง:
-    // - ตัวเลขเก็บเป็นตัวเลขจริง (type 'n', format '#,##0.00')
-    // - รหัสพนักงาน (col 1) และ เลขบัญชี (col headers.length - 2) เก็บเป็นข้อความ (type 's', format '@') ไม่ให้เลข 0 หน้าหาย
-    const firstDataRowIdx = 6; // แถวที่ 7 (0-indexed = 6)
-    const totalRowIdx = 6 + reportRows.length;
-    const numericStartCol = 3; // 'เงินเดือน/ค่าจ้าง'
-    const numericEndCol = headers.length - 3; // 'ยอดจ่ายพนักงาน'
-    const accountColIdx = headers.length - 2; // 'เลขบัญชี'
-    const bankColIdx = headers.length - 1; // 'ธนาคาร'
-
-    for (let rIdx = firstDataRowIdx; rIdx <= totalRowIdx; rIdx++) {
-      const isTotalRow = rIdx === totalRowIdx;
-
-      if (!isTotalRow) {
-        // ลำดับที่ (จำนวนเต็ม)
-        const seqRef = XLSX.utils.encode_cell({ r: rIdx, c: 0 });
-        if (ws[seqRef]) {
-          ws[seqRef].t = 'n';
-        }
-
-        // รหัสพนักงาน (ข้อความเสมอ เพื่อไม่ให้เลข 0 นำหน้าหาย)
-        const codeRef = XLSX.utils.encode_cell({ r: rIdx, c: 1 });
-        const rawCode = String(reportRows[rIdx - firstDataRowIdx]?.employeeCode ?? '');
-        ws[codeRef] = { t: 's', v: rawCode, z: '@' };
-
-        // เลขบัญชี (ข้อความเสมอ แสดงเลขเต็ม ไม่ให้เลข 0 นำหน้าหาย)
-        const accRef = XLSX.utils.encode_cell({ r: rIdx, c: accountColIdx });
-        const rawAcc = String(reportRows[rIdx - firstDataRowIdx]?.accountNumber ?? '');
-        ws[accRef] = { t: 's', v: rawAcc, z: '@' };
-
-        // ธนาคาร (ข้อความ)
-        const bankRef = XLSX.utils.encode_cell({ r: rIdx, c: bankColIdx });
-        const rawBank = String(reportRows[rIdx - firstDataRowIdx]?.bankName ?? '');
-        ws[bankRef] = { t: 's', v: rawBank, z: '@' };
+      if (colNum >= 1 && colNum <= 3) {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (colNum >= numericStartColNum && colNum <= numericEndColNum) {
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        cell.numFmt = moneyNumFmt;
+      } else {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
       }
-
-      // คอลัมน์ตัวเลขทั้งหมด ตั้งค่าเป็นตัวเลขจริงพร้อมทศนิยม 2 ตำแหน่ง
-      for (let cIdx = numericStartCol; cIdx <= numericEndCol; cIdx++) {
-        const cellRef = XLSX.utils.encode_cell({ r: rIdx, c: cIdx });
-        const cell = ws[cellRef];
-        const numVal = cell ? Number(cell.v) || 0 : 0;
-        ws[cellRef] = {
-          t: 'n',
-          v: round2(numVal),
-          z: '#,##0.00',
-        };
-      }
-    }
-
-    // กำหนดความกว้างคอลัมน์ให้อ่านง่ายใน Excel
-    ws['!cols'] = headers.map((h, i) => {
-      if (i === 0) return { wch: 10 };
-      if (i === 1) return { wch: 16 };
-      if (i === 2) return { wch: 26 };
-      if (i === accountColIdx) return { wch: 20 };
-      if (i === bankColIdx) return { wch: 20 };
-      return { wch: Math.max(16, h.length + 4) };
     });
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'สรุปเงินเดือน');
+    // รวมเซลล์คำว่า "รวม" ตั้งแต่ลำดับที่ถึงชื่อ-สกุล (คอลัมน์ 1 ถึง 3)
+    ws.mergeCells(totalExcelRowNum, 1, totalExcelRowNum, 3);
 
+    // สร้าง Buffer และดาวน์โหลดเป็น Blob ชื่อไฟล์เหมือนเดิม
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
     const safeCompany = companyName.replace(/[\\/:*?"<>|]/g, '_');
     const fileName = `รายงานเงินเดือน_${safeCompany}_${selectedCycleKey}.xlsx`;
-    XLSX.writeFile(wb, fileName, { bookType: 'xlsx' });
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
     setShowDownloadWarningModal(false);
   };
 
@@ -4184,7 +4328,7 @@ function PayrollCycleSummaryReportSection({
       setShowDownloadWarningModal(true);
       return;
     }
-    executeExportExcel();
+    void executeExportExcel();
   };
 
   return (
