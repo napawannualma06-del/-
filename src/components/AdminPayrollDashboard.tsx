@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   FileCheck2,
+  FileSpreadsheet,
   FileText,
   KeyRound,
   Lock,
@@ -30,9 +31,11 @@ import {
   X,
 } from 'lucide-react';
 import { onAuthStateChanged } from 'firebase/auth';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
-import { auth } from '../lib/firebase';
+import * as XLSX from 'xlsx';
+import { auth, db } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
 import {
   HRPrivateData,
@@ -127,6 +130,8 @@ export function AdminPayrollDashboard() {
   const [rowsReloadCount, setRowsReloadCount] = useState<number>(0);
 
   // UI State
+  const [activeSubTab, setActiveSubTab] = useState<'slips' | 'summary_report'>('slips');
+  const [summaryReloadTrigger, setSummaryReloadTrigger] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'not_created' | 'draft' | 'confirmed'>(
     'all'
@@ -846,6 +851,37 @@ export function AdminPayrollDashboard() {
           </div>
         )}
 
+        {/* Sub-Tabs: จัดการสลิปเงินเดือน vs รายงานสรุปรอบ */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('slips')}
+            className={clsx(
+              'px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer',
+              activeSubTab === 'slips'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700'
+            )}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>จัดการสลิปเงินเดือน</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('summary_report')}
+            className={clsx(
+              'px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer',
+              activeSubTab === 'summary_report'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700'
+            )}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>รายงานสรุปรอบ</span>
+          </button>
+        </div>
+
         {/* Cycle Selector & Pay Date Selector */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
           <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40">
@@ -985,7 +1021,7 @@ export function AdminPayrollDashboard() {
         )}
       </div>
 
-      {/* Main Content: Locked State vs Unlocked Payroll Table */}
+      {/* Main Content: Locked State vs Unlocked Payroll Table / Cycle Summary Report */}
       {!isHrUnlocked ? (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-amber-300 dark:border-amber-800 p-8 sm:p-12 text-center space-y-4 shadow-xs">
           <div className="w-14 h-14 rounded-2xl bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 flex items-center justify-center text-amber-600 dark:text-amber-400 mx-auto">
@@ -997,7 +1033,7 @@ export function AdminPayrollDashboard() {
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               สลิปเงินเดือน (`payroll_slips`) และข้อมูลเงินเดือน (`hr_private`) เป็นความลับเฉพาะแอดมิน HR
-              กรุณายืนยันตัวตนด้วยอีเมลแอดมินเพื่อดูตารางคำนวณและจัดการสลิปเงินเดือน (ล็อกอัตโนมัติเมื่อไม่ใช้งาน 15 นาที)
+              กรุณายืนยันตัวตนด้วยอีเมลแอดมินเพื่อดูตารางคำนวณ จัดการสลิปเงินเดือน และดูรายงานสรุปรอบ (ล็อกอัตโนมัติเมื่อไม่ใช้งาน 15 นาที)
             </p>
           </div>
           <div>
@@ -1011,6 +1047,17 @@ export function AdminPayrollDashboard() {
             </button>
           </div>
         </div>
+      ) : activeSubTab === 'summary_report' ? (
+        <PayrollCycleSummaryReportSection
+          selectedCycleKey={selectedCycleKey}
+          onChangeCycleKey={setSelectedCycleKey}
+          availableCycles={availableCycles}
+          settings={settings}
+          profiles={profiles}
+          visibleEmployees={visibleEmployees}
+          isHrUnlocked={isHrUnlocked}
+          reloadTrigger={summaryReloadTrigger}
+        />
       ) : (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
           {/* Summary Bar above table */}
@@ -1419,6 +1466,7 @@ export function AdminPayrollDashboard() {
               }
             }
 
+            setSummaryReloadTrigger((c) => c + 1);
             setStatusNotice({
               type: 'success',
               message:
@@ -3546,3 +3594,963 @@ function PayslipPreviewModal({
     </div>
   );
 }
+
+// ===============================================================
+// Sub-Tab 2: Payroll Cycle Summary Report (รายงานสรุปเงินเดือนรายรอบ)
+// ===============================================================
+
+const THAI_FULL_MONTHS = [
+  'มกราคม',
+  'กุมภาพันธ์',
+  'มีนาคม',
+  'เมษายน',
+  'พฤษภาคม',
+  'มิถุนายน',
+  'กรกฎาคม',
+  'สิงหาคม',
+  'กันยายน',
+  'ตุลาคม',
+  'พฤศจิกายน',
+  'ธันวาคม',
+];
+
+function getCycleThaiMonthYearText(cycleKey: string): string {
+  const parts = (cycleKey || '').split('-').map(Number);
+  if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) {
+    return cycleKey;
+  }
+  const [yearAD, month] = parts;
+  const monthIdx = Math.min(11, Math.max(0, month - 1));
+  const yearBE = yearAD + 543;
+  return `${THAI_FULL_MONTHS[monthIdx]} ${yearBE}`;
+}
+
+function getCycleThaiPeriodRangeText(cycleKey: string): string {
+  const parts = (cycleKey || '').split('-').map(Number);
+  if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) {
+    return cycleKey;
+  }
+  const [targetYearAD, targetMonth] = parts;
+  let prevYearAD = targetYearAD;
+  let prevMonth = targetMonth - 1;
+  if (prevMonth === 0) {
+    prevMonth = 12;
+    prevYearAD = targetYearAD - 1;
+  }
+
+  const prevMonthName = THAI_FULL_MONTHS[Math.min(11, Math.max(0, prevMonth - 1))];
+  const targetMonthName = THAI_FULL_MONTHS[Math.min(11, Math.max(0, targetMonth - 1))];
+  const prevYearBE = prevYearAD + 543;
+  const targetYearBE = targetYearAD + 543;
+
+  return `26 ${prevMonthName} ${prevYearBE} - 25 ${targetMonthName} ${targetYearBE}`;
+}
+
+function formatReportMoney(val: number): string {
+  const num = Number(val);
+  const safe = Number.isFinite(num) ? num : 0;
+  return safe.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+interface SummaryReportRow {
+  seq: number;
+  employeeId: string;
+  employeeCode: string;
+  fullName: string;
+  salary: number;
+  otRegular: number; // เขียว + ฟ้า + ไม่ระบุ
+  otHolidayRed: number; // แดง
+  otTotalInSlip: number;
+  earningAmounts: Record<string, number>;
+  totalEarnings: number;
+  ssoAmount: number;
+  deductionAmounts: Record<string, number>;
+  withholdingTax: number;
+  advanceAmount: number;
+  netPay: number;
+  accountNumber: string;
+  bankName: string;
+  validationErrors: string[];
+  isValid: boolean;
+}
+
+function PayrollCycleSummaryReportSection({
+  selectedCycleKey,
+  onChangeCycleKey,
+  availableCycles,
+  settings,
+  profiles,
+  visibleEmployees,
+  isHrUnlocked,
+  reloadTrigger,
+}: {
+  selectedCycleKey: string;
+  onChangeCycleKey: (cycleKey: string) => void;
+  availableCycles: Array<{ cycleKey: string; cycleLabel: string; periodLabel: string }>;
+  settings: PayrollSettingsDoc;
+  profiles: Record<string, HRProfile>;
+  visibleEmployees: Array<{ uid: string; name: string; username?: string }>;
+  isHrUnlocked: boolean;
+  reloadTrigger: number;
+}) {
+  const [loading, setLoading] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [localReloadCount, setLocalReloadCount] = useState<number>(0);
+  const [cycleSlips, setCycleSlips] = useState<PayrollSlip[]>([]);
+  const [showDownloadWarningModal, setShowDownloadWarningModal] = useState<boolean>(false);
+
+  // ดึง payroll_slips ด้วย where('cycleKey', '==', selectedCycleKey) ครั้งเดียว ห้ามดึงทั้ง collection
+  // และต้องยืนยันตัวตนด้วยอีเมลแอดมินแล้วเท่านั้น (isHrUnlocked === true)
+  useEffect(() => {
+    if (!isHrUnlocked) {
+      setCycleSlips([]);
+      setLoadError(null);
+      setLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadCycleSlipsOnce() {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const q = query(
+          collection(db, 'payroll_slips'),
+          where('cycleKey', '==', selectedCycleKey)
+        );
+        const snap = await getDocs(q);
+        if (isCancelled) return;
+
+        const list: PayrollSlip[] = [];
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() as PayrollSlip;
+          list.push({
+            ...data,
+            id: docSnap.id,
+          });
+        });
+
+        setCycleSlips(list);
+      } catch (err: any) {
+        console.error(`Error fetching payroll_slips for cycle ${selectedCycleKey}:`, err);
+        if (!isCancelled) {
+          setLoadError('ไม่สามารถดึงข้อมูลสลิปเงินเดือนของรอบที่เลือกได้ กรุณากดโหลดใหม่');
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadCycleSlipsOnce();
+    return () => {
+      isCancelled = true;
+    };
+  }, [isHrUnlocked, selectedCycleKey, reloadTrigger, localReloadCount]);
+
+  // นับเฉพาะสลิปที่มี status === 'confirmed'
+  const confirmedSlips = useMemo(() => {
+    return cycleSlips
+      .filter((s) => s.status === 'confirmed')
+      .sort((a, b) => {
+        const nameA = (a.snapshot?.fullName || a.employeeName || a.employeeId || '').trim();
+        const nameB = (b.snapshot?.fullName || b.employeeName || b.employeeId || '').trim();
+        return nameA.localeCompare(nameB, 'th');
+      });
+  }, [cycleSlips]);
+
+  // ตรวจสอบรายชื่อพนักงานที่ยังไม่มีสลิปยืนยันในรอบนั้น (เทียบกับรายชื่อใน hr_profiles และพนักงานปัจจุบัน)
+  const missingEmployeesList = useMemo(() => {
+    const confirmedEmpIds = new Set(confirmedSlips.map((s) => s.employeeId));
+    const draftEmpIds = new Set(
+      cycleSlips.filter((s) => s.status === 'draft').map((s) => s.employeeId)
+    );
+
+    const activeEmpMap = new Map<string, string>();
+
+    // 1. จาก hr_profiles ที่ไม่ได้ทำเครื่องหมาย notEmployee
+    Object.entries(profiles).forEach(([empId, prof]) => {
+      if (prof && !prof.notEmployee) {
+        const displayName = (prof.fullName || prof.nickname || empId).trim();
+        if (displayName) {
+          activeEmpMap.set(empId, displayName);
+        }
+      }
+    });
+
+    // 2. จากรายชื่อพนักงานในระบบที่ไม่ได้ถูกปฏิเสธและไม่ได้เป็น notEmployee
+    visibleEmployees.forEach((emp) => {
+      if (!profiles[emp.uid]?.notEmployee) {
+        const p = profiles[emp.uid];
+        const displayName = (p?.fullName || emp.name || emp.username || emp.uid).trim();
+        activeEmpMap.set(emp.uid, displayName);
+      }
+    });
+
+    const missing: Array<{ employeeId: string; name: string; isDraft: boolean }> = [];
+    activeEmpMap.forEach((name, empId) => {
+      if (!confirmedEmpIds.has(empId)) {
+        missing.push({
+          employeeId: empId,
+          name,
+          isDraft: draftEmpIds.has(empId),
+        });
+      }
+    });
+
+    return missing.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  }, [confirmedSlips, cycleSlips, profiles, visibleEmployees]);
+
+  // สร้างคอลัมน์รายการเงินได้ (earning) และรายการหัก (deduction) เรียงตามลำดับในตั้งค่า
+  // รายการที่ปิดใช้งานแล้วแต่ยังมีในสลิปของรอบนั้น ต้องยังแสดงคอลัมน์
+  const { earningColumns, deductionColumns } = useMemo(() => {
+    const usedInCycleIds = new Set<string>();
+    const cycleItemMetaMap = new Map<string, { id: string; name: string; type: PayrollItemType }>();
+
+    confirmedSlips.forEach((slip) => {
+      (slip.items || []).forEach((it) => {
+        if (!it || !it.id) return;
+        // หากมีอยู่ในสลิปของรอบนั้น
+        usedInCycleIds.add(it.id);
+        if (!cycleItemMetaMap.has(it.id)) {
+          cycleItemMetaMap.set(it.id, {
+            id: it.id,
+            name: it.name || it.id,
+            type: it.type === 'deduction' ? 'deduction' : 'earning',
+          });
+        }
+      });
+    });
+
+    const earnCols: Array<{ id: string; name: string }> = [];
+    const deductCols: Array<{ id: string; name: string }> = [];
+    const seenIds = new Set<string>();
+
+    // 1. เรียงตามลำดับใน settings.payItems
+    (settings.payItems || []).forEach((def) => {
+      if (def.enabled || usedInCycleIds.has(def.id)) {
+        seenIds.add(def.id);
+        if (def.type === 'earning') {
+          earnCols.push({ id: def.id, name: def.name });
+        } else {
+          deductCols.push({ id: def.id, name: def.name });
+        }
+      }
+    });
+
+    // 2. กรณีมีรายการที่อยู่ในสลิปของรอบนั้นแต่ไม่อยู่ใน settings.payItems แล้ว
+    cycleItemMetaMap.forEach((meta) => {
+      if (!seenIds.has(meta.id)) {
+        seenIds.add(meta.id);
+        if (meta.type === 'earning') {
+          earnCols.push({ id: meta.id, name: meta.name });
+        } else {
+          deductCols.push({ id: meta.id, name: meta.name });
+        }
+      }
+    });
+
+    return {
+      earningColumns: earnCols,
+      deductionColumns: deductCols,
+    };
+  }, [settings.payItems, confirmedSlips]);
+
+  // สร้างข้อมูลแต่ละแถวจากตัวเลขที่บันทึกไว้ในสลิปเท่านั้น (ห้ามคำนวณใหม่) + ตรวจความถูกต้อง 3 ข้อ
+  const reportRows = useMemo<SummaryReportRow[]>(() => {
+    return confirmedSlips.map((slip, idx) => {
+      const hrProf = profiles[slip.employeeId] as (HRProfile & { employeeCode?: string }) | undefined;
+      // รหัสพนักงาน: ถ้าใน hr_profiles มีช่องรหัสพนักงานให้ใช้ ถ้าไม่มีให้เว้นว่าง
+      const employeeCode =
+        hrProf && typeof hrProf.employeeCode === 'string' && hrProf.employeeCode.trim()
+          ? hrProf.employeeCode.trim()
+          : '';
+
+      // ชื่อ ธนาคาร เลขบัญชี ใช้ snapshot ในสลิป
+      const fullName = (
+        slip.snapshot?.fullName ||
+        slip.employeeName ||
+        hrProf?.fullName ||
+        slip.employeeId ||
+        ''
+      ).trim();
+      const accountNumber = (slip.snapshot?.accountNumber ?? slip.accountNumber ?? '').trim();
+      const bankName = (slip.snapshot?.bankName ?? slip.bankName ?? '').trim();
+
+      const salary = round2(Number(slip.salary) || 0);
+
+      // ค่าล่วงเวลา OT = ยอด OT ใน otLines ประเภทเขียว + ฟ้า + ไม่ระบุ
+      const amtGreen = Number(slip.otLines?.holiday_after_hours?.amount) || 0;
+      const amtBlue = Number(slip.otLines?.workday?.amount) || 0;
+      const amtUnspecified = Number(slip.otLines?.unspecified?.amount) || 0;
+      const otRegular = round2(amtGreen + amtBlue + amtUnspecified);
+
+      // เงินได้อื่นๆ ทำงานวันหยุด = ยอด OT ใน otLines ประเภทแดง
+      const otHolidayRed = round2(Number(slip.otLines?.holiday_in_hours?.amount) || 0);
+
+      const otTotalInSlip = round2(Number(slip.otTotal) || 0);
+
+      // รายการเงินได้แต่ละคอลัมน์ (รายการที่คนนั้นไม่มี = 0)
+      const earningAmounts: Record<string, number> = {};
+      earningColumns.forEach((col) => {
+        earningAmounts[col.id] = 0;
+      });
+      // รายการหักแต่ละคอลัมน์ (รายการที่คนนั้นไม่มี = 0)
+      const deductionAmounts: Record<string, number> = {};
+      deductionColumns.forEach((col) => {
+        deductionAmounts[col.id] = 0;
+      });
+
+      (slip.items || []).forEach((it) => {
+        if (!it || !it.id) return;
+        const amt = round2(Number(it.amount) || 0);
+        if (it.type === 'earning') {
+          earningAmounts[it.id] = round2((earningAmounts[it.id] || 0) + amt);
+        } else if (it.type === 'deduction') {
+          deductionAmounts[it.id] = round2((deductionAmounts[it.id] || 0) + amt);
+        }
+      });
+
+      const totalEarnings = round2(Number(slip.totalEarnings) || 0);
+      const ssoAmount = round2(Number(slip.ssoAmount) || 0);
+      const withholdingTax = round2(Number(slip.withholdingTax) || 0);
+      const advanceAmount = round2(Number(slip.advanceAmount) || 0);
+      const netPay = round2(Number(slip.netPay) || 0);
+
+      // ตรวจความถูกต้อง 3 ข้อ (ยอมให้ต่างกันไม่เกิน 0.01)
+      const validationErrors: string[] = [];
+
+      // ข้อ 4.1: ช่อง OT + ช่องทำงานวันหยุด ต้องเท่ากับ otTotal ในสลิป
+      const sumOtCols = round2(otRegular + otHolidayRed);
+      if (Math.abs(sumOtCols - otTotalInSlip) > 0.01) {
+        validationErrors.push(
+          `ค่าล่วงเวลา OT + ทำงานวันหยุด (${formatReportMoney(sumOtCols)}) ไม่ตรงกับ otTotal ในสลิป (${formatReportMoney(otTotalInSlip)})`
+        );
+      }
+
+      // ข้อ 4.2: เงินเดือน + OT + ทำงานวันหยุด + รายการเงินได้ทั้งหมด ต้องเท่ากับ totalEarnings
+      const sumAllEarningItems = round2(
+        earningColumns.reduce((acc, col) => acc + (earningAmounts[col.id] || 0), 0)
+      );
+      const expectedTotalEarnings = round2(salary + otRegular + otHolidayRed + sumAllEarningItems);
+      if (Math.abs(expectedTotalEarnings - totalEarnings) > 0.01) {
+        validationErrors.push(
+          `เงินเดือน + OT + ทำงานวันหยุด + รายการเงินได้ (${formatReportMoney(expectedTotalEarnings)}) ไม่ตรงกับ รวมเงินได้ ยื่น ภงด.1 (${formatReportMoney(totalEarnings)})`
+        );
+      }
+
+      // ข้อ 4.3: รวมเงินได้ − (ประกันสังคม + รายการหักทั้งหมด + หัก ณ ที่จ่าย + เบิกล่วงหน้า) ต้องเท่ากับ netPay
+      const sumAllDeductionItems = round2(
+        deductionColumns.reduce((acc, col) => acc + (deductionAmounts[col.id] || 0), 0)
+      );
+      const expectedDeductions = round2(
+        ssoAmount + sumAllDeductionItems + withholdingTax + advanceAmount
+      );
+      const expectedNetPay = round2(totalEarnings - expectedDeductions);
+      if (Math.abs(expectedNetPay - netPay) > 0.01) {
+        validationErrors.push(
+          `รวมเงินได้ − (ประกันสังคม + รายการหัก + หัก ณ ที่จ่าย + เบิกล่วงหน้า) (${formatReportMoney(expectedNetPay)}) ไม่ตรงกับ ยอดจ่ายพนักงาน (${formatReportMoney(netPay)})`
+        );
+      }
+
+      return {
+        seq: idx + 1,
+        employeeId: slip.employeeId,
+        employeeCode,
+        fullName,
+        salary,
+        otRegular,
+        otHolidayRed,
+        otTotalInSlip,
+        earningAmounts,
+        totalEarnings,
+        ssoAmount,
+        deductionAmounts,
+        withholdingTax,
+        advanceAmount,
+        netPay,
+        accountNumber,
+        bankName,
+        validationErrors,
+        isValid: validationErrors.length === 0,
+      };
+    });
+  }, [confirmedSlips, profiles, earningColumns, deductionColumns]);
+
+  // คำนวณแถวสุดท้าย "รวม" รวมทุกคอลัมน์ตัวเลข
+  const totalsRow = useMemo(() => {
+    let salary = 0;
+    let otRegular = 0;
+    let otHolidayRed = 0;
+    const earningTotals: Record<string, number> = {};
+    earningColumns.forEach((c) => {
+      earningTotals[c.id] = 0;
+    });
+    let totalEarnings = 0;
+    let ssoAmount = 0;
+    const deductionTotals: Record<string, number> = {};
+    deductionColumns.forEach((c) => {
+      deductionTotals[c.id] = 0;
+    });
+    let withholdingTax = 0;
+    let advanceAmount = 0;
+    let netPay = 0;
+
+    reportRows.forEach((r) => {
+      salary = round2(salary + r.salary);
+      otRegular = round2(otRegular + r.otRegular);
+      otHolidayRed = round2(otHolidayRed + r.otHolidayRed);
+      earningColumns.forEach((c) => {
+        earningTotals[c.id] = round2(earningTotals[c.id] + (r.earningAmounts[c.id] || 0));
+      });
+      totalEarnings = round2(totalEarnings + r.totalEarnings);
+      ssoAmount = round2(ssoAmount + r.ssoAmount);
+      deductionColumns.forEach((c) => {
+        deductionTotals[c.id] = round2(deductionTotals[c.id] + (r.deductionAmounts[c.id] || 0));
+      });
+      withholdingTax = round2(withholdingTax + r.withholdingTax);
+      advanceAmount = round2(advanceAmount + r.advanceAmount);
+      netPay = round2(netPay + r.netPay);
+    });
+
+    return {
+      salary,
+      otRegular,
+      otHolidayRed,
+      earningTotals,
+      totalEarnings,
+      ssoAmount,
+      deductionTotals,
+      withholdingTax,
+      advanceAmount,
+      netPay,
+    };
+  }, [reportRows, earningColumns, deductionColumns]);
+
+  const invalidRows = useMemo(() => reportRows.filter((r) => !r.isValid), [reportRows]);
+
+  // สร้างและดาวน์โหลดไฟล์ Excel (.xlsx จริง ด้วย SheetJS)
+  const executeExportExcel = () => {
+    const companyName = (settings.companyName || 'Thunder Cloud').trim();
+    const monthYearThai = getCycleThaiMonthYearText(selectedCycleKey);
+    const periodRangeThai = getCycleThaiPeriodRangeText(selectedCycleKey);
+
+    const headers: string[] = [
+      'ลำดับที่',
+      'รหัสพนักงาน',
+      'ชื่อ-สกุล',
+      'เงินเดือน/ค่าจ้าง',
+      'ค่าล่วงเวลา OT',
+      'เงินได้อื่นๆ ทำงานวันหยุด',
+      ...earningColumns.map((c) => c.name),
+      'รวมเงินได้ ยื่น ภงด.1',
+      'ประกันสังคม',
+      ...deductionColumns.map((c) => c.name),
+      'หัก ณ ที่จ่าย',
+      'เงินเบิกล่วงหน้า',
+      'ยอดจ่ายพนักงาน',
+      'เลขบัญชี',
+      'ธนาคาร',
+    ];
+
+    // แถว 1 ถึง แถว 6 ตามรูปแบบที่กำหนด
+    const aoa: any[][] = [
+      [`รายงานเงินเดือนรวมเงินได้/ค่าจ้างรายพนักงาน รอบเดือน ${monthYearThai}`], // แถว 1
+      [], // แถว 2
+      ['ชื่อบริษัท', companyName], // แถว 3
+      ['ช่วงเวลา :', periodRangeThai], // แถว 4
+      [], // แถว 5
+      headers, // แถว 6: หัวตาราง
+    ];
+
+    // แถว 7 เป็นต้นไป: ข้อมูลพนักงานแต่ละแถว
+    reportRows.forEach((r) => {
+      aoa.push([
+        r.seq,
+        r.employeeCode,
+        r.fullName,
+        r.salary,
+        r.otRegular,
+        r.otHolidayRed,
+        ...earningColumns.map((c) => r.earningAmounts[c.id] || 0),
+        r.totalEarnings,
+        r.ssoAmount,
+        ...deductionColumns.map((c) => r.deductionAmounts[c.id] || 0),
+        r.withholdingTax,
+        r.advanceAmount,
+        r.netPay,
+        r.accountNumber, // ไฟล์ Excel แสดงเลขบัญชีเต็ม
+        r.bankName,
+      ]);
+    });
+
+    // ต่อด้วยแถวรวม
+    aoa.push([
+      'รวม',
+      '',
+      '',
+      totalsRow.salary,
+      totalsRow.otRegular,
+      totalsRow.otHolidayRed,
+      ...earningColumns.map((c) => totalsRow.earningTotals[c.id] || 0),
+      totalsRow.totalEarnings,
+      totalsRow.ssoAmount,
+      ...deductionColumns.map((c) => totalsRow.deductionTotals[c.id] || 0),
+      totalsRow.withholdingTax,
+      totalsRow.advanceAmount,
+      totalsRow.netPay,
+      '',
+      '',
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // กำหนดชนิดข้อมูลในเซลล์ให้ถูกต้อง:
+    // - ตัวเลขเก็บเป็นตัวเลขจริง (type 'n', format '#,##0.00')
+    // - รหัสพนักงาน (col 1) และ เลขบัญชี (col headers.length - 2) เก็บเป็นข้อความ (type 's', format '@') ไม่ให้เลข 0 หน้าหาย
+    const firstDataRowIdx = 6; // แถวที่ 7 (0-indexed = 6)
+    const totalRowIdx = 6 + reportRows.length;
+    const numericStartCol = 3; // 'เงินเดือน/ค่าจ้าง'
+    const numericEndCol = headers.length - 3; // 'ยอดจ่ายพนักงาน'
+    const accountColIdx = headers.length - 2; // 'เลขบัญชี'
+    const bankColIdx = headers.length - 1; // 'ธนาคาร'
+
+    for (let rIdx = firstDataRowIdx; rIdx <= totalRowIdx; rIdx++) {
+      const isTotalRow = rIdx === totalRowIdx;
+
+      if (!isTotalRow) {
+        // ลำดับที่ (จำนวนเต็ม)
+        const seqRef = XLSX.utils.encode_cell({ r: rIdx, c: 0 });
+        if (ws[seqRef]) {
+          ws[seqRef].t = 'n';
+        }
+
+        // รหัสพนักงาน (ข้อความเสมอ เพื่อไม่ให้เลข 0 นำหน้าหาย)
+        const codeRef = XLSX.utils.encode_cell({ r: rIdx, c: 1 });
+        const rawCode = String(reportRows[rIdx - firstDataRowIdx]?.employeeCode ?? '');
+        ws[codeRef] = { t: 's', v: rawCode, z: '@' };
+
+        // เลขบัญชี (ข้อความเสมอ แสดงเลขเต็ม ไม่ให้เลข 0 นำหน้าหาย)
+        const accRef = XLSX.utils.encode_cell({ r: rIdx, c: accountColIdx });
+        const rawAcc = String(reportRows[rIdx - firstDataRowIdx]?.accountNumber ?? '');
+        ws[accRef] = { t: 's', v: rawAcc, z: '@' };
+
+        // ธนาคาร (ข้อความ)
+        const bankRef = XLSX.utils.encode_cell({ r: rIdx, c: bankColIdx });
+        const rawBank = String(reportRows[rIdx - firstDataRowIdx]?.bankName ?? '');
+        ws[bankRef] = { t: 's', v: rawBank, z: '@' };
+      }
+
+      // คอลัมน์ตัวเลขทั้งหมด ตั้งค่าเป็นตัวเลขจริงพร้อมทศนิยม 2 ตำแหน่ง
+      for (let cIdx = numericStartCol; cIdx <= numericEndCol; cIdx++) {
+        const cellRef = XLSX.utils.encode_cell({ r: rIdx, c: cIdx });
+        const cell = ws[cellRef];
+        const numVal = cell ? Number(cell.v) || 0 : 0;
+        ws[cellRef] = {
+          t: 'n',
+          v: round2(numVal),
+          z: '#,##0.00',
+        };
+      }
+    }
+
+    // กำหนดความกว้างคอลัมน์ให้อ่านง่ายใน Excel
+    ws['!cols'] = headers.map((h, i) => {
+      if (i === 0) return { wch: 10 };
+      if (i === 1) return { wch: 16 };
+      if (i === 2) return { wch: 26 };
+      if (i === accountColIdx) return { wch: 20 };
+      if (i === bankColIdx) return { wch: 20 };
+      return { wch: Math.max(16, h.length + 4) };
+    });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'สรุปเงินเดือน');
+
+    const safeCompany = companyName.replace(/[\\/:*?"<>|]/g, '_');
+    const fileName = `รายงานเงินเดือน_${safeCompany}_${selectedCycleKey}.xlsx`;
+    XLSX.writeFile(wb, fileName, { bookType: 'xlsx' });
+    setShowDownloadWarningModal(false);
+  };
+
+  const handleClickDownloadExcel = () => {
+    if (reportRows.length === 0) return;
+    if (invalidRows.length > 0) {
+      setShowDownloadWarningModal(true);
+      return;
+    }
+    executeExportExcel();
+  };
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden space-y-4 p-4 sm:p-5">
+      {/* Header & Controls */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+        <div>
+          <h3 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>
+              รายงานเงินเดือนรวมเงินได้/ค่าจ้างรายพนักงาน รอบเดือน{' '}
+              {getCycleThaiMonthYearText(selectedCycleKey)}
+            </span>
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            บริษัท: <strong>{settings.companyName || 'Thunder Cloud'}</strong> • ช่วงเวลา:{' '}
+            <strong>{getCycleThaiPeriodRangeText(selectedCycleKey)}</strong> (แสดงเฉพาะสลิปที่ยืนยันแล้ว)
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedCycleKey}
+            onChange={(e) => onChangeCycleKey(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+          >
+            {availableCycles.map((c) => (
+              <option key={c.cycleKey} value={c.cycleKey}>
+                {c.cycleLabel} ({c.periodLabel})
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => setLocalReloadCount((c) => c + 1)}
+            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={clsx('w-3.5 h-3.5', loading && 'animate-spin')} />
+            <span>รีเฟรช</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={loading || Boolean(loadError) || reportRows.length === 0}
+            onClick={handleClickDownloadExcel}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>ดาวน์โหลด Excel (.xlsx)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Yellow Warning Box: Missing Employees without Confirmed Slip */}
+      {!loading && !loadError && missingEmployeesList.length > 0 && (
+        <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs space-y-1.5">
+          <div className="font-bold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              แจ้งเตือน: มีพนักงานที่ยังไม่มีสลิปยืนยัน (confirmed) ในรอบนี้ จำนวน{' '}
+              {missingEmployeesList.length} คน (ยังไม่รวมในตารางสรุปด้านล่าง)
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5 pl-6">
+            {missingEmployeesList.map((m) => (
+              <span
+                key={m.employeeId}
+                className="px-2.5 py-0.5 rounded-lg bg-amber-100/90 dark:bg-amber-900/70 border border-amber-300 dark:border-amber-700 font-semibold text-[11px]"
+              >
+                {m.name} {m.isDraft ? '(สถานะร่าง)' : '(ยังไม่ได้สร้างสลิป)'}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Red Validation Alert Box if any row has mismatched totals */}
+      {!loading && !loadError && invalidRows.length > 0 && (
+        <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs space-y-1.5">
+          <div className="font-bold flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+            <span>
+              พบข้อมูลยอดเงินในสลิปไม่ตรงตามสูตรตรวจสอบ จำนวน {invalidRows.length} แถว (แถวที่ไฮไลต์สีแดง):
+            </span>
+          </div>
+          <ul className="list-disc pl-8 space-y-1 text-[11px] font-semibold">
+            {invalidRows.map((r) => (
+              <li key={r.employeeId}>
+                <strong>{r.fullName}:</strong> {r.validationErrors.join(' | ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Main Report Content */}
+      {loading ? (
+        <div className="p-12 text-center text-slate-400 dark:text-slate-500 text-sm">
+          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+          กำลังโหลดรายงานสรุปเงินเดือนประจำรอบ...
+        </div>
+      ) : loadError ? (
+        <div className="p-10 text-center space-y-3">
+          <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+          <div className="text-sm font-bold text-rose-700 dark:text-rose-400">{loadError}</div>
+          <button
+            type="button"
+            onClick={() => setLocalReloadCount((c) => c + 1)}
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>โหลดใหม่</span>
+          </button>
+        </div>
+      ) : reportRows.length === 0 ? (
+        <div className="p-12 text-center text-slate-400 dark:text-slate-500 text-sm">
+          ยังไม่มีสลิปเงินเดือนที่ยืนยันแล้ว (confirmed) ในรอบ {selectedCycleKey}
+        </div>
+      ) : (
+        <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+          <table className="w-full border-collapse text-xs whitespace-nowrap">
+            <thead>
+              <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold border-b border-slate-200 dark:border-slate-700">
+                <th className="px-3 py-3 text-center border-r border-slate-200 dark:border-slate-700">
+                  ลำดับที่
+                </th>
+                <th className="px-3 py-3 text-left border-r border-slate-200 dark:border-slate-700">
+                  รหัสพนักงาน
+                </th>
+                <th className="px-3 py-3 text-left border-r border-slate-200 dark:border-slate-700 min-w-[180px]">
+                  ชื่อ-สกุล
+                </th>
+                <th className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700">
+                  เงินเดือน/ค่าจ้าง
+                </th>
+                <th className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700">
+                  ค่าล่วงเวลา OT
+                </th>
+                <th className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700">
+                  เงินได้อื่นๆ ทำงานวันหยุด
+                </th>
+                {earningColumns.map((col) => (
+                  <th
+                    key={col.id}
+                    className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700 text-emerald-800 dark:text-emerald-300"
+                  >
+                    {col.name}
+                  </th>
+                ))}
+                <th className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200">
+                  รวมเงินได้ ยื่น ภงด.1
+                </th>
+                <th className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700">
+                  ประกันสังคม
+                </th>
+                {deductionColumns.map((col) => (
+                  <th
+                    key={col.id}
+                    className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700 text-rose-800 dark:text-rose-300"
+                  >
+                    {col.name}
+                  </th>
+                ))}
+                <th className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700">
+                  หัก ณ ที่จ่าย
+                </th>
+                <th className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700">
+                  เงินเบิกล่วงหน้า
+                </th>
+                <th className="px-3 py-3 text-right border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
+                  ยอดจ่ายพนักงาน
+                </th>
+                <th className="px-3 py-3 text-left border-r border-slate-200 dark:border-slate-700">
+                  เลขบัญชี
+                </th>
+                <th className="px-3 py-3 text-left">ธนาคาร</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 tabular-nums">
+              {reportRows.map((row) => (
+                <tr
+                  key={row.employeeId}
+                  className={clsx(
+                    'transition',
+                    !row.isValid
+                      ? 'bg-rose-100/90 dark:bg-rose-950/60 text-rose-950 dark:text-rose-100 hover:bg-rose-200/70'
+                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                  )}
+                >
+                  <td className="px-3 py-2.5 text-center font-mono border-r border-slate-100 dark:border-slate-800">
+                    {row.seq}
+                  </td>
+                  <td className="px-3 py-2.5 text-left font-mono border-r border-slate-100 dark:border-slate-800">
+                    {row.employeeCode}
+                  </td>
+                  <td className="px-3 py-2.5 text-left font-bold border-r border-slate-100 dark:border-slate-800">
+                    <div>{row.fullName}</div>
+                    {!row.isValid && (
+                      <div className="mt-1 text-[10px] font-semibold text-rose-700 dark:text-rose-300 whitespace-normal max-w-xs">
+                        {row.validationErrors.map((errText, i) => (
+                          <div key={i}>• {errText}</div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                    {formatReportMoney(row.salary)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                    {formatReportMoney(row.otRegular)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                    {formatReportMoney(row.otHolidayRed)}
+                  </td>
+                  {earningColumns.map((col) => (
+                    <td
+                      key={col.id}
+                      className="px-3 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800"
+                    >
+                      {formatReportMoney(row.earningAmounts[col.id] || 0)}
+                    </td>
+                  ))}
+                  <td className="px-3 py-2.5 text-right font-mono font-bold border-r border-slate-100 dark:border-slate-800 bg-emerald-50/40 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300">
+                    {formatReportMoney(row.totalEarnings)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                    {formatReportMoney(row.ssoAmount)}
+                  </td>
+                  {deductionColumns.map((col) => (
+                    <td
+                      key={col.id}
+                      className="px-3 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800"
+                    >
+                      {formatReportMoney(row.deductionAmounts[col.id] || 0)}
+                    </td>
+                  ))}
+                  <td className="px-3 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                    {formatReportMoney(row.withholdingTax)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                    {formatReportMoney(row.advanceAmount)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-mono font-extrabold border-r border-slate-100 dark:border-slate-800 bg-indigo-50/40 dark:bg-indigo-950/20 text-indigo-900 dark:text-indigo-200">
+                    {formatReportMoney(row.netPay)}
+                  </td>
+                  <td className="px-3 py-2.5 text-left font-mono border-r border-slate-100 dark:border-slate-800">
+                    {row.accountNumber ? maskSensitiveNumber(row.accountNumber) : '-'}
+                  </td>
+                  <td className="px-3 py-2.5 text-left">{row.bankName || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-slate-100 dark:bg-slate-800 font-extrabold text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700 tabular-nums">
+                <td
+                  colSpan={3}
+                  className="px-3 py-3 text-center border-r border-slate-200 dark:border-slate-700"
+                >
+                  รวม
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700">
+                  {formatReportMoney(totalsRow.salary)}
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700">
+                  {formatReportMoney(totalsRow.otRegular)}
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700">
+                  {formatReportMoney(totalsRow.otHolidayRed)}
+                </td>
+                {earningColumns.map((col) => (
+                  <td
+                    key={col.id}
+                    className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700"
+                  >
+                    {formatReportMoney(totalsRow.earningTotals[col.id] || 0)}
+                  </td>
+                ))}
+                <td className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700 bg-emerald-100/70 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200">
+                  {formatReportMoney(totalsRow.totalEarnings)}
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700">
+                  {formatReportMoney(totalsRow.ssoAmount)}
+                </td>
+                {deductionColumns.map((col) => (
+                  <td
+                    key={col.id}
+                    className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700"
+                  >
+                    {formatReportMoney(totalsRow.deductionTotals[col.id] || 0)}
+                  </td>
+                ))}
+                <td className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700">
+                  {formatReportMoney(totalsRow.withholdingTax)}
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700">
+                  {formatReportMoney(totalsRow.advanceAmount)}
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-slate-200 dark:border-slate-700 bg-indigo-100/70 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200">
+                  {formatReportMoney(totalsRow.netPay)}
+                </td>
+                <td className="px-3 py-3 border-r border-slate-200 dark:border-slate-700" />
+                <td className="px-3 py-3" />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      {/* Warning Modal before downloading Excel when validation errors exist */}
+      {showDownloadWarningModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-rose-300 dark:border-rose-800 w-full max-w-lg p-5 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400">
+                  <ShieldAlert className="w-5 h-5" />
+                </span>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    คำเตือน: พบแถวที่ยอดเงินตรวจสอบไม่ผ่าน ({invalidRows.length} แถว)
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    คุณยังสามารถกดยืนยันเพื่อดาวน์โหลดไฟล์ Excel ต่อได้
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDownloadWarningModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-200 max-h-60 overflow-y-auto space-y-1.5">
+              {invalidRows.map((r) => (
+                <div key={r.employeeId} className="leading-relaxed">
+                  <span className="font-bold">{r.fullName}:</span> {r.validationErrors.join(' | ')}
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowDownloadWarningModal(false)}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={executeExportExcel}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>ดาวน์โหลด Excel ต่อไป</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
