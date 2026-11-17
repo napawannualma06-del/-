@@ -326,5 +326,9 @@ service cloud.firestore {
     match /payroll_slips/{slipId} {
       allow read, write: if isHrAdmin();
     }
+
+    match /tax_certificates/{docId} {
+      allow read, write: if isHrAdmin();
+    }
   }
 }

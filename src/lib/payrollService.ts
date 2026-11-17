@@ -99,6 +99,12 @@ export function getDefaultPayrollSettings(): PayrollSettingsDoc {
     payItems: getDefaultPayItems(),
     usedPayItemIds: [],
     defaultPayDates: {},
+    legalCompanyName: '',
+    companyAddress: '',
+    companyTaxId: '',
+    ssoEmployerAccount: '',
+    signerName: '',
+    signatureDataUrl: '',
   };
 }
 
@@ -146,6 +152,16 @@ export async function fetchPayrollSettings(): Promise<PayrollSettingsDoc> {
           data.defaultPayDates && typeof data.defaultPayDates === 'object'
             ? data.defaultPayDates
             : {},
+        legalCompanyName:
+          typeof data.legalCompanyName === 'string' ? data.legalCompanyName.trim() : '',
+        companyAddress:
+          typeof data.companyAddress === 'string' ? data.companyAddress.trim() : '',
+        companyTaxId: typeof data.companyTaxId === 'string' ? data.companyTaxId.trim() : '',
+        ssoEmployerAccount:
+          typeof data.ssoEmployerAccount === 'string' ? data.ssoEmployerAccount.trim() : '',
+        signerName: typeof data.signerName === 'string' ? data.signerName.trim() : '',
+        signatureDataUrl:
+          typeof data.signatureDataUrl === 'string' ? data.signatureDataUrl : '',
         updatedAt: data.updatedAt,
         updatedBy: data.updatedBy,
       };
@@ -200,6 +216,13 @@ export async function savePayrollSettings(
     })),
     usedPayItemIds: Array.from(new Set(settings.usedPayItemIds || [])),
     defaultPayDates: settings.defaultPayDates || {},
+    legalCompanyName: (settings.legalCompanyName || '').trim(),
+    companyAddress: (settings.companyAddress || '').trim(),
+    companyTaxId: (settings.companyTaxId || '').trim(),
+    ssoEmployerAccount: (settings.ssoEmployerAccount || '').trim(),
+    signerName: (settings.signerName || '').trim(),
+    signatureDataUrl:
+      typeof settings.signatureDataUrl === 'string' ? settings.signatureDataUrl : '',
     updatedAt: Date.now(),
     updatedBy,
   };

@@ -308,6 +308,7 @@ export interface HRPrivateData {
   ssoStatus: HRSSOStatus; // 'enrolled' | 'not_enrolled'
   ssoRatePercent: number; // ค่าเริ่ม 5
   ssoCapAmount: number;   // ค่าเริ่ม 875
+  address?: string;       // ที่อยู่ตามบัตรประชาชน (สำหรับ 50 ทวิ)
   updatedAt?: number;
   updatedBy?: string;
 }
@@ -336,6 +337,13 @@ export interface PayrollSettingsDoc {
   payItems: PayrollItemDefinition[];
   usedPayItemIds?: string[]; // รายการที่เคยใช้ในสลิปที่ยืนยันแล้ว (ห้ามลบจริง ให้ปิดใช้งานแทน)
   defaultPayDates?: Record<string, string>; // วันที่จ่ายของแต่ละรอบ (ถ้าบันทึกไว้)
+  // ข้อมูลสำหรับหนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ)
+  legalCompanyName?: string;   // ชื่อนิติบุคคลตามกฎหมาย (แยกจาก companyName ที่ใช้บนสลิป)
+  companyAddress?: string;     // ที่อยู่บริษัท
+  companyTaxId?: string;       // เลขประจำตัวผู้เสียภาษี 13 หลัก
+  ssoEmployerAccount?: string; // เลขที่บัญชีนายจ้างประกันสังคม
+  signerName?: string;         // ชื่อผู้ลงนาม
+  signatureDataUrl?: string;   // รูปลายเซ็น (data URL ไม่บังคับ ย่อไม่เกิน 400px และไม่เกิน 300KB)
   updatedAt?: number;
   updatedBy?: string;
 }
@@ -405,6 +413,26 @@ export interface PayrollSlip {
   updatedAt: number;
   updatedBy: string;
 }
+
+// ===============================================================
+// Tax Certificates 50 ทวิ (tax_certificates/{year}_{employeeId})
+// ===============================================================
+
+export interface TaxCertificateDoc {
+  id?: string; // <year>_<employeeId>
+  year: number; // ปี ค.ศ.
+  employeeId: string;
+  seqNo: number; // ลำดับที่บนเอกสาร
+  openingIncome: number; // ยอดยกมาเงินได้ (ค่าเริ่ม 0)
+  openingTax: number; // ยอดยกมาภาษี (ค่าเริ่ม 0)
+  openingSso: number; // ยอดยกมาประกันสังคม (ค่าเริ่ม 0)
+  openingNote: string; // หมายเหตุยอดยกมา
+  nameOnDoc: string; // ชื่อบนเอกสาร (ค่าเริ่ม = ชื่อ-สกุลจาก HR แก้ได้)
+  issueDate: string; // วันที่ออกหนังสือรับรอง YYYY-MM-DD
+  updatedAt: number;
+  updatedBy: string;
+}
+
 
 
 

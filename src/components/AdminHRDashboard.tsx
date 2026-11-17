@@ -1385,14 +1385,14 @@ function EmployeeHRProfileModal({
                   </div>
                 </div>
 
-                {/* Social Security (SSO) Info */}
+                {/* Social Security (SSO) & Citizen ID Info */}
                 <div className="pt-2.5 border-t border-amber-200/60 dark:border-amber-800/50 space-y-2.5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* SSO Number with Masked Display + Toggle */}
+                    {/* SSO Number / Citizen ID with Masked Display + Toggle */}
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                          เลขประกันสังคม
+                          เลขประกันสังคม / เลขบัตรประชาชน (13 หลัก)
                         </label>
                         <button
                           type="button"
@@ -1419,7 +1419,7 @@ function EmployeeHRProfileModal({
                           onChange={(e) =>
                             setPrivateData((prev) => ({ ...prev, ssoNumber: e.target.value }))
                           }
-                          placeholder="กรอกเลขประกันสังคม 13 หลัก"
+                          placeholder="กรอกเลขบัตรประชาชน / ประกันสังคม 13 หลัก"
                           className="w-full px-3 py-1.5 rounded-lg border border-indigo-400 dark:border-indigo-600 bg-white dark:bg-slate-900 font-mono text-xs"
                         />
                       ) : (
@@ -1522,6 +1522,22 @@ function EmployeeHRProfileModal({
                         {(privateData.ssoCapAmount || 0).toLocaleString()})
                       </div>
                     </div>
+                  </div>
+
+                  {/* Address according to National ID Card (for 50 ทวิ) */}
+                  <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/50">
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      ที่อยู่ตามบัตรประชาชน (ใช้แสดงในหนังสือรับรองการหักภาษี ณ ที่จ่าย 50 ทวิ)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={privateData.address || ''}
+                      onChange={(e) =>
+                        setPrivateData((prev) => ({ ...prev, address: e.target.value }))
+                      }
+                      placeholder="เช่น 123/45 หมู่ 6 ต.บางรักพัฒนา อ.บางบัวทอง จ.นนทบุรี 11110"
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                    />
                   </div>
                 </div>
               </div>

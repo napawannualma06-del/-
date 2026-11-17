@@ -274,6 +274,7 @@ export function getDefaultHRPrivateData(fallbackAccountName = ''): HRPrivateData
     ssoStatus: 'enrolled',
     ssoRatePercent: DEFAULT_SSO_RATE_PERCENT,
     ssoCapAmount: DEFAULT_SSO_CAP_AMOUNT,
+    address: '',
   };
 }
 
@@ -306,6 +307,7 @@ export async function fetchHRPrivateEmployee(
           typeof data.ssoCapAmount === 'number'
             ? data.ssoCapAmount
             : DEFAULT_SSO_CAP_AMOUNT,
+        address: typeof data.address === 'string' ? data.address : '',
         updatedAt: data.updatedAt,
         updatedBy: data.updatedBy,
       };
@@ -341,6 +343,7 @@ export async function saveHRPrivateEmployee(
       Number.isFinite(Number(data.ssoCapAmount)) && Number(data.ssoCapAmount) >= 0
         ? Number(data.ssoCapAmount)
         : DEFAULT_SSO_CAP_AMOUNT,
+    address: (data.address || '').trim(),
     updatedAt: Date.now(),
     updatedBy,
   };

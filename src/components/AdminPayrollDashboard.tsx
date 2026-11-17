@@ -31,7 +31,7 @@ import {
   X,
 } from 'lucide-react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
 import ExcelJS from 'exceljs';
@@ -45,6 +45,7 @@ import {
   PayrollSettingsDoc,
   PayrollSlip,
   PayrollSlipItem,
+  TaxCertificateDoc,
 } from '../types';
 import {
   HR_PRIVATE_IDLE_TIMEOUT_MS,
@@ -81,6 +82,13 @@ import {
   downloadBatchPayslipsPdf,
   downloadSinglePayslipPdf,
 } from './PayslipDocument';
+import {
+  TaxCertificate50TawiData,
+  TaxCertificate50TawiDocument,
+  downloadBatch50TawiPdf,
+  downloadSingle50TawiPdf,
+  isValidThaiCitizenId,
+} from './TaxCertificate50TawiDocument';
 
 interface EmployeeRowComputedData {
   privateData: HRPrivateData;
@@ -130,7 +138,7 @@ export function AdminPayrollDashboard() {
   const [rowsReloadCount, setRowsReloadCount] = useState<number>(0);
 
   // UI State
-  const [activeSubTab, setActiveSubTab] = useState<'slips' | 'summary_report'>('slips');
+  const [activeSubTab, setActiveSubTab] = useState<'slips' | 'summary_report' | 'tax_50tawi'>('slips');
   const [summaryReloadTrigger, setSummaryReloadTrigger] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'not_created' | 'draft' | 'confirmed'>(
@@ -851,7 +859,7 @@ export function AdminPayrollDashboard() {
           </div>
         )}
 
-        {/* Sub-Tabs: จัดการสลิปเงินเดือน vs รายงานสรุปรอบ */}
+        {/* Sub-Tabs: จัดการสลิปเงินเดือน vs รายงานสรุปรอบ vs 50 ทวิ */}
         <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
           <button
             type="button"
@@ -879,6 +887,20 @@ export function AdminPayrollDashboard() {
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
             <span>รายงานสรุปรอบ</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('tax_50tawi')}
+            className={clsx(
+              'px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer',
+              activeSubTab === 'tax_50tawi'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700'
+            )}
+          >
+            <FileCheck2 className="w-3.5 h-3.5" />
+            <span>50 ทวิ</span>
           </button>
         </div>
 
@@ -1056,6 +1078,16 @@ export function AdminPayrollDashboard() {
           profiles={profiles}
           visibleEmployees={visibleEmployees}
           isHrUnlocked={isHrUnlocked}
+          reloadTrigger={summaryReloadTrigger}
+        />
+      ) : activeSubTab === 'tax_50tawi' ? (
+        <TaxCertificate50TawiSection
+          settings={settings}
+          profiles={profiles}
+          registeredUsers={registeredUsers || []}
+          isHrUnlocked={isHrUnlocked}
+          actorName={hrUnlockedEmail || user?.name || user?.username || 'Admin'}
+          onOpenSettings={() => setShowSettingsModal(true)}
           reloadTrigger={summaryReloadTrigger}
         />
       ) : (
@@ -1587,6 +1619,30 @@ function PayrollSettingsModal({
   const [processingLogo, setProcessingLogo] = useState(false);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
 
+  // ข้อมูลสำหรับ 50 ทวิ
+  const [legalCompanyName, setLegalCompanyName] = useState<string>(
+    initialSettings.legalCompanyName || ''
+  );
+  const [companyAddress, setCompanyAddress] = useState<string>(
+    initialSettings.companyAddress || ''
+  );
+  const [companyTaxId, setCompanyTaxId] = useState<string>(
+    initialSettings.companyTaxId || ''
+  );
+  const [ssoEmployerAccount, setSsoEmployerAccount] = useState<string>(
+    initialSettings.ssoEmployerAccount || ''
+  );
+  const [signerName, setSignerName] = useState<string>(
+    initialSettings.signerName || ''
+  );
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string>(
+    initialSettings.signatureDataUrl || ''
+  );
+  const [signatureSizeBytes, setSignatureSizeBytes] = useState<number>(0);
+  const [signatureWarning, setSignatureWarning] = useState<string | null>(null);
+  const [processingSignature, setProcessingSignature] = useState(false);
+  const signatureInputRef = useRef<HTMLInputElement | null>(null);
+
   const [multRed, setMultRed] = useState<string>(
     initialSettings.otMultiplierHolidayInHours !== null &&
       initialSettings.otMultiplierHolidayInHours !== undefined
@@ -1737,6 +1793,107 @@ function PayrollSettingsModal({
     if (logoInputRef.current) logoInputRef.current.value = '';
   };
 
+  const handleSignatureFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setSignatureWarning(null);
+    setErrorMsg(null);
+
+    const isPng = file.type === 'image/png' || /\.png$/i.test(file.name);
+    const isJpg =
+      file.type === 'image/jpeg' ||
+      file.type === 'image/jpg' ||
+      /\.(jpe?g)$/i.test(file.name);
+
+    if (!isPng && !isJpg) {
+      setSignatureWarning('รองรับเฉพาะไฟล์รูปภาพ PNG หรือ JPG เท่านั้น');
+      if (signatureInputRef.current) signatureInputRef.current.value = '';
+      return;
+    }
+
+    setProcessingSignature(true);
+    try {
+      const resizedDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('ไม่สามารถอ่านไฟล์รูปลายเซ็นได้'));
+        reader.onload = () => {
+          const srcDataUrl = typeof reader.result === 'string' ? reader.result : '';
+          if (!srcDataUrl) {
+            reject(new Error('ไม่สามารถอ่านไฟล์รูปลายเซ็นได้'));
+            return;
+          }
+          const img = new Image();
+          img.onerror = () => reject(new Error('ไฟล์รูปลายเซ็นไม่ถูกต้อง'));
+          img.onload = () => {
+            const origW = img.naturalWidth || img.width;
+            const origH = img.naturalHeight || img.height;
+            if (!origW || !origH) {
+              reject(new Error('ขนาดรูปลายเซ็นไม่ถูกต้อง'));
+              return;
+            }
+
+            // ย่อรูปในเครื่องให้ด้านยาวไม่เกิน 400 พิกเซล โดยรักษาสัดส่วนเดิม
+            const maxSide = 400;
+            const longest = Math.max(origW, origH);
+            const scale = longest > maxSide ? maxSide / longest : 1;
+            const targetW = Math.max(1, Math.round(origW * scale));
+            const targetH = Math.max(1, Math.round(origH * scale));
+
+            const canvas = document.createElement('canvas');
+            canvas.width = targetW;
+            canvas.height = targetH;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error('ไม่สามารถสร้าง Canvas สำหรับย่อรูปได้'));
+              return;
+            }
+
+            // เก็บความโปร่งใสของ PNG ไว้
+            ctx.clearRect(0, 0, targetW, targetH);
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+
+            if (isPng) {
+              resolve(canvas.toDataURL('image/png'));
+            } else {
+              resolve(canvas.toDataURL('image/jpeg', 0.9));
+            }
+          };
+          img.src = srcDataUrl;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      const byteSize = computeDataUrlByteSize(resizedDataUrl);
+      const maxBytes = 300 * 1024; // 300 KB
+      setSignatureDataUrl(resizedDataUrl);
+      setSignatureSizeBytes(byteSize);
+
+      if (byteSize > maxBytes) {
+        const sizeKb = (byteSize / 1024).toFixed(1);
+        setSignatureWarning(
+          `ไฟล์รูปลายเซ็นหลังย่อมีขนาด ${sizeKb} KB ซึ่งเกินกำหนด 300 KB กรุณาเลือกไฟล์ใหม่ที่มีขนาดเล็กลง หรือกดลบลายเซ็นก่อนบันทึก`
+        );
+      } else {
+        setSignatureWarning(null);
+      }
+    } catch (err: any) {
+      console.error('Error resizing signature image:', err);
+      setSignatureWarning(err?.message || 'เกิดข้อผิดพลาดในการย่อรูปลายเซ็น');
+    } finally {
+      setProcessingSignature(false);
+      if (signatureInputRef.current) signatureInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveSignature = () => {
+    setSignatureDataUrl('');
+    setSignatureSizeBytes(0);
+    setSignatureWarning(null);
+    setErrorMsg(null);
+    if (signatureInputRef.current) signatureInputRef.current.value = '';
+  };
+
   const handleAddItem = () => {
     const trimmed = newNameTh.trim();
     if (!trimmed) {
@@ -1803,7 +1960,7 @@ function PayrollSettingsModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (disabledSave || saving || processingLogo) return;
+    if (disabledSave || saving || processingLogo || processingSignature) return;
 
     // ตรวจสอบขนาดไฟล์โลโก้หลังย่อ ถ้าเกิน 300 KB ให้ขึ้นเตือนและไม่บันทึก
     if (logoDataUrl) {
@@ -1817,6 +1974,18 @@ function PayrollSettingsModal({
       }
     }
 
+    // ตรวจสอบขนาดไฟล์รูปลายเซ็นหลังย่อ ถ้าเกิน 300 KB ให้ขึ้นเตือนและไม่บันทึก
+    if (signatureDataUrl) {
+      const sigBytes = computeDataUrlByteSize(signatureDataUrl);
+      if (sigBytes > 300 * 1024) {
+        const sizeKb = (sigBytes / 1024).toFixed(1);
+        const msg = `ไม่สามารถบันทึกได้: รูปลายเซ็นหลังย่อมีขนาด ${sizeKb} KB เกินกำหนด 300 KB กรุณาเปลี่ยนรูปใหม่หรือลบลายเซ็นออก`;
+        setSignatureWarning(msg);
+        setErrorMsg(msg);
+        return;
+      }
+    }
+
     setSaving(true);
     setErrorMsg(null);
     try {
@@ -1824,6 +1993,12 @@ function PayrollSettingsModal({
         ...initialSettings,
         companyName: companyName.trim() || 'Thunder Cloud',
         logoDataUrl: logoDataUrl || '',
+        legalCompanyName: legalCompanyName.trim(),
+        companyAddress: companyAddress.trim(),
+        companyTaxId: companyTaxId.replace(/\D/g, '').slice(0, 13),
+        ssoEmployerAccount: ssoEmployerAccount.trim(),
+        signerName: signerName.trim(),
+        signatureDataUrl: signatureDataUrl || '',
         otMultiplierHolidayInHours: parseMultiplierInput(multRed),
         otMultiplierHolidayAfterHours: parseMultiplierInput(multGreen),
         otMultiplierWorkday: parseMultiplierInput(multBlue),
@@ -2238,6 +2413,171 @@ function PayrollSettingsModal({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* 4. ข้อมูลสำหรับ 50 ทวิ */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 space-y-3">
+            <div>
+              <div className="font-bold text-slate-800 dark:text-slate-200">
+                ข้อมูลสำหรับ 50 ทวิ (หนังสือรับรองการหักภาษี ณ ที่จ่าย)
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                ข้อมูลผู้มีหน้าที่หักภาษี ณ ที่จ่าย สำหรับออกเอกสาร 50 ทวิ (แยกจากชื่อบริษัทบนสลิปเงินเดือน)
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-slate-700 dark:text-slate-200 mb-1">
+                  ชื่อนิติบุคคลตามกฎหมาย (`legalCompanyName`)
+                </label>
+                <input
+                  type="text"
+                  value={legalCompanyName}
+                  onChange={(e) => setLegalCompanyName(e.target.value)}
+                  placeholder="เช่น บริษัท ธันเดอร์ คลาวด์ จำกัด"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-slate-700 dark:text-slate-200 mb-1">
+                  ที่อยู่บริษัท (`companyAddress`)
+                </label>
+                <textarea
+                  rows={2}
+                  value={companyAddress}
+                  onChange={(e) => setCompanyAddress(e.target.value)}
+                  placeholder="เลขที่ อาคาร ชั้น ซอย ถนน แขวง/ตำบล เขต/อำเภอ จังหวัด รหัสไปรษณีย์"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-200 mb-1">
+                  เลขผู้เสียภาษี 13 หลัก (`companyTaxId`)
+                </label>
+                <input
+                  type="text"
+                  maxLength={17}
+                  value={companyTaxId}
+                  onChange={(e) => setCompanyTaxId(e.target.value.replace(/\D/g, '').slice(0, 13))}
+                  placeholder="ระบุเลข 13 หลัก"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-200 mb-1">
+                  เลขบัญชีนายจ้างประกันสังคม (`ssoEmployerAccount`)
+                </label>
+                <input
+                  type="text"
+                  value={ssoEmployerAccount}
+                  onChange={(e) => setSsoEmployerAccount(e.target.value)}
+                  placeholder="เช่น 10-1234567-8"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-slate-700 dark:text-slate-200 mb-1">
+                  ชื่อผู้ลงนาม (`signerName`)
+                </label>
+                <input
+                  type="text"
+                  value={signerName}
+                  onChange={(e) => setSignerName(e.target.value)}
+                  placeholder="ชื่อ-นามสกุล ผู้มีหน้าที่หักภาษี ณ ที่จ่าย"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
+                />
+              </div>
+            </div>
+
+            {/* รูปลายเซ็น (ไม่บังคับ) */}
+            <div className="pt-2 border-t border-slate-200/80 dark:border-slate-700/80 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <label className="block font-bold text-slate-800 dark:text-slate-200">
+                    รูปลายเซ็น (`signatureDataUrl` - ไม่บังคับ)
+                  </label>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    รองรับไฟล์ PNG หรือ JPG (ย่ออัตโนมัติให้ด้านยาวไม่เกิน 400px รักษาความโปร่งใสของ PNG และขนาดหลังย่อต้องไม่เกิน 300 KB)
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={signatureInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+                    onChange={handleSignatureFileChange}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    disabled={processingSignature}
+                    onClick={() => signatureInputRef.current?.click()}
+                    className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold transition cursor-pointer disabled:opacity-50"
+                  >
+                    {processingSignature
+                      ? 'กำลังย่อรูป...'
+                      : signatureDataUrl
+                      ? 'เปลี่ยนรูปลายเซ็น'
+                      : 'อัปโหลดรูปลายเซ็น (PNG / JPG)'}
+                  </button>
+
+                  {signatureDataUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveSignature}
+                      className="px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-300 font-bold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>ลบลายเซ็น</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {signatureDataUrl ? (
+                <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                  <div className="px-3 py-2 rounded-lg bg-slate-100/80 dark:bg-slate-800/80 border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center">
+                    <img
+                      src={signatureDataUrl}
+                      alt="ตัวอย่างรูปลายเซ็น"
+                      style={{
+                        height: '44px',
+                        width: 'auto',
+                        maxWidth: '160px',
+                        objectFit: 'contain',
+                        display: 'block',
+                      }}
+                    />
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300 space-y-0.5">
+                    <div className="font-bold text-slate-800 dark:text-slate-100">
+                      ตัวอย่างลายเซ็นที่จะแสดงในช่องลงชื่อ 50 ทวิ
+                    </div>
+                    <div className="text-slate-400">
+                      ขนาดข้อมูลหลังย่อ:{' '}
+                      {((signatureSizeBytes || computeDataUrlByteSize(signatureDataUrl)) / 1024).toFixed(1)} KB / สูงสุด 300 KB
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-400 italic">
+                  ไม่ได้อัปโหลดรูปลายเซ็น (เอกสาร 50 ทวิ จะแสดงชื่อตัวพิมพ์ของผู้ลงนามแทน)
+                </div>
+              )}
+
+              {signatureWarning && (
+                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300 font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{signatureWarning}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -4697,4 +5037,1120 @@ function PayrollCycleSummaryReportSection({
     </div>
   );
 }
+
+// ===============================================================
+// Sub-Tab 3: 50 ทวิ (Withholding Tax Certificate Section)
+// ===============================================================
+
+interface Tax50TawiRowFormState {
+  seqNo: number;
+  nameOnDoc: string;
+  openingIncome: string;
+  openingTax: string;
+  openingSso: string;
+  openingNote: string;
+  issueDate: string;
+}
+
+interface Tax50TawiLoadedEmployee {
+  employeeId: string;
+  username?: string;
+  avatarEmoji?: string;
+  defaultFullName: string;
+  position: string;
+  isResignedOrInactive: boolean;
+  privateData: HRPrivateData;
+  slipIncome: number;
+  slipTax: number;
+  slipSso: number;
+  confirmedSlipCount: number;
+  savedCert: TaxCertificateDoc | null;
+}
+
+function TaxCertificate50TawiSection({
+  settings,
+  profiles,
+  registeredUsers,
+  isHrUnlocked,
+  actorName,
+  onOpenSettings,
+  reloadTrigger,
+}: {
+  settings: PayrollSettingsDoc;
+  profiles: Record<string, HRProfile>;
+  registeredUsers: Array<{
+    uid: string;
+    name: string;
+    username?: string;
+    avatarEmoji?: string;
+    accountStatus?: string;
+  }>;
+  isHrUnlocked: boolean;
+  actorName: string;
+  onOpenSettings: () => void;
+  reloadTrigger: number;
+}) {
+  // เลือกปีภาษี (แสดงเป็น พ.ศ.) ค่าเริ่ม = ปีก่อนหน้าถ้าอยู่ในเดือน ม.ค.–ก.พ. นอกนั้น = ปีปัจจุบัน
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const month = now.getMonth() + 1; // 1..12
+    return month <= 2 ? curYear - 1 : curYear;
+  });
+
+  const availableTaxYears = useMemo(() => {
+    const cur = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = cur + 1; y >= cur - 4; y--) {
+      years.push(y);
+    }
+    return years;
+  }, []);
+
+  const [loading, setLoading] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [localReloadCount, setLocalReloadCount] = useState<number>(0);
+
+  const [employeesData, setEmployeesData] = useState<Tax50TawiLoadedEmployee[]>([]);
+  const [formMap, setFormMap] = useState<Record<string, Tax50TawiRowFormState>>({});
+  const [payDateMismatches, setPayDateMismatches] = useState<
+    Array<{ employeeName: string; cycleKey: string; payDate: string }>
+  >([]);
+
+  const [savingEmpId, setSavingEmpId] = useState<string | null>(null);
+  const [savingAll, setSavingAll] = useState<boolean>(false);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(
+    null
+  );
+
+  // Preview & PDF Download States
+  const [previewData, setPreviewData] = useState<TaxCertificate50TawiData | null>(null);
+  const [singleJob, setSingleJob] = useState<{
+    employeeId: string;
+    data: TaxCertificate50TawiData;
+  } | null>(null);
+  const singleRef = useRef<HTMLDivElement | null>(null);
+
+  const [batchJobs, setBatchJobs] = useState<TaxCertificate50TawiData[]>([]);
+  const batchContainerRef = useRef<HTMLDivElement | null>(null);
+  const [downloadingBatch, setDownloadingBatch] = useState<boolean>(false);
+
+  // โหลดข้อมูลเฉพาะเมื่อยืนยันตัวตนด้วยอีเมลแอดมินแล้วเท่านั้น
+  useEffect(() => {
+    if (!isHrUnlocked) {
+      setEmployeesData([]);
+      setFormMap({});
+      setPayDateMismatches([]);
+      setLoadError(null);
+      setLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadTaxYearData() {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        // 1. ดึง payroll_slips เฉพาะปีที่เลือก (where('year', '==', ปี)) ห้ามดึงทั้งก้อน
+        const slipsQ = query(collection(db, 'payroll_slips'), where('year', '==', selectedYear));
+        const slipsSnap = await getDocs(slipsQ);
+        if (isCancelled) return;
+
+        const confirmedSlips: PayrollSlip[] = [];
+        slipsSnap.forEach((docSnap) => {
+          const data = docSnap.data() as PayrollSlip;
+          if (data && data.status === 'confirmed') {
+            confirmedSlips.push({
+              ...data,
+              id: docSnap.id,
+            });
+          }
+        });
+
+        // ตรวจว่ามีสลิปของปีนี้ที่ payDate อยู่คนละปีหรือไม่
+        const mismatches: Array<{ employeeName: string; cycleKey: string; payDate: string }> = [];
+        const slipsByEmp = new Map<string, PayrollSlip[]>();
+
+        confirmedSlips.forEach((s) => {
+          const empId = s.employeeId;
+          if (!slipsByEmp.has(empId)) {
+            slipsByEmp.set(empId, []);
+          }
+          slipsByEmp.get(empId)!.push(s);
+
+          if (s.payDate && /^\d{4}-\d{2}-\d{2}$/.test(s.payDate)) {
+            const payYear = Number(s.payDate.slice(0, 4));
+            if (payYear !== selectedYear) {
+              const p = profiles[empId];
+              const regUser = registeredUsers.find((u) => u.uid === empId);
+              const empName =
+                s.snapshot?.fullName ||
+                s.employeeName ||
+                p?.fullName ||
+                regUser?.name ||
+                empId;
+              mismatches.push({
+                employeeName: empName,
+                cycleKey: s.cycleKey,
+                payDate: s.payDate,
+              });
+            }
+          }
+        });
+
+        // 2. รวบรวมรายชื่อผู้ที่จะตรวจแสดงในตาราง (รวมพนักงานที่ลาออก/พ้นสภาพแล้วถ้ามีสลิปยืนยันหรือมียอดยกมาในปีนั้น)
+        const candidateMap = new Map<
+          string,
+          {
+            uid: string;
+            name: string;
+            username?: string;
+            avatarEmoji?: string;
+            isActiveEmployee: boolean;
+          }
+        >();
+
+        registeredUsers
+          .filter((u) => u.accountStatus !== 'rejected')
+          .forEach((u) => {
+            const isNotEmp = Boolean(profiles[u.uid]?.notEmployee);
+            candidateMap.set(u.uid, {
+              uid: u.uid,
+              name: u.name,
+              username: u.username,
+              avatarEmoji: u.avatarEmoji,
+              isActiveEmployee: !isNotEmp,
+            });
+          });
+
+        // เผื่อมีสลิปที่ยืนยันแล้วของพนักงานที่ไม่อยู่ใน registeredUsers ปัจจุบัน
+        slipsByEmp.forEach((empSlips, empId) => {
+          if (!candidateMap.has(empId)) {
+            const firstSlip = empSlips[0];
+            candidateMap.set(empId, {
+              uid: empId,
+              name: firstSlip?.snapshot?.fullName || firstSlip?.employeeName || empId,
+              username: empId,
+              isActiveEmployee: false,
+            });
+          }
+        });
+
+        const candidates = Array.from(candidateMap.values());
+
+        // ดึง tax_certificates/{year}_{empId} ของทุกคนใน candidate เพื่อตรวจว่ามีเอกสารหรือยอดยกมาหรือไม่
+        const certEntries = await Promise.all(
+          candidates.map(async (c) => {
+            const certRef = doc(db, 'tax_certificates', `${selectedYear}_${c.uid}`);
+            const certSnap = await getDoc(certRef);
+            const certData = certSnap.exists() ? (certSnap.data() as TaxCertificateDoc) : null;
+            return { candidate: c, certData };
+          })
+        );
+
+        if (isCancelled) return;
+
+        // กรองเฉพาะพนักงานปัจจุบัน หรือ พนักงานที่พ้นสภาพ/ลาออกที่มีสลิปยืนยันในปีนั้นหรือมียอดยกมาในปีนั้น
+        const includedEntries = certEntries.filter(({ candidate, certData }) => {
+          const hasConfirmedSlips = (slipsByEmp.get(candidate.uid)?.length || 0) > 0;
+          const hasOpeningBalance = Boolean(
+            certData &&
+              (Number(certData.openingIncome) > 0 ||
+                Number(certData.openingTax) > 0 ||
+                Number(certData.openingSso) > 0 ||
+                Boolean(certData.seqNo))
+          );
+          return candidate.isActiveEmployee || hasConfirmedSlips || hasOpeningBalance;
+        });
+
+        // ดึงข้อมูลลับ hr_private/{empId} ของพนักงานที่อยู่ในตาราง
+        const loadedRows = await Promise.all(
+          includedEntries.map(async ({ candidate, certData }) => {
+            const prof = profiles[candidate.uid] || getDefaultHRProfile(candidate.name);
+            const empSlips = slipsByEmp.get(candidate.uid) || [];
+            const fallbackName =
+              prof.fullName ||
+              empSlips[0]?.snapshot?.fullName ||
+              empSlips[0]?.employeeName ||
+              candidate.name;
+
+            const priv = await fetchHRPrivateEmployee(candidate.uid, fallbackName);
+
+            let slipIncome = 0;
+            let slipTax = 0;
+            let slipSso = 0;
+            empSlips.forEach((s) => {
+              slipIncome = round2(slipIncome + (Number(s.totalEarnings) || 0));
+              slipTax = round2(slipTax + (Number(s.withholdingTax) || 0));
+              slipSso = round2(slipSso + (Number(s.ssoAmount) || 0));
+            });
+
+            return {
+              employeeId: candidate.uid,
+              username: candidate.username,
+              avatarEmoji: candidate.avatarEmoji,
+              defaultFullName: fallbackName,
+              position: prof.position || empSlips[0]?.snapshot?.position || '',
+              isResignedOrInactive: !candidate.isActiveEmployee,
+              privateData: priv,
+              slipIncome,
+              slipTax,
+              slipSso,
+              confirmedSlipCount: empSlips.length,
+              savedCert: certData,
+            } as Tax50TawiLoadedEmployee;
+          })
+        );
+
+        if (isCancelled) return;
+
+        // เรียงตามชื่อภาษาไทย ก-ฮ เพื่อกำหนดลำดับที่เริ่มต้นเริ่มจาก 1
+        const sortedByThaiName = [...loadedRows].sort((a, b) =>
+          (a.defaultFullName || '').localeCompare(b.defaultFullName || '', 'th')
+        );
+
+        const defaultIssueDate = format(new Date(), 'yyyy-MM-dd');
+        const nextFormMap: Record<string, Tax50TawiRowFormState> = {};
+
+        sortedByThaiName.forEach((row, index) => {
+          const cert = row.savedCert;
+          const defaultSeq = index + 1;
+          nextFormMap[row.employeeId] = {
+            seqNo:
+              cert && Number.isFinite(Number(cert.seqNo)) && Number(cert.seqNo) > 0
+                ? Number(cert.seqNo)
+                : defaultSeq,
+            nameOnDoc: (cert?.nameOnDoc || row.defaultFullName || '').trim(),
+            openingIncome: String(round2(Number(cert?.openingIncome) || 0)),
+            openingTax: String(round2(Number(cert?.openingTax) || 0)),
+            openingSso: String(round2(Number(cert?.openingSso) || 0)),
+            openingNote: cert?.openingNote || '',
+            issueDate: cert?.issueDate || defaultIssueDate,
+          };
+        });
+
+        setEmployeesData(sortedByThaiName);
+        setFormMap(nextFormMap);
+        setPayDateMismatches(mismatches);
+      } catch (err: any) {
+        console.error('Error loading 50 Tawi data:', err);
+        if (!isCancelled) {
+          setLoadError('โหลดข้อมูล 50 ทวิ ไม่สำเร็จ กรุณากดโหลดใหม่');
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadTaxYearData();
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    isHrUnlocked,
+    selectedYear,
+    profiles,
+    registeredUsers,
+    reloadTrigger,
+    localReloadCount,
+  ]);
+
+  // Trigger Single PDF Download when singleJob renders
+  useEffect(() => {
+    if (!singleJob || !singleRef.current) return;
+    let isCancelled = false;
+
+    async function runSinglePdf() {
+      try {
+        await new Promise((r) => setTimeout(r, 80));
+        if (isCancelled || !singleRef.current) return;
+        await downloadSingle50TawiPdf(
+          singleRef.current,
+          singleJob.data.yearBE,
+          singleJob.data.nameOnDoc
+        );
+      } catch (err) {
+        console.error('Error generating single 50 Tawi PDF:', err);
+        setNotice({
+          type: 'error',
+          message: 'สร้างไฟล์ PDF 50 ทวิ ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+        });
+      } finally {
+        if (!isCancelled) {
+          setSingleJob(null);
+        }
+      }
+    }
+
+    runSinglePdf();
+    return () => {
+      isCancelled = true;
+    };
+  }, [singleJob]);
+
+  // Trigger Batch PDF Download when batchJobs render
+  useEffect(() => {
+    if (batchJobs.length === 0 || !batchContainerRef.current) return;
+    let isCancelled = false;
+
+    async function runBatchPdf() {
+      try {
+        await new Promise((r) => setTimeout(r, 120));
+        if (isCancelled || !batchContainerRef.current) return;
+        const pageEls = Array.from(
+          batchContainerRef.current.querySelectorAll('[data-50tawi-page="true"] > div')
+        ) as HTMLElement[];
+        if (pageEls.length > 0) {
+          await downloadBatch50TawiPdf(pageEls, selectedYear + 543);
+        }
+      } catch (err) {
+        console.error('Error generating batch 50 Tawi PDF:', err);
+        setNotice({
+          type: 'error',
+          message: 'สร้างไฟล์ PDF 50 ทวิ ทั้งหมดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+        });
+      } finally {
+        if (!isCancelled) {
+          setBatchJobs([]);
+          setDownloadingBatch(false);
+        }
+      }
+    }
+
+    runBatchPdf();
+    return () => {
+      isCancelled = true;
+    };
+  }, [batchJobs, selectedYear]);
+
+  // ตรวจความครบถ้วนของข้อมูลบริษัทสำหรับ 50 ทวิ
+  const companyMissingList = useMemo(() => {
+    const missing: string[] = [];
+    if (!settings.legalCompanyName?.trim()) missing.push('ชื่อนิติบุคคลตามกฎหมาย');
+    if (!settings.companyAddress?.trim()) missing.push('ที่อยู่บริษัท');
+    const cleanCompanyTax = (settings.companyTaxId || '').replace(/\D/g, '');
+    if (cleanCompanyTax.length !== 13) missing.push('เลขผู้เสียภาษีบริษัท 13 หลัก');
+    if (!settings.signerName?.trim()) missing.push('ชื่อผู้ลงนาม');
+    return missing;
+  }, [settings]);
+
+  // นับจำนวนซ้ำของ seqNo ในปีเดียวกัน
+  const seqCountMap = useMemo(() => {
+    const counts = new Map<number, number>();
+    employeesData.forEach((emp) => {
+      const f = formMap[emp.employeeId];
+      const seq = Number(f?.seqNo);
+      if (Number.isFinite(seq) && seq > 0) {
+        counts.set(seq, (counts.get(seq) || 0) + 1);
+      }
+    });
+    return counts;
+  }, [employeesData, formMap]);
+
+  // คำนวณยอดรวมและตรวจความพร้อม 5 ข้อของแต่ละแถว
+  const computedRows = useMemo(() => {
+    return employeesData.map((emp) => {
+      const f = formMap[emp.employeeId] || {
+        seqNo: 1,
+        nameOnDoc: emp.defaultFullName,
+        openingIncome: '0',
+        openingTax: '0',
+        openingSso: '0',
+        openingNote: '',
+        issueDate: format(new Date(), 'yyyy-MM-dd'),
+      };
+
+      const openInc = round2(Math.max(0, Number(f.openingIncome) || 0));
+      const openTax = round2(Math.max(0, Number(f.openingTax) || 0));
+      const openSso = round2(Math.max(0, Number(f.openingSso) || 0));
+
+      const totalIncome = round2(emp.slipIncome + openInc);
+      const totalTax = round2(emp.slipTax + openTax);
+      const totalSso = round2(emp.slipSso + openSso);
+
+      // การตรวจก่อนออกเอกสาร 5 ข้อ (สถานะ "พร้อม" เมื่อครบทุกข้อ)
+      const missingReasons: string[] = [];
+
+      // 1. พนักงานมีเลขบัตรประชาชน 13 หลัก และผ่านสูตรตรวจหลักที่ 13 ของไทย
+      const rawCitId = (emp.privateData.ssoNumber || '').replace(/\D/g, '');
+      if (rawCitId.length !== 13) {
+        missingReasons.push('ไม่มีเลขบัตรประชาชน 13 หลัก (ในข้อมูลลับ HR)');
+      } else if (!isValidThaiCitizenId(rawCitId)) {
+        missingReasons.push('เลขบัตรประชาชนไม่ผ่านสูตรตรวจหลักที่ 13');
+      }
+
+      // 2. พนักงานมีที่อยู่
+      if (!emp.privateData.address?.trim()) {
+        missingReasons.push('ไม่มีที่อยู่ตามบัตรประชาชน (ในข้อมูลลับ HR)');
+      }
+
+      // 3. ตั้งค่าข้อมูล 50 ทวิ ของบริษัทครบ
+      if (companyMissingList.length > 0) {
+        missingReasons.push(`ตั้งค่าบริษัทไม่ครบ (${companyMissingList.join(', ')})`);
+      }
+
+      // 4. มีวันที่ออกหนังสือรับรอง
+      if (!f.issueDate || !/^\d{4}-\d{2}-\d{2}$/.test(f.issueDate)) {
+        missingReasons.push('ยังไม่ได้ระบุวันที่ออกหนังสือรับรอง');
+      }
+
+      // 5. ลำดับที่ไม่ซ้ำกันในปีเดียวกัน (และต้อง > 0)
+      const seqNum = Number(f.seqNo);
+      if (!Number.isInteger(seqNum) || seqNum <= 0) {
+        missingReasons.push('ลำดับที่ไม่ถูกต้อง');
+      } else if ((seqCountMap.get(seqNum) || 0) > 1) {
+        missingReasons.push(`ลำดับที่ ${seqNum} ซ้ำกันในปีเดียวกัน`);
+      }
+
+      const isReady = missingReasons.length === 0;
+
+      const docData: TaxCertificate50TawiData = {
+        seqNo: seqNum > 0 ? seqNum : f.seqNo,
+        yearBE: selectedYear + 543,
+        legalCompanyName: settings.legalCompanyName || '',
+        companyAddress: settings.companyAddress || '',
+        companyTaxId: settings.companyTaxId || '',
+        ssoEmployerAccount: settings.ssoEmployerAccount || '',
+        signerName: settings.signerName || '',
+        signatureDataUrl: settings.signatureDataUrl || '',
+        nameOnDoc: f.nameOnDoc.trim() || emp.defaultFullName,
+        employeeAddress: emp.privateData.address || '',
+        employeeCitizenId: rawCitId,
+        totalIncome,
+        totalTax,
+        totalSso,
+        issueDate: f.issueDate,
+      };
+
+      return {
+        emp,
+        form: f,
+        openInc,
+        openTax,
+        openSso,
+        totalIncome,
+        totalTax,
+        totalSso,
+        isReady,
+        missingReasons,
+        docData,
+      };
+    });
+  }, [employeesData, formMap, companyMissingList, seqCountMap, selectedYear, settings]);
+
+  const readyRowsSortedBySeq = useMemo(() => {
+    return computedRows
+      .filter((r) => r.isReady)
+      .sort((a, b) => Number(a.form.seqNo) - Number(b.form.seqNo));
+  }, [computedRows]);
+
+  const updateRowField = (
+    employeeId: string,
+    patch: Partial<Tax50TawiRowFormState>
+  ) => {
+    setFormMap((prev) => {
+      const cur = prev[employeeId];
+      if (!cur) return prev;
+      return {
+        ...prev,
+        [employeeId]: {
+          ...cur,
+          ...patch,
+        },
+      };
+    });
+  };
+
+  const handleApplyIssueDateToAll = (newDate: string) => {
+    if (!newDate) return;
+    setFormMap((prev) => {
+      const next: Record<string, Tax50TawiRowFormState> = {};
+      Object.entries(prev).forEach(([empId, st]) => {
+        next[empId] = {
+          ...st,
+          issueDate: newDate,
+        };
+      });
+      return next;
+    });
+  };
+
+  const saveEmployeeTaxCert = async (empId: string) => {
+    const f = formMap[empId];
+    const emp = employeesData.find((e) => e.employeeId === empId);
+    if (!f || !emp) return;
+
+    const docId = `${selectedYear}_${empId}`;
+    const payload: TaxCertificateDoc = {
+      id: docId,
+      year: selectedYear,
+      employeeId: empId,
+      seqNo: Math.max(1, Math.round(Number(f.seqNo) || 1)),
+      openingIncome: round2(Math.max(0, Number(f.openingIncome) || 0)),
+      openingTax: round2(Math.max(0, Number(f.openingTax) || 0)),
+      openingSso: round2(Math.max(0, Number(f.openingSso) || 0)),
+      openingNote: f.openingNote.trim(),
+      nameOnDoc: f.nameOnDoc.trim() || emp.defaultFullName,
+      issueDate: f.issueDate,
+      updatedAt: Date.now(),
+      updatedBy: actorName,
+    };
+
+    await setDoc(doc(db, 'tax_certificates', docId), payload, { merge: true });
+  };
+
+  const handleSaveSingleRow = async (empId: string, empName: string) => {
+    if (!isHrUnlocked || savingEmpId || savingAll) return;
+    setSavingEmpId(empId);
+    setNotice(null);
+    try {
+      await saveEmployeeTaxCert(empId);
+      setNotice({
+        type: 'success',
+        message: `บันทึกข้อมูล 50 ทวิ ของ "${empName}" ลง tax_certificates/${selectedYear}_${empId} เรียบร้อยแล้ว`,
+      });
+      setTimeout(() => setNotice(null), 4000);
+    } catch (err) {
+      console.error('Error saving tax certificate:', err);
+      setNotice({
+        type: 'error',
+        message: `บันทึกข้อมูล 50 ทวิ ของ "${empName}" ไม่สำเร็จ กรุณาลองใหม่`,
+      });
+    } finally {
+      setSavingEmpId(null);
+    }
+  };
+
+  const handleSaveAllRows = async () => {
+    if (!isHrUnlocked || savingAll || savingEmpId || employeesData.length === 0) return;
+    setSavingAll(true);
+    setNotice(null);
+    try {
+      await Promise.all(employeesData.map((e) => saveEmployeeTaxCert(e.employeeId)));
+      setNotice({
+        type: 'success',
+        message: `บันทึกข้อมูล 50 ทวิ ทั้งหมด (${employeesData.length} คน) สำหรับปี พ.ศ. ${selectedYear + 543} เรียบร้อยแล้ว`,
+      });
+      setTimeout(() => setNotice(null), 4000);
+    } catch (err) {
+      console.error('Error saving all tax certificates:', err);
+      setNotice({
+        type: 'error',
+        message: 'บันทึกข้อมูล 50 ทวิ ทั้งหมดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+      });
+    } finally {
+      setSavingAll(false);
+    }
+  };
+
+  const handleDownloadBatchReadyPdf = () => {
+    if (!isHrUnlocked || downloadingBatch || readyRowsSortedBySeq.length === 0) return;
+    setDownloadingBatch(true);
+    setBatchJobs(readyRowsSortedBySeq.map((r) => r.docData));
+  };
+
+  const fmtMoney = (n: number) =>
+    (Number(n) || 0).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden space-y-4 p-4 sm:p-5">
+      {/* Top Bar: Year Selector, Issue Date Helper, Save All & Download All Ready */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+              เลือกปีภาษี (พ.ศ.)
+            </label>
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+            >
+              {availableTaxYears.map((y) => (
+                <option key={y} value={y}>
+                  ปีภาษี พ.ศ. {y + 543} (ค.ศ. {y})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+              ตั้งวันที่ออกหนังสือรับรองพร้อมกันทุกคน
+            </label>
+            <input
+              type="date"
+              defaultValue={format(new Date(), 'yyyy-MM-dd')}
+              onChange={(e) => handleApplyIssueDateToAll(e.target.value)}
+              className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white cursor-pointer"
+            />
+          </div>
+
+          <div className="pt-4 text-xs text-slate-600 dark:text-slate-300 font-semibold">
+            พร้อมออกเอกสาร:{' '}
+            <strong className="text-emerald-600 dark:text-emerald-400">
+              {readyRowsSortedBySeq.length}
+            </strong>{' '}
+            / {computedRows.length} คน
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={loading || savingAll || employeesData.length === 0}
+            onClick={handleSaveAllRows}
+            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition cursor-pointer disabled:opacity-50"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>{savingAll ? 'กำลังบันทึกทั้งหมด...' : 'บันทึกทั้งหมด'}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={loading || downloadingBatch || readyRowsSortedBySeq.length === 0}
+            onClick={handleDownloadBatchReadyPdf}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer disabled:opacity-50"
+            title={
+              readyRowsSortedBySeq.length === 0
+                ? 'ยังไม่มีพนักงานที่มีสถานะ "พร้อม"'
+                : `ดาวน์โหลด 50 ทวิ ของพนักงานที่สถานะ "พร้อม" ทั้งหมด (${readyRowsSortedBySeq.length} คน) เรียงตามลำดับที่`
+            }
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>
+              {downloadingBatch
+                ? 'กำลังสร้าง PDF ทั้งหมด...'
+                : `ดาวน์โหลดทั้งหมด (${readyRowsSortedBySeq.length} คน)`}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* แจ้งเตือนหากยังตั้งค่าข้อมูลบริษัทสำหรับ 50 ทวิ ไม่ครบ */}
+      {companyMissingList.length > 0 && (
+        <div className="p-3.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">
+                ตั้งค่าข้อมูลบริษัทสำหรับ 50 ทวิ ยังไม่ครบ ({companyMissingList.join(', ')})
+              </div>
+              <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                กรุณากดปุ่มตั้งค่าสลิป แล้วกรอกข้อมูลใต้หัวข้อ &ldquo;ข้อมูลสำหรับ 50 ทวิ&rdquo; ให้ครบเพื่อให้สถานะเปลี่ยนเป็น &ldquo;พร้อม&rdquo;
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer"
+          >
+            ตั้งค่าข้อมูล 50 ทวิ
+          </button>
+        </div>
+      )}
+
+      {/* กล่องเหลืองแจ้งเตือนกรณีมีสลิปของปีนี้แต่ payDate อยู่คนละปี */}
+      {payDateMismatches.length > 0 && (
+        <div className="p-3.5 rounded-xl border border-amber-400 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/70 text-amber-900 dark:text-amber-200 text-xs space-y-1.5">
+          <div className="font-bold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              คำเตือน: พบสลิปที่ยืนยันแล้วของปี {selectedYear + 543} แต่วันที่จ่ายเงิน (payDate) อยู่คนละปี
+            </span>
+          </div>
+          <ul className="list-disc list-inside text-[11px] space-y-0.5 pl-1">
+            {payDateMismatches.map((m, idx) => (
+              <li key={`${m.cycleKey}_${idx}`}>
+                พนักงาน <strong>{m.employeeName}</strong> — รอบ <strong>{m.cycleKey}</strong> (วันที่จ่าย:{' '}
+                <strong>{m.payDate}</strong>)
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {notice && (
+        <div
+          className={clsx(
+            'p-3 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2',
+            notice.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+              : 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+          )}
+        >
+          <div className="flex items-center gap-2">
+            {notice.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 shrink-0" />
+            )}
+            <span>{notice.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="text-slate-400 hover:text-slate-600"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="p-12 text-center text-slate-400 text-sm">
+          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+          กำลังโหลดข้อมูลสลิปที่ยืนยันแล้วและข้อมูล 50 ทวิ ประจำปี พ.ศ. {selectedYear + 543}...
+        </div>
+      ) : loadError ? (
+        <div className="p-10 text-center space-y-3">
+          <AlertCircle className="w-7 h-7 text-rose-500 mx-auto" />
+          <div className="text-xs font-bold text-rose-600">{loadError}</div>
+          <button
+            type="button"
+            onClick={() => setLocalReloadCount((c) => c + 1)}
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>โหลดใหม่</span>
+          </button>
+        </div>
+      ) : computedRows.length === 0 ? (
+        <div className="p-12 text-center text-slate-400 text-sm">
+          ไม่พบข้อมูลพนักงานสำหรับปีภาษี พ.ศ. {selectedYear + 543}
+        </div>
+      ) : (
+        <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold border-b border-slate-200 dark:border-slate-700">
+                <th className="px-2.5 py-3 text-center w-[76px]">ลำดับที่</th>
+                <th className="px-3 py-3 text-left min-w-[210px]">ชื่อบนเอกสาร / วันที่ออก</th>
+                <th className="px-3 py-3 text-right min-w-[140px]">เงินได้จากสลิป</th>
+                <th className="px-3 py-3 text-left min-w-[260px]">
+                  ยอดยกมา (เงินได้ / ภาษี / ประกันสังคม)
+                </th>
+                <th className="px-3 py-3 text-right min-w-[125px]">รวมเงินได้ทั้งปี</th>
+                <th className="px-3 py-3 text-right min-w-[115px]">รวมภาษีทั้งปี</th>
+                <th className="px-3 py-3 text-right min-w-[125px]">รวมประกันสังคมทั้งปี</th>
+                <th className="px-3 py-3 text-left min-w-[190px]">สถานะ</th>
+                <th className="px-3 py-3 text-right min-w-[180px]">บันทึก / ดูตัวอย่าง / PDF</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 tabular-nums">
+              {computedRows.map((row) => {
+                const {
+                  emp,
+                  form,
+                  totalIncome,
+                  totalTax,
+                  totalSso,
+                  isReady,
+                  missingReasons,
+                  docData,
+                } = row;
+
+                const isSingleDownloading = singleJob?.employeeId === emp.employeeId;
+
+                return (
+                  <tr
+                    key={emp.employeeId}
+                    className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 align-top"
+                  >
+                    {/* ลำดับที่ (แก้ได้) */}
+                    <td className="px-2.5 py-3 text-center">
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={form.seqNo}
+                        onChange={(e) =>
+                          updateRowField(emp.employeeId, {
+                            seqNo: Math.max(1, parseInt(e.target.value || '1', 10) || 1),
+                          })
+                        }
+                        className="w-16 px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-center font-mono font-bold text-slate-900 dark:text-white"
+                      />
+                    </td>
+
+                    {/* ชื่อบนเอกสาร + วันที่ออกหนังสือรับรอง */}
+                    <td className="px-3 py-3 space-y-1.5">
+                      <input
+                        type="text"
+                        value={form.nameOnDoc}
+                        onChange={(e) =>
+                          updateRowField(emp.employeeId, { nameOnDoc: e.target.value })
+                        }
+                        placeholder="ระบุคำนำหน้า ชื่อ-นามสกุล"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-slate-900 dark:text-white"
+                      />
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                        <span>วันที่ออก:</span>
+                        <input
+                          type="date"
+                          value={form.issueDate}
+                          onChange={(e) =>
+                            updateRowField(emp.employeeId, { issueDate: e.target.value })
+                          }
+                          className="px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-[11px] text-slate-700 dark:text-slate-200"
+                        />
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        HR: {emp.defaultFullName}{' '}
+                        {emp.isResignedOrInactive && (
+                          <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-bold">
+                            พ้นสภาพ/ไม่ได้เป็นพนักงานปัจจุบัน
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* เงินได้จากสลิป */}
+                    <td className="px-3 py-3 text-right font-mono space-y-0.5">
+                      <div className="font-bold text-slate-800 dark:text-slate-200">
+                        {fmtMoney(emp.slipIncome)}
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        ภาษีสลิป: {fmtMoney(emp.slipTax)}
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        สปส.สลิป: {fmtMoney(emp.slipSso)}
+                      </div>
+                      <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-sans">
+                        ({emp.confirmedSlipCount} สลิปยืนยันแล้ว)
+                      </div>
+                    </td>
+
+                    {/* ยอดยกมา (เงินได้/ภาษี/ประกันสังคม กรอกได้ + หมายเหตุ) */}
+                    <td className="px-3 py-3">
+                      <div className="grid grid-cols-3 gap-1.5 mb-1.5">
+                        <div>
+                          <label className="block text-[10px] text-slate-500 mb-0.5">
+                            เงินได้ยกมา
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={form.openingIncome}
+                            onChange={(e) =>
+                              updateRowField(emp.employeeId, { openingIncome: e.target.value })
+                            }
+                            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-right font-mono text-[11px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500 mb-0.5">
+                            ภาษียกมา
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={form.openingTax}
+                            onChange={(e) =>
+                              updateRowField(emp.employeeId, { openingTax: e.target.value })
+                            }
+                            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-right font-mono text-[11px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500 mb-0.5">
+                            สปส.ยกมา
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={form.openingSso}
+                            onChange={(e) =>
+                              updateRowField(emp.employeeId, { openingSso: e.target.value })
+                            }
+                            className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-right font-mono text-[11px]"
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        value={form.openingNote}
+                        onChange={(e) =>
+                          updateRowField(emp.employeeId, { openingNote: e.target.value })
+                        }
+                        placeholder="หมายเหตุยอดยกมา (ถ้ามี)"
+                        className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] text-slate-600 dark:text-slate-300"
+                      />
+                    </td>
+
+                    {/* รวมเงินได้ทั้งปี */}
+                    <td className="px-3 py-3 text-right font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                      {fmtMoney(totalIncome)}
+                    </td>
+
+                    {/* รวมภาษีทั้งปี */}
+                    <td className="px-3 py-3 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
+                      {fmtMoney(totalTax)}
+                    </td>
+
+                    {/* รวมประกันสังคมทั้งปี */}
+                    <td className="px-3 py-3 text-right font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                      {fmtMoney(totalSso)}
+                    </td>
+
+                    {/* สถานะ */}
+                    <td className="px-3 py-3">
+                      {isReady ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>พร้อม</span>
+                        </span>
+                      ) : (
+                        <div className="space-y-1">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            <span>ข้อมูลยังไม่ครบ</span>
+                          </span>
+                          <ul className="list-disc list-inside text-[10px] text-rose-600 dark:text-rose-400 space-y-0.5 leading-snug">
+                            {missingReasons.map((reason, idx) => (
+                              <li key={idx}>{reason}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </td>
+
+                    {/* ปุ่มบันทึก / ดูตัวอย่าง / ดาวน์โหลด PDF */}
+                    <td className="px-3 py-3 text-right">
+                      <div className="flex flex-col items-end gap-1.5">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={savingEmpId === emp.employeeId || savingAll}
+                            onClick={() =>
+                              handleSaveSingleRow(
+                                emp.employeeId,
+                                form.nameOnDoc || emp.defaultFullName
+                              )
+                            }
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-[11px] font-bold inline-flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
+                          >
+                            <Save className="w-3 h-3" />
+                            <span>
+                              {savingEmpId === emp.employeeId ? 'กำลังบันทึก...' : 'บันทึก'}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setPreviewData(docData)}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold inline-flex items-center gap-1 transition cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>ดูตัวอย่าง</span>
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={!isReady || Boolean(singleJob) || downloadingBatch}
+                          onClick={() =>
+                            setSingleJob({
+                              employeeId: emp.employeeId,
+                              data: docData,
+                            })
+                          }
+                          className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          title={
+                            isReady
+                              ? 'ดาวน์โหลดหนังสือรับรอง 50 ทวิ เป็นไฟล์ PDF'
+                              : `ยังไม่สามารถดาวน์โหลดได้: ${missingReasons.join(', ')}`
+                          }
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>
+                            {isSingleDownloading ? 'กำลังสร้าง PDF...' : 'ดาวน์โหลด PDF'}
+                          </span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal ดูตัวอย่าง 50 ทวิ */}
+      {previewData && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+          <div className="bg-slate-100 dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-4xl w-full max-h-[94vh] flex flex-col overflow-hidden">
+            <div className="px-4 py-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                ตัวอย่างหนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) — {previewData.nameOnDoc} (ปีภาษี{' '}
+                {previewData.yearBE})
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewData(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-auto flex justify-center bg-slate-200/70 dark:bg-slate-950">
+              <div className="shadow-lg">
+                <TaxCertificate50TawiDocument data={previewData} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Offscreen Render Container สำหรับดาวน์โหลด PDF รายคน */}
+      {singleJob && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            left: '-10000px',
+            top: '0px',
+            zIndex: -100,
+            pointerEvents: 'none',
+          }}
+        >
+          <TaxCertificate50TawiDocument ref={singleRef} data={singleJob.data} />
+        </div>
+      )}
+
+      {/* Offscreen Render Container สำหรับดาวน์โหลด PDF ทั้งหมด (เรียงตามลำดับที่) */}
+      {batchJobs.length > 0 && (
+        <div
+          ref={batchContainerRef}
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            left: '-10000px',
+            top: '0px',
+            zIndex: -100,
+            pointerEvents: 'none',
+          }}
+        >
+          {batchJobs.map((job, idx) => (
+            <div key={`${job.seqNo}_${idx}`} data-50tawi-page="true">
+              <TaxCertificate50TawiDocument data={job} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
