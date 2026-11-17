@@ -330,5 +330,15 @@ service cloud.firestore {
     match /tax_certificates/{docId} {
       allow read, write: if isHrAdmin();
     }
+
+    match /profile_requests/{requestId} {
+      allow create: if isAuthenticatedOrPinSession() && request.resource.data.status in ['first_time', 'pending'];
+      allow read, update, delete: if isHrAdmin();
+    }
+
+    match /profile_status/{employeeId} {
+      allow read, create, update: if isAuthenticatedOrPinSession();
+      allow delete: if isHrAdmin();
+    }
   }
 }

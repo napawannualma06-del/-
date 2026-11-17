@@ -31,16 +31,22 @@ import { auth, db } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
 import {
   AdvanceRequest,
+  EmployeeSelfSubmittedFields,
   HRPrivateData,
   HRProbationStatus,
   HRProfile,
   HRSSOStatus,
+  ProfileRequestDoc,
 } from '../types';
 import {
+  ALL_SELF_PROFILE_KEYS,
   DEFAULT_PROBATION_DAYS,
   DEFAULT_SSO_CAP_AMOUNT,
   DEFAULT_SSO_RATE_PERCENT,
   HR_PRIVATE_IDLE_TIMEOUT_MS,
+  SELF_PROFILE_FIELD_LABELS,
+  approveEmployeeProfileRequest,
+  autoApplyFirstTimeProfileRequests,
   calculateMonthlySSODeduction,
   calculateProbationEndDate,
   calculateTenureText,
@@ -52,9 +58,11 @@ import {
   getProbationBadgeInfo,
   lockHrAdminEmailSession,
   maskSensitiveNumber,
+  rejectEmployeeProfileRequest,
   saveHRPrivateEmployee,
   saveHRProfiles,
   signInHrAdminEmail,
+  syncProfileStatusMaskedSummaryByAdmin,
 } from '../lib/hrService';
 import { getOTCycleFromDate, getOTCycleInfo } from '../lib/otUtils';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -88,6 +96,15 @@ export function AdminHRDashboard() {
   const [showUnlockModal, setShowUnlockModal] = useState<boolean>(false);
   const lastHrActivityRef = useRef<number>(Date.now());
 
+  // Profile Edit Requests State (loaded ONLY when isHrUnlocked is true)
+  const [profileRequestsTab, setProfileRequestsTab] = useState<'pending' | 'history'>('pending');
+  const [pendingProfileRequests, setPendingProfileRequests] = useState<ProfileRequestDoc[]>([]);
+  const [historyProfileRequests, setHistoryProfileRequests] = useState<ProfileRequestDoc[]>([]);
+  const [loadingProfileRequests, setLoadingProfileRequests] = useState<boolean>(false);
+  const [profileRequestsReloadTrigger, setProfileRequestsReloadTrigger] = useState<number>(0);
+  const [inspectingRequest, setInspectingRequest] = useState<ProfileRequestDoc | null>(null);
+  const autoAppliedOnUnlockRef = useRef<boolean>(false);
+
   // Sync Firebase Auth state for email/password provider
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (fbUser) => {
@@ -101,6 +118,7 @@ export function AdminHRDashboard() {
       } else {
         setIsHrUnlocked(false);
         setHrUnlockedEmail(null);
+        autoAppliedOnUnlockRef.current = false;
       }
     });
     return () => unsub();
@@ -110,6 +128,10 @@ export function AdminHRDashboard() {
     await lockHrAdminEmailSession();
     setIsHrUnlocked(false);
     setHrUnlockedEmail(null);
+    autoAppliedOnUnlockRef.current = false;
+    setPendingProfileRequests([]);
+    setHistoryProfileRequests([]);
+    setInspectingRequest(null);
     if (isAutoTimeout) {
       setStatusNotice({
         type: 'error',
@@ -178,6 +200,85 @@ export function AdminHRDashboard() {
       isCancelled = true;
     };
   }, [reloadTrigger]);
+
+  // Auto-apply first_time profile requests & load pending/history requests when HR is unlocked
+  useEffect(() => {
+    if (!isHrUnlocked || !hrUnlockedEmail || loading || loadError) return;
+    let isCancelled = false;
+
+    async function syncAndLoadProfileRequests() {
+      setLoadingProfileRequests(true);
+      try {
+        // 1. Auto-apply first_time requests once per unlock session (or on manual refresh)
+        if (!autoAppliedOnUnlockRef.current) {
+          autoAppliedOnUnlockRef.current = true;
+          const autoRes = await autoApplyFirstTimeProfileRequests(profiles, hrUnlockedEmail!);
+          if (!isCancelled && (autoRes.appliedCount > 0 || autoRes.conflictCreatedCount > 0)) {
+            setProfiles(autoRes.updatedProfiles);
+            window.dispatchEvent(new CustomEvent('hr-profile-requests-updated'));
+            setStatusNotice({
+              type: 'success',
+              message:
+                autoRes.conflictCreatedCount > 0
+                  ? `นำข้อมูลกรอกครั้งแรกของพนักงานไปเติมช่องว่างแล้ว ${autoRes.appliedCount} รายการ (พบช่องที่แอดมินกรอกไว้แล้วไม่ตรงกัน ${autoRes.conflictCreatedCount} รายการ แยกเป็นคำขอรออนุมัติ)`
+                  : `นำข้อมูลกรอกครั้งแรกของพนักงานไปเติมช่องว่างอัตโนมัติแล้ว ${autoRes.appliedCount} รายการ`,
+            });
+          }
+        }
+
+        // 2. Load pending & history requests with filtered queries
+        const pendingQ = query(
+          collection(db, 'profile_requests'),
+          where('status', '==', 'pending')
+        );
+        const historyQ = query(
+          collection(db, 'profile_requests'),
+          where('status', 'in', ['approved', 'rejected', 'applied']),
+          limit(100)
+        );
+
+        const [pendingSnap, historySnap] = await Promise.all([
+          getDocs(pendingQ),
+          getDocs(historyQ),
+        ]);
+
+        if (isCancelled) return;
+
+        const pendList: ProfileRequestDoc[] = [];
+        pendingSnap.forEach((d) => {
+          pendList.push({
+            ...(d.data() as Omit<ProfileRequestDoc, 'id'>),
+            id: d.id,
+          });
+        });
+        pendList.sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
+        setPendingProfileRequests(pendList);
+
+        const histList: ProfileRequestDoc[] = [];
+        historySnap.forEach((d) => {
+          histList.push({
+            ...(d.data() as Omit<ProfileRequestDoc, 'id'>),
+            id: d.id,
+          });
+        });
+        histList.sort(
+          (a, b) => (b.decidedAt || b.submittedAt || 0) - (a.decidedAt || a.submittedAt || 0)
+        );
+        setHistoryProfileRequests(histList);
+      } catch (err) {
+        console.error('Error loading profile_requests:', err);
+      } finally {
+        if (!isCancelled) {
+          setLoadingProfileRequests(false);
+        }
+      }
+    }
+
+    syncAndLoadProfileRequests();
+    return () => {
+      isCancelled = true;
+    };
+  }, [isHrUnlocked, hrUnlockedEmail, loading, loadError, profileRequestsReloadTrigger]);
 
   // All non-rejected registered users
   const allActiveUsers = useMemo(() => {
@@ -302,6 +403,7 @@ export function AdminHRDashboard() {
 
       if (isHrUnlocked && updatedPrivateData) {
         await saveHRPrivateEmployee(empId, updatedPrivateData, hrUnlockedEmail || actorName);
+        await syncProfileStatusMaskedSummaryByAdmin(empId, updatedPrivateData, updatedProfile);
       }
 
       setProfiles(nextProfiles);
@@ -590,6 +692,218 @@ export function AdminHRDashboard() {
         )}
       </div>
 
+      {/* BOX: คำขอแก้ไขข้อมูล (Profile Edit Requests Approval & History) */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-5 border border-amber-300/80 dark:border-amber-800/80 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-400">
+              <ShieldAlert className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                  คำขอแก้ไขข้อมูลพนักงาน
+                </h3>
+                {isHrUnlocked && pendingProfileRequests.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[11px] font-extrabold tabular-nums">
+                    รออนุมัติ {pendingProfileRequests.length}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                ตรวจสอบและอนุมัติคำขอแก้ไขข้อมูลจากหน้า "ข้อมูลของฉัน" ของพนักงาน (ต้องยืนยันตัวตนด้วยอีเมลแอดมินก่อน)
+              </p>
+            </div>
+          </div>
+
+          {isHrUnlocked && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 border border-slate-200 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setProfileRequestsTab('pending')}
+                  className={clsx(
+                    'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5',
+                    profileRequestsTab === 'pending'
+                      ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  )}
+                >
+                  <span>รออนุมัติ</span>
+                  <span className="px-1.5 py-0.2 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[10px] font-extrabold tabular-nums">
+                    {pendingProfileRequests.length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProfileRequestsTab('history')}
+                  className={clsx(
+                    'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5',
+                    profileRequestsTab === 'history'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  )}
+                >
+                  <span>ประวัติคำขอ</span>
+                  <span className="px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-extrabold tabular-nums">
+                    {historyProfileRequests.length}
+                  </span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  autoAppliedOnUnlockRef.current = false;
+                  setProfileRequestsReloadTrigger((c) => c + 1);
+                }}
+                className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 transition cursor-pointer"
+                title="โหลดรายการคำขอใหม่และซิงค์ข้อมูลครั้งแรก"
+              >
+                <RefreshCw className={clsx('w-3.5 h-3.5', loadingProfileRequests && 'animate-spin')} />
+                <span>รีเฟรชคำขอ</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {!isHrUnlocked ? (
+          <div className="py-5 px-3 text-center space-y-2.5 bg-amber-50/40 dark:bg-amber-950/20 rounded-xl border border-amber-200/70 dark:border-amber-900/50">
+            <Lock className="w-6 h-6 text-amber-500 mx-auto" />
+            <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+              กรุณายืนยันตัวตนแอดมินด้วยอีเมลก่อน เพื่อเปิดดูคำขอแก้ไขข้อมูลและนำข้อมูลครั้งแรกของพนักงานมาเติมอัตโนมัติ
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowUnlockModal(true)}
+              className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>ยืนยันตัวตนแอดมินเพื่อดูคำขอแก้ไขข้อมูล</span>
+            </button>
+          </div>
+        ) : loadingProfileRequests ? (
+          <div className="py-6 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+            <RefreshCw className="w-4 h-4 animate-spin text-amber-500" />
+            <span>กำลังโหลดรายการคำขอแก้ไขข้อมูล...</span>
+          </div>
+        ) : profileRequestsTab === 'pending' ? (
+          pendingProfileRequests.length === 0 ? (
+            <div className="py-6 text-center text-xs text-slate-400">
+              ไม่มีคำขอแก้ไขข้อมูลที่รออนุมัติในขณะนี้
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden">
+              {pendingProfileRequests.map((req) => {
+                const changedCount = Object.keys(req.data || {}).length;
+                return (
+                  <div
+                    key={req.id}
+                    className="p-3 sm:px-4 bg-white dark:bg-slate-900 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs transition"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-900 dark:text-white">
+                          {req.employeeName || req.employeeId}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-[10px] font-bold">
+                          รออนุมัติ ({changedCount} ช่อง)
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        ส่งเมื่อ:{' '}
+                        {req.submittedAt
+                          ? new Date(req.submittedAt).toLocaleString('th-TH')
+                          : '-'}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setInspectingRequest(req)}
+                      className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition cursor-pointer self-start sm:self-center"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>ดูตารางเปรียบเทียบ / อนุมัติ</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : historyProfileRequests.length === 0 ? (
+          <div className="py-6 text-center text-xs text-slate-400">
+            ยังไม่มีประวัติคำขอที่ดำเนินการแล้ว
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+            {historyProfileRequests.map((req) => {
+              const statusBadge =
+                req.status === 'approved'
+                  ? {
+                      text: 'อนุมัติแล้ว',
+                      cls: 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800',
+                    }
+                  : req.status === 'applied'
+                  ? {
+                      text: 'บันทึกครั้งแรกอัตโนมัติ',
+                      cls: 'bg-sky-100 dark:bg-sky-950/70 text-sky-800 dark:text-sky-300 border-sky-300 dark:border-sky-800',
+                    }
+                  : {
+                      text: 'ไม่อนุมัติ',
+                      cls: 'bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-800',
+                    };
+
+              return (
+                <div
+                  key={req.id}
+                  className="p-3 sm:px-4 bg-white dark:bg-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        {req.employeeName || req.employeeId}
+                      </span>
+                      <span
+                        className={clsx(
+                          'px-2 py-0.5 rounded-full text-[10px] font-bold border',
+                          statusBadge.cls
+                        )}
+                      >
+                        {statusBadge.text}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      ส่งเมื่อ:{' '}
+                      {req.submittedAt
+                        ? new Date(req.submittedAt).toLocaleString('th-TH')
+                        : '-'}{' '}
+                      {req.decidedAt &&
+                        `• ดำเนินการเมื่อ: ${new Date(req.decidedAt).toLocaleString('th-TH')}`}{' '}
+                      {req.decidedBy && `โดย ${req.decidedBy}`}
+                    </div>
+                    {req.status === 'rejected' && req.rejectReason && (
+                      <div className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                        เหตุผลที่ไม่อนุมัติ: {req.rejectReason}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setInspectingRequest(req)}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 transition cursor-pointer self-start sm:self-center"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>ดูรายละเอียด</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Main HR Table Card */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
         {loading ? (
@@ -773,6 +1087,37 @@ export function AdminHRDashboard() {
             setStatusNotice({
               type: 'success',
               message: `ยืนยันตัวตนสำเร็จ (${email}) สามารถเปิดดูและแก้ไขข้อมูลลับ HR รายบุคคลได้แล้ว`,
+            });
+            setTimeout(() => setStatusNotice(null), 4000);
+          }}
+        />
+      )}
+
+      {/* MODAL 4: Profile Request Comparison & Approval Modal */}
+      {inspectingRequest && isHrUnlocked && hrUnlockedEmail && (
+        <ProfileRequestComparisonModal
+          request={inspectingRequest}
+          currentProfiles={profiles}
+          adminEmail={hrUnlockedEmail}
+          onClose={() => setInspectingRequest(null)}
+          onApproved={(updatedProfiles) => {
+            setProfiles(updatedProfiles);
+            setInspectingRequest(null);
+            setProfileRequestsReloadTrigger((c) => c + 1);
+            window.dispatchEvent(new CustomEvent('hr-profile-requests-updated'));
+            setStatusNotice({
+              type: 'success',
+              message: `อนุมัติและอัปเดตข้อมูลของ "${inspectingRequest.employeeName}" เรียบร้อยแล้ว`,
+            });
+            setTimeout(() => setStatusNotice(null), 4000);
+          }}
+          onRejected={() => {
+            setInspectingRequest(null);
+            setProfileRequestsReloadTrigger((c) => c + 1);
+            window.dispatchEvent(new CustomEvent('hr-profile-requests-updated'));
+            setStatusNotice({
+              type: 'success',
+              message: `ปฏิเสธคำขอแก้ไขข้อมูลของ "${inspectingRequest.employeeName}" เรียบร้อยแล้ว`,
             });
             setTimeout(() => setStatusNotice(null), 4000);
           }}
@@ -1539,6 +1884,395 @@ function EmployeeHRProfileModal({
                       className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
                     />
                   </div>
+
+                  {/* Additional Employee Self-Service Fields (หมวด ก - ซ) */}
+                  <div className="pt-3 border-t border-amber-200/60 dark:border-amber-800/50 space-y-3">
+                    <div className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                      ข้อมูลส่วนบุคคลเพิ่มเติม (หมวด ก – ซ)
+                    </div>
+
+                    {/* ก. ข้อมูลส่วนตัว & ข. วันหมดอายุบัตร */}
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          คำนำหน้า
+                        </label>
+                        <select
+                          value={privateData.title || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, title: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        >
+                          <option value="">- ไม่ระบุ -</option>
+                          <option value="นาย">นาย</option>
+                          <option value="นาง">นาง</option>
+                          <option value="นางสาว">นางสาว</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          ชื่อจริง (ไทย)
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.firstNameTh || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, firstNameTh: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          นามสกุล (ไทย)
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.lastNameTh || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, lastNameTh: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          สถานภาพสมรส
+                        </label>
+                        <select
+                          value={privateData.maritalStatus || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, maritalStatus: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        >
+                          <option value="">- ไม่ระบุ -</option>
+                          <option value="โสด">โสด</option>
+                          <option value="สมรส">สมรส</option>
+                          <option value="หย่า">หย่า</option>
+                          <option value="หม้าย">หม้าย</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          ชื่อจริง (อังกฤษ)
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.firstNameEn || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, firstNameEn: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          นามสกุล (อังกฤษ)
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.lastNameEn || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, lastNameEn: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          วันเกิด
+                        </label>
+                        <input
+                          type="date"
+                          value={privateData.birthDate || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, birthDate: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          วันหมดอายุบัตรประชาชน
+                        </label>
+                        <input
+                          type="date"
+                          value={privateData.idCardExpiry || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, idCardExpiry: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* ค. ติดต่อ */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div className="sm:col-span-3">
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          ที่อยู่ปัจจุบัน
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={privateData.currentAddress || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, currentAddress: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          เบอร์มือถือ
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.phone || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, phone: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          อีเมล
+                        </label>
+                        <input
+                          type="email"
+                          value={privateData.email || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, email: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          LINE ID
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.lineId || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, lineId: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* ง. ผู้ติดต่อฉุกเฉิน */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          ชื่อผู้ติดต่อฉุกเฉิน
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.emergencyName || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, emergencyName: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          ความสัมพันธ์ (ฉุกเฉิน)
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.emergencyRelation || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({
+                              ...prev,
+                              emergencyRelation: e.target.value,
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          เบอร์โทรฉุกเฉิน
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.emergencyPhone || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({
+                              ...prev,
+                              emergencyPhone: e.target.value,
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* ฉ. ประกันสังคมเพิ่มเติม & ซ. การศึกษา */}
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          รพ. ประกันสังคมที่ต้องการ
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.ssoHospital || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, ssoHospital: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          เคยมีประกันสังคมมาก่อน
+                        </label>
+                        <select
+                          value={privateData.hadSsoBefore || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, hadSsoBefore: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        >
+                          <option value="">- ไม่ระบุ -</option>
+                          <option value="เคยมี">เคยมี</option>
+                          <option value="ไม่เคย">ไม่เคย</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          วุฒิการศึกษาสูงสุด
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.educationLevel || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({ ...prev, educationLevel: e.target.value }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          ชื่อสถานศึกษา
+                        </label>
+                        <input
+                          type="text"
+                          value={privateData.educationInstitute || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({
+                              ...prev,
+                              educationInstitute: e.target.value,
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* ช. ลดหย่อนภาษี */}
+                    <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          คู่สมรสมีรายได้หรือไม่
+                        </label>
+                        <select
+                          value={privateData.spouseHasIncome || ''}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({
+                              ...prev,
+                              spouseHasIncome: e.target.value,
+                            }))
+                          }
+                          className="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
+                        >
+                          <option value="">- ไม่ระบุ -</option>
+                          <option value="ไม่มีคู่สมรส">ไม่มีคู่สมรส</option>
+                          <option value="มีรายได้">มีรายได้</option>
+                          <option value="ไม่มีรายได้">ไม่มีรายได้</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          จำนวนบุตร (คน)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={privateData.childrenCount ?? 0}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({
+                              ...prev,
+                              childrenCount: Math.max(0, parseInt(e.target.value, 10) || 0),
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          อุปการะบิดามารดา (0-4)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={4}
+                          value={privateData.parentsSupportedCount ?? 0}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({
+                              ...prev,
+                              parentsSupportedCount: Math.min(
+                                4,
+                                Math.max(0, parseInt(e.target.value, 10) || 0)
+                              ),
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          ประกันชีวิต/ปี (บาท)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={privateData.lifeInsurancePerYear ?? 0}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({
+                              ...prev,
+                              lifeInsurancePerYear: Math.max(0, parseFloat(e.target.value) || 0),
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400 mb-0.5">
+                          ประกันสุขภาพ/ปี (บาท)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={privateData.healthInsurancePerYear ?? 0}
+                          onChange={(e) =>
+                            setPrivateData((prev) => ({
+                              ...prev,
+                              healthInsurancePerYear: Math.max(0, parseFloat(e.target.value) || 0),
+                            }))
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1854,3 +2588,285 @@ function HrAdminUnlockModal({
     </div>
   );
 }
+
+// ===============================================================
+// Sub-Modal 4: Profile Request 3-Column Comparison & Approval Modal
+// ===============================================================
+
+function ProfileRequestComparisonModal({
+  request,
+  currentProfiles,
+  adminEmail,
+  onClose,
+  onApproved,
+  onRejected,
+}: {
+  request: ProfileRequestDoc;
+  currentProfiles: Record<string, HRProfile>;
+  adminEmail: string;
+  onClose: () => void;
+  onApproved: (updatedProfiles: Record<string, HRProfile>) => void;
+  onRejected: () => void;
+}) {
+  const [loadingOld, setLoadingOld] = useState(true);
+  const [oldPrivate, setOldPrivate] = useState<HRPrivateData>(() =>
+    getDefaultHRPrivateData(request.employeeName)
+  );
+  const [showRejectBox, setShowRejectBox] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [processing, setProcessing] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const curProfile = useMemo(
+    () => currentProfiles[request.employeeId] || getDefaultHRProfile(request.employeeName),
+    [currentProfiles, request.employeeId, request.employeeName]
+  );
+
+  useEffect(() => {
+    let isCancelled = false;
+    async function loadCurrentPrivate() {
+      setLoadingOld(true);
+      try {
+        const priv = await fetchHRPrivateEmployee(request.employeeId, request.employeeName);
+        if (!isCancelled) {
+          setOldPrivate(priv);
+        }
+      } catch (err) {
+        console.error('Error loading employee private data for comparison:', err);
+      } finally {
+        if (!isCancelled) {
+          setLoadingOld(false);
+        }
+      }
+    }
+    loadCurrentPrivate();
+    return () => {
+      isCancelled = true;
+    };
+  }, [request.employeeId, request.employeeName]);
+
+  const rows = useMemo(() => {
+    const reqData = request.data || {};
+    return ALL_SELF_PROFILE_KEYS.map((key) => {
+      const label = SELF_PROFILE_FIELD_LABELS[key] || key;
+      const oldRaw =
+        key === 'nickname'
+          ? curProfile.nickname
+          : (oldPrivate as unknown as Record<string, unknown>)[key];
+      const newRaw = (reqData as unknown as Record<string, unknown>)[key];
+
+      const hasNewValue =
+        newRaw !== undefined && newRaw !== null && String(newRaw).trim() !== '';
+      const oldStr =
+        oldRaw !== undefined && oldRaw !== null && String(oldRaw).trim() !== ''
+          ? String(oldRaw).trim()
+          : '-';
+      const newStr = hasNewValue ? String(newRaw).trim() : oldStr;
+      const isChanged = hasNewValue && newStr !== oldStr;
+
+      return {
+        key,
+        label,
+        oldStr,
+        newStr: hasNewValue ? String(newRaw).trim() : '(ไม่เปลี่ยน)',
+        isChanged,
+        hasNewValue,
+      };
+    });
+  }, [request.data, curProfile.nickname, oldPrivate]);
+
+  const handleApprove = async () => {
+    if (processing) return;
+    setProcessing(true);
+    setErrorMsg(null);
+    try {
+      const res = await approveEmployeeProfileRequest({
+        request,
+        currentProfiles,
+        actorEmail: adminEmail,
+      });
+      onApproved(res.updatedProfiles);
+    } catch (err) {
+      console.error('Error approving profile request:', err);
+      setErrorMsg('เกิดข้อผิดพลาดในการอนุมัติคำขอ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (processing) return;
+    if (!rejectReason.trim()) {
+      setErrorMsg('กรุณากรอกเหตุผลที่ไม่อนุมัติคำขอแก้ไขข้อมูล');
+      return;
+    }
+    setProcessing(true);
+    setErrorMsg(null);
+    try {
+      await rejectEmployeeProfileRequest({
+        request,
+        rejectReason: rejectReason.trim(),
+        currentProfiles,
+        actorEmail: adminEmail,
+      });
+      onRejected();
+    } catch (err) {
+      console.error('Error rejecting profile request:', err);
+      setErrorMsg('เกิดข้อผิดพลาดในการปฏิเสธคำขอ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-3xl p-5 space-y-4 max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0">
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+              เปรียบเทียบคำขอแก้ไขข้อมูล: {request.employeeName}
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              ส่งเมื่อ:{' '}
+              {request.submittedAt ? new Date(request.submittedAt).toLocaleString('th-TH') : '-'} •
+              สถานะ: {request.status}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* 3-Column Comparison Table: ช่อง | ค่าเดิม | ค่าใหม่ */}
+        <div className="overflow-y-auto flex-1 border border-slate-200 dark:border-slate-800 rounded-xl">
+          {loadingOld ? (
+            <div className="py-10 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin text-indigo-500" />
+              <span>กำลังโหลดข้อมูลปัจจุบันของพนักงานเพื่อเปรียบเทียบ...</span>
+            </div>
+          ) : (
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-bold sticky top-0">
+                  <th className="px-3.5 py-2.5 text-left w-1/3">ช่องข้อมูล</th>
+                  <th className="px-3.5 py-2.5 text-left w-1/3">ค่าเดิม (ในระบบ HR)</th>
+                  <th className="px-3.5 py-2.5 text-left w-1/3">ค่าใหม่ (ที่พนักงานส่งมา)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {rows.map((r) => (
+                  <tr
+                    key={r.key}
+                    className={clsx(
+                      r.isChanged
+                        ? 'bg-amber-50/80 dark:bg-amber-950/30 font-semibold'
+                        : 'bg-white dark:bg-slate-900 opacity-65'
+                    )}
+                  >
+                    <td className="px-3.5 py-2.5 text-slate-800 dark:text-slate-200">
+                      <div className="flex items-center gap-1.5">
+                        <span>{r.label}</span>
+                        {r.isChanged && (
+                          <span className="px-1.5 py-0.2 rounded bg-amber-500 text-white text-[9px] font-extrabold">
+                            เปลี่ยน
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3.5 py-2.5 font-mono text-slate-600 dark:text-slate-400 break-all">
+                      {r.oldStr}
+                    </td>
+                    <td
+                      className={clsx(
+                        'px-3.5 py-2.5 font-mono break-all',
+                        r.isChanged
+                          ? 'text-emerald-700 dark:text-emerald-300 font-bold'
+                          : 'text-slate-400'
+                      )}
+                    >
+                      {r.newStr}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Reject Reason Input when Rejecting */}
+        {showRejectBox && request.status === 'pending' && (
+          <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 space-y-2 shrink-0">
+            <label className="block text-xs font-bold text-rose-800 dark:text-rose-300">
+              ระบุเหตุผลที่ไม่อนุมัติ (บังคับกรอก) <span className="text-rose-600">*</span>
+            </label>
+            <input
+              type="text"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="เช่น เลขบัญชีไม่ตรงกับชื่อพนักงาน หรือข้อมูลที่อยู่ไม่ครบถ้วน"
+              className="w-full px-3 py-2 rounded-xl border border-rose-300 dark:border-rose-700 bg-white dark:bg-slate-900 text-xs"
+            />
+          </div>
+        )}
+
+        {errorMsg && (
+          <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2 shrink-0">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        {/* Footer Actions */}
+        <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100 dark:border-slate-800 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+          >
+            ปิดหน้าต่าง
+          </button>
+
+          {request.status === 'pending' && (
+            <div className="flex items-center gap-2">
+              {!showRejectBox ? (
+                <button
+                  type="button"
+                  disabled={processing || loadingOld}
+                  onClick={() => setShowRejectBox(true)}
+                  className="px-4 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/70 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                >
+                  ไม่อนุมัติ
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={processing || loadingOld}
+                  onClick={handleReject}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm transition cursor-pointer disabled:opacity-50"
+                >
+                  {processing ? 'กำลังบันทึก...' : 'ยืนยันไม่อนุมัติ'}
+                </button>
+              )}
+
+              <button
+                type="button"
+                disabled={processing || loadingOld}
+                onClick={handleApprove}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-md transition cursor-pointer disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{processing ? 'กำลังอนุมัติ...' : 'อนุมัติและอัปเดตข้อมูล'}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+

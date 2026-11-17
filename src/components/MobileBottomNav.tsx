@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   ChevronRight,
   CalendarCheck,
-  Users
+  Users,
+  User
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -30,6 +31,7 @@ interface MobileBottomNavProps {
   pendingOTCount: number;
   pendingAdvanceCount: number;
   pendingTechCount: number;
+  pendingProfileReqCount?: number;
   onOpenOT: () => void;
   onOpenAdvance: () => void;
   onOpenShift?: () => void;
@@ -50,6 +52,7 @@ export function MobileBottomNav({
   pendingOTCount,
   pendingAdvanceCount,
   pendingTechCount,
+  pendingProfileReqCount = 0,
   onOpenOT,
   onOpenAdvance,
   onOpenShift,
@@ -149,6 +152,11 @@ export function MobileBottomNav({
                 isActive('/hr') && "bg-indigo-50 dark:bg-indigo-950/60"
               )}>
                 <Users className="w-5 h-5 shrink-0" />
+                {pendingProfileReqCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 text-white rounded-full text-[9px] font-extrabold flex items-center justify-center shadow-xs">
+                    {pendingProfileReqCount > 9 ? '9+' : pendingProfileReqCount}
+                  </span>
+                )}
               </div>
               <span className="text-[11px] font-medium tracking-tight mt-0.5">
                 HR
@@ -227,26 +235,37 @@ export function MobileBottomNav({
                 </div>
               </div>
 
-              {/* Work Status Toggle */}
-              <button
-                type="button"
-                onClick={() => {
-                  onClockToggle();
-                  setShowDrawer(false);
-                }}
-                className={clsx(
-                  "px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-2xs whitespace-nowrap",
-                  isOffWork
-                    ? "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300"
-                    : "bg-emerald-500 text-white shadow-emerald-500/20"
-                )}
-              >
-                <span className={clsx(
-                  "w-2 h-2 rounded-full shrink-0",
-                  isOffWork ? "bg-slate-400" : "bg-white animate-pulse"
-                )} />
-                <span>{isOffWork ? 'หยุด' : 'เข้างานอยู่'}</span>
-              </button>
+              {/* Work Status Toggle & My Profile Link */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Link
+                  to="/me"
+                  onClick={() => setShowDrawer(false)}
+                  className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1 transition cursor-pointer shadow-2xs whitespace-nowrap"
+                >
+                  <User className="w-3.5 h-3.5" />
+                  <span>ข้อมูลของฉัน</span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClockToggle();
+                    setShowDrawer(false);
+                  }}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-2xs whitespace-nowrap",
+                    isOffWork
+                      ? "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300"
+                      : "bg-emerald-500 text-white shadow-emerald-500/20"
+                  )}
+                >
+                  <span className={clsx(
+                    "w-2 h-2 rounded-full shrink-0",
+                    isOffWork ? "bg-slate-400" : "bg-white animate-pulse"
+                  )} />
+                  <span>{isOffWork ? 'หยุด' : 'เข้างานอยู่'}</span>
+                </button>
+              </div>
             </div>
 
             {/* Section Title */}

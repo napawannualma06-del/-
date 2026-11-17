@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import {
   inMemoryPersistence,
   setPersistence,
@@ -8,7 +8,15 @@ import {
   User as FirebaseAuthUser,
 } from 'firebase/auth';
 import { auth, db } from './firebase';
-import { HRPrivateData, HRProfile, HRProfilesDoc } from '../types';
+import {
+  EmployeeSelfSubmittedFields,
+  HRPrivateData,
+  HRProfile,
+  HRProfilesDoc,
+  ProfileMaskedSummary,
+  ProfileRequestDoc,
+  ProfileStatusDoc,
+} from '../types';
 
 export const DEFAULT_PROBATION_DAYS = 119;
 export const DEFAULT_SSO_RATE_PERCENT = 5;
@@ -275,6 +283,30 @@ export function getDefaultHRPrivateData(fallbackAccountName = ''): HRPrivateData
     ssoRatePercent: DEFAULT_SSO_RATE_PERCENT,
     ssoCapAmount: DEFAULT_SSO_CAP_AMOUNT,
     address: '',
+    title: '',
+    firstNameTh: '',
+    lastNameTh: '',
+    firstNameEn: '',
+    lastNameEn: '',
+    birthDate: '',
+    maritalStatus: '',
+    idCardExpiry: '',
+    currentAddress: '',
+    phone: '',
+    email: '',
+    lineId: '',
+    emergencyName: '',
+    emergencyRelation: '',
+    emergencyPhone: '',
+    ssoHospital: '',
+    hadSsoBefore: '',
+    spouseHasIncome: '',
+    childrenCount: 0,
+    parentsSupportedCount: 0,
+    lifeInsurancePerYear: 0,
+    healthInsurancePerYear: 0,
+    educationLevel: '',
+    educationInstitute: '',
   };
 }
 
@@ -308,6 +340,43 @@ export async function fetchHRPrivateEmployee(
             ? data.ssoCapAmount
             : DEFAULT_SSO_CAP_AMOUNT,
         address: typeof data.address === 'string' ? data.address : '',
+        title: typeof data.title === 'string' ? data.title : '',
+        firstNameTh: typeof data.firstNameTh === 'string' ? data.firstNameTh : '',
+        lastNameTh: typeof data.lastNameTh === 'string' ? data.lastNameTh : '',
+        firstNameEn: typeof data.firstNameEn === 'string' ? data.firstNameEn : '',
+        lastNameEn: typeof data.lastNameEn === 'string' ? data.lastNameEn : '',
+        birthDate: typeof data.birthDate === 'string' ? data.birthDate : '',
+        maritalStatus: typeof data.maritalStatus === 'string' ? data.maritalStatus : '',
+        idCardExpiry: typeof data.idCardExpiry === 'string' ? data.idCardExpiry : '',
+        currentAddress: typeof data.currentAddress === 'string' ? data.currentAddress : '',
+        phone: typeof data.phone === 'string' ? data.phone : '',
+        email: typeof data.email === 'string' ? data.email : '',
+        lineId: typeof data.lineId === 'string' ? data.lineId : '',
+        emergencyName: typeof data.emergencyName === 'string' ? data.emergencyName : '',
+        emergencyRelation: typeof data.emergencyRelation === 'string' ? data.emergencyRelation : '',
+        emergencyPhone: typeof data.emergencyPhone === 'string' ? data.emergencyPhone : '',
+        ssoHospital: typeof data.ssoHospital === 'string' ? data.ssoHospital : '',
+        hadSsoBefore: typeof data.hadSsoBefore === 'string' ? data.hadSsoBefore : '',
+        spouseHasIncome: typeof data.spouseHasIncome === 'string' ? data.spouseHasIncome : '',
+        childrenCount:
+          typeof data.childrenCount === 'number'
+            ? data.childrenCount
+            : Number(data.childrenCount) || 0,
+        parentsSupportedCount:
+          typeof data.parentsSupportedCount === 'number'
+            ? data.parentsSupportedCount
+            : Number(data.parentsSupportedCount) || 0,
+        lifeInsurancePerYear:
+          typeof data.lifeInsurancePerYear === 'number'
+            ? data.lifeInsurancePerYear
+            : Number(data.lifeInsurancePerYear) || 0,
+        healthInsurancePerYear:
+          typeof data.healthInsurancePerYear === 'number'
+            ? data.healthInsurancePerYear
+            : Number(data.healthInsurancePerYear) || 0,
+        educationLevel: typeof data.educationLevel === 'string' ? data.educationLevel : '',
+        educationInstitute:
+          typeof data.educationInstitute === 'string' ? data.educationInstitute : '',
         updatedAt: data.updatedAt,
         updatedBy: data.updatedBy,
       };
@@ -344,6 +413,33 @@ export async function saveHRPrivateEmployee(
         ? Number(data.ssoCapAmount)
         : DEFAULT_SSO_CAP_AMOUNT,
     address: (data.address || '').trim(),
+    title: (data.title || '').trim(),
+    firstNameTh: (data.firstNameTh || '').trim(),
+    lastNameTh: (data.lastNameTh || '').trim(),
+    firstNameEn: (data.firstNameEn || '').trim(),
+    lastNameEn: (data.lastNameEn || '').trim(),
+    birthDate: (data.birthDate || '').trim(),
+    maritalStatus: (data.maritalStatus || '').trim(),
+    idCardExpiry: (data.idCardExpiry || '').trim(),
+    currentAddress: (data.currentAddress || '').trim(),
+    phone: (data.phone || '').trim(),
+    email: (data.email || '').trim(),
+    lineId: (data.lineId || '').trim(),
+    emergencyName: (data.emergencyName || '').trim(),
+    emergencyRelation: (data.emergencyRelation || '').trim(),
+    emergencyPhone: (data.emergencyPhone || '').trim(),
+    ssoHospital: (data.ssoHospital || '').trim(),
+    hadSsoBefore: (data.hadSsoBefore || '').trim(),
+    spouseHasIncome: (data.spouseHasIncome || '').trim(),
+    childrenCount: Math.max(0, Math.floor(Number(data.childrenCount) || 0)),
+    parentsSupportedCount: Math.min(
+      4,
+      Math.max(0, Math.floor(Number(data.parentsSupportedCount) || 0))
+    ),
+    lifeInsurancePerYear: Math.max(0, Number(data.lifeInsurancePerYear) || 0),
+    healthInsurancePerYear: Math.max(0, Number(data.healthInsurancePerYear) || 0),
+    educationLevel: (data.educationLevel || '').trim(),
+    educationInstitute: (data.educationInstitute || '').trim(),
     updatedAt: Date.now(),
     updatedBy,
   };
@@ -431,4 +527,657 @@ export async function lockHrAdminEmailSession(): Promise<void> {
     // ignore if anonymous auth is disabled
   }
 }
+
+// ===============================================================
+// Employee Self-Service Profile Requests & Masked Status Operations
+// ===============================================================
+
+/**
+ * ปิดบังเบอร์โทรศัพท์ให้เห็นเฉพาะ 4 ตัวท้าย เช่น xxx-xxx-1234
+ */
+export function maskPhoneLast4(rawPhone?: string): string {
+  const trimmed = (rawPhone || '').trim();
+  if (!trimmed) return '-';
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length < 4) return 'xxxx';
+  const last4 = digits.slice(-4);
+  return `xxx-xxx-${last4}`;
+}
+
+/**
+ * ตรวจสูตรเลขบัตรประชาชน 13 หลักของไทย
+ */
+export function validateThaiIdCard13Digits(raw?: string): boolean {
+  if (!raw) return false;
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length !== 13) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(digits.charAt(i), 10) * (13 - i);
+  }
+  const checkDigit = (11 - (sum % 11)) % 10;
+  return checkDigit === parseInt(digits.charAt(12), 10);
+}
+
+/**
+ * สร้างข้อมูลแบบปิดบัง (maskedSummary) สำหรับเก็บใน profile_status/{employeeId}
+ * ห้ามเก็บข้อมูลลับแบบเต็มลงใน profile_status เด็ดขาด
+ */
+export function buildMaskedSummaryFromHRPrivateAndProfile(
+  priv: Partial<HRPrivateData>,
+  profile?: Partial<HRProfile>
+): ProfileMaskedSummary {
+  const hasAddress = Boolean(priv.address && String(priv.address).trim());
+  const hasCurrentAddress = Boolean(priv.currentAddress && String(priv.currentAddress).trim());
+  const hasEmergency = Boolean(
+    (priv.emergencyName && String(priv.emergencyName).trim()) ||
+      (priv.emergencyPhone && String(priv.emergencyPhone).trim())
+  );
+  const hasSsoSection = Boolean(
+    (priv.ssoHospital && String(priv.ssoHospital).trim()) ||
+      (priv.hadSsoBefore && String(priv.hadSsoBefore).trim())
+  );
+  const hasTaxSection = Boolean(
+    (priv.spouseHasIncome && String(priv.spouseHasIncome).trim()) ||
+      Number(priv.childrenCount) > 0 ||
+      Number(priv.parentsSupportedCount) > 0 ||
+      Number(priv.lifeInsurancePerYear) > 0 ||
+      Number(priv.healthInsurancePerYear) > 0
+  );
+  const hasEducation = Boolean(
+    (priv.educationLevel && String(priv.educationLevel).trim()) ||
+      (priv.educationInstitute && String(priv.educationInstitute).trim())
+  );
+
+  return {
+    title: (priv.title || '').trim(),
+    firstNameTh: (priv.firstNameTh || '').trim(),
+    lastNameTh: (priv.lastNameTh || '').trim(),
+    firstNameEn: (priv.firstNameEn || '').trim(),
+    lastNameEn: (priv.lastNameEn || '').trim(),
+    nickname: (profile?.nickname || '').trim(),
+    maritalStatus: (priv.maritalStatus || '').trim(),
+    birthDateStatus: priv.birthDate && String(priv.birthDate).trim() ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    ssoNumberMasked:
+      priv.ssoNumber && String(priv.ssoNumber).trim()
+        ? maskSensitiveNumber(String(priv.ssoNumber))
+        : '-',
+    idCardExpiryStatus:
+      priv.idCardExpiry && String(priv.idCardExpiry).trim() ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    phoneMasked:
+      priv.phone && String(priv.phone).trim() ? maskPhoneLast4(String(priv.phone)) : '-',
+    emailStatus: priv.email && String(priv.email).trim() ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    lineIdStatus: priv.lineId && String(priv.lineId).trim() ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    bankName: (priv.bankName || '').trim(),
+    accountName: (priv.accountName || '').trim(),
+    accountNumberMasked:
+      priv.accountNumber && String(priv.accountNumber).trim()
+        ? maskSensitiveNumber(String(priv.accountNumber))
+        : '-',
+    addressStatus: hasAddress ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    currentAddressStatus: hasCurrentAddress ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    emergencyStatus: hasEmergency ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    ssoSectionStatus: hasSsoSection ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    taxDeductionStatus: hasTaxSection ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+    educationStatus: hasEducation ? 'กรอกแล้ว' : 'ยังไม่กรอก',
+  };
+}
+
+/**
+ * สร้าง maskedSummary จากข้อมูลที่พนักงานส่งครั้งแรก (หรือผสานกับ maskedSummary เดิม)
+ */
+export function buildMaskedSummaryFromSubmittedFields(
+  submitted: Partial<EmployeeSelfSubmittedFields>,
+  existingSummary?: ProfileMaskedSummary
+): ProfileMaskedSummary {
+  const prev = existingSummary || {};
+
+  const pickStr = (newVal: string | undefined, oldVal: string | undefined) =>
+    newVal !== undefined && String(newVal).trim() !== '' ? String(newVal).trim() : oldVal || '';
+
+  const hasNewTax =
+    (submitted.spouseHasIncome && submitted.spouseHasIncome.trim() !== '') ||
+    (submitted.childrenCount !== undefined && Number(submitted.childrenCount) >= 0) ||
+    (submitted.parentsSupportedCount !== undefined && Number(submitted.parentsSupportedCount) >= 0) ||
+    (submitted.lifeInsurancePerYear !== undefined && Number(submitted.lifeInsurancePerYear) >= 0) ||
+    (submitted.healthInsurancePerYear !== undefined && Number(submitted.healthInsurancePerYear) >= 0);
+
+  return {
+    title: pickStr(submitted.title, prev.title),
+    firstNameTh: pickStr(submitted.firstNameTh, prev.firstNameTh),
+    lastNameTh: pickStr(submitted.lastNameTh, prev.lastNameTh),
+    firstNameEn: pickStr(submitted.firstNameEn, prev.firstNameEn),
+    lastNameEn: pickStr(submitted.lastNameEn, prev.lastNameEn),
+    nickname: pickStr(submitted.nickname, prev.nickname),
+    maritalStatus: pickStr(submitted.maritalStatus, prev.maritalStatus),
+    birthDateStatus:
+      submitted.birthDate && submitted.birthDate.trim()
+        ? 'กรอกแล้ว'
+        : prev.birthDateStatus || 'ยังไม่กรอก',
+    ssoNumberMasked:
+      submitted.ssoNumber && submitted.ssoNumber.trim()
+        ? maskSensitiveNumber(submitted.ssoNumber)
+        : prev.ssoNumberMasked || '-',
+    idCardExpiryStatus:
+      submitted.idCardExpiry && submitted.idCardExpiry.trim()
+        ? 'กรอกแล้ว'
+        : prev.idCardExpiryStatus || 'ยังไม่กรอก',
+    phoneMasked:
+      submitted.phone && submitted.phone.trim()
+        ? maskPhoneLast4(submitted.phone)
+        : prev.phoneMasked || '-',
+    emailStatus:
+      submitted.email && submitted.email.trim() ? 'กรอกแล้ว' : prev.emailStatus || 'ยังไม่กรอก',
+    lineIdStatus:
+      submitted.lineId && submitted.lineId.trim() ? 'กรอกแล้ว' : prev.lineIdStatus || 'ยังไม่กรอก',
+    bankName: pickStr(submitted.bankName, prev.bankName),
+    accountName: pickStr(submitted.accountName, prev.accountName),
+    accountNumberMasked:
+      submitted.accountNumber && submitted.accountNumber.trim()
+        ? maskSensitiveNumber(submitted.accountNumber)
+        : prev.accountNumberMasked || '-',
+    addressStatus:
+      submitted.address && submitted.address.trim()
+        ? 'กรอกแล้ว'
+        : prev.addressStatus || 'ยังไม่กรอก',
+    currentAddressStatus:
+      submitted.currentAddress && submitted.currentAddress.trim()
+        ? 'กรอกแล้ว'
+        : prev.currentAddressStatus || 'ยังไม่กรอก',
+    emergencyStatus:
+      (submitted.emergencyName && submitted.emergencyName.trim()) ||
+      (submitted.emergencyPhone && submitted.emergencyPhone.trim())
+        ? 'กรอกแล้ว'
+        : prev.emergencyStatus || 'ยังไม่กรอก',
+    ssoSectionStatus:
+      (submitted.ssoHospital && submitted.ssoHospital.trim()) ||
+      (submitted.hadSsoBefore && submitted.hadSsoBefore.trim())
+        ? 'กรอกแล้ว'
+        : prev.ssoSectionStatus || 'ยังไม่กรอก',
+    taxDeductionStatus: hasNewTax ? 'กรอกแล้ว' : prev.taxDeductionStatus || 'ยังไม่กรอก',
+    educationStatus:
+      (submitted.educationLevel && submitted.educationLevel.trim()) ||
+      (submitted.educationInstitute && submitted.educationInstitute.trim())
+        ? 'กรอกแล้ว'
+        : prev.educationStatus || 'ยังไม่กรอก',
+  };
+}
+
+/**
+ * อ่าน profile_status/{employeeId} ด้วย getDoc ครั้งเดียว
+ * พนักงานเรียกได้ (ไม่อ่าน hr_private หรือ profile_requests)
+ */
+export async function fetchEmployeeProfileStatus(
+  employeeId: string
+): Promise<ProfileStatusDoc | null> {
+  const snap = await getDoc(doc(db, 'profile_status', employeeId));
+  if (!snap.exists()) return null;
+  const data = snap.data() as ProfileStatusDoc;
+  return {
+    ...data,
+    employeeId,
+  };
+}
+
+/**
+ * นับจำนวนคำขอแก้ไขข้อมูลที่รออนุมัติ (อ่านจาก profile_status ที่ lastStatus == 'pending')
+ */
+export async function fetchPendingProfileRequestsCount(): Promise<number> {
+  try {
+    const q = query(collection(db, 'profile_status'), where('lastStatus', '==', 'pending'));
+    const snap = await getDocs(q);
+    return snap.size;
+  } catch (err) {
+    console.warn('Error fetching pending profile_status count:', err);
+    return 0;
+  }
+}
+
+/**
+ * พนักงานส่งข้อมูลตัวเอง (ครั้งแรก 'first_time' หรือ ขอแก้ไข 'edit')
+ * สร้างเอกสารใน profile_requests และอัปเดต profile_status/{employeeId}
+ */
+export async function submitEmployeeProfileRequest(params: {
+  employeeId: string;
+  employeeName: string;
+  isFirstTime: boolean;
+  data: Partial<EmployeeSelfSubmittedFields>;
+  existingStatus: ProfileStatusDoc | null;
+}): Promise<ProfileStatusDoc> {
+  const { employeeId, employeeName, isFirstTime, data, existingStatus } = params;
+  const now = Date.now();
+
+  const reqRef = doc(collection(db, 'profile_requests'));
+  const reqType = isFirstTime ? 'first_time' : 'edit';
+  const reqStatus = isFirstTime ? 'first_time' : 'pending';
+
+  const requestPayload: ProfileRequestDoc = {
+    id: reqRef.id,
+    employeeId,
+    employeeName,
+    type: reqType,
+    status: reqStatus,
+    data,
+    submittedAt: now,
+    decidedAt: null,
+    decidedBy: null,
+    rejectReason: '',
+  };
+
+  await setDoc(reqRef, requestPayload);
+
+  // สำหรับครั้งแรก: พนักงานเห็น "บันทึกแล้ว" ทันที และเห็น maskedSummary ของสิ่งที่กรอกทันที
+  // สำหรับครั้งที่ 2 ขึ้นไป ('edit'): สถานะ 'pending' รอแอดมินอนุมัติ (คง maskedSummary เดิมไว้จนกว่าแอดมินจะอนุมัติ)
+  const nextMaskedSummary = isFirstTime
+    ? buildMaskedSummaryFromSubmittedFields(data, existingStatus?.maskedSummary)
+    : existingStatus?.maskedSummary || buildMaskedSummaryFromSubmittedFields(data);
+
+  const statusPayload: ProfileStatusDoc = {
+    employeeId,
+    hasSubmittedFirstTime: true,
+    pendingRequestId: isFirstTime ? null : reqRef.id,
+    lastStatus: isFirstTime ? 'applied' : 'pending',
+    rejectReason: '',
+    submittedAt: now,
+    decidedAt: isFirstTime ? now : null,
+    maskedSummary: nextMaskedSummary,
+  };
+
+  await setDoc(doc(db, 'profile_status', employeeId), statusPayload);
+  return statusPayload;
+}
+
+export const SELF_PROFILE_FIELD_LABELS: Record<keyof EmployeeSelfSubmittedFields, string> = {
+  title: 'คำนำหน้า',
+  firstNameTh: 'ชื่อจริง (ไทย)',
+  lastNameTh: 'นามสกุล (ไทย)',
+  firstNameEn: 'ชื่อจริง (อังกฤษ)',
+  lastNameEn: 'นามสกุล (อังกฤษ)',
+  nickname: 'ชื่อเล่น',
+  birthDate: 'วันเกิด',
+  maritalStatus: 'สถานภาพสมรส',
+  ssoNumber: 'เลขบัตรประชาชน (13 หลัก)',
+  idCardExpiry: 'วันหมดอายุบัตรประชาชน',
+  address: 'ที่อยู่ตามบัตรประชาชน',
+  currentAddress: 'ที่อยู่ปัจจุบัน',
+  phone: 'เบอร์โทรศัพท์',
+  email: 'อีเมล',
+  lineId: 'LINE ID',
+  emergencyName: 'ชื่อผู้ติดต่อฉุกเฉิน',
+  emergencyRelation: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน',
+  emergencyPhone: 'เบอร์โทรผู้ติดต่อฉุกเฉิน',
+  bankName: 'ธนาคารรับเงินเดือน',
+  accountNumber: 'เลขที่บัญชีธนาคาร',
+  accountName: 'ชื่อบัญชีธนาคาร',
+  ssoHospital: 'โรงพยาบาลประกันสังคม',
+  hadSsoBefore: 'ประวัติการมีประกันสังคม',
+  spouseHasIncome: 'สถานะรายได้คู่สมรส (ลดหย่อนภาษี)',
+  childrenCount: 'จำนวนบุตร (ลดหย่อนภาษี)',
+  parentsSupportedCount: 'จำนวนบิดามารดาที่อุปการะ (0-4)',
+  lifeInsurancePerYear: 'เบี้ยประกันชีวิตต่อปี (บาท)',
+  healthInsurancePerYear: 'เบี้ยประกันสุขภาพต่อปี (บาท)',
+  educationLevel: 'ระดับการศึกษาสูงสุด',
+  educationInstitute: 'สถาบันการศึกษา',
+};
+
+export const ALL_SELF_PROFILE_KEYS: Array<keyof EmployeeSelfSubmittedFields> = [
+  'title',
+  'firstNameTh',
+  'lastNameTh',
+  'firstNameEn',
+  'lastNameEn',
+  'nickname',
+  'birthDate',
+  'maritalStatus',
+  'ssoNumber',
+  'idCardExpiry',
+  'address',
+  'currentAddress',
+  'phone',
+  'email',
+  'lineId',
+  'emergencyName',
+  'emergencyRelation',
+  'emergencyPhone',
+  'bankName',
+  'accountNumber',
+  'accountName',
+  'ssoHospital',
+  'hadSsoBefore',
+  'spouseHasIncome',
+  'childrenCount',
+  'parentsSupportedCount',
+  'lifeInsurancePerYear',
+  'healthInsurancePerYear',
+  'educationLevel',
+  'educationInstitute',
+];
+
+function isFieldEmpty(val: unknown): boolean {
+  if (val === undefined || val === null) return true;
+  if (typeof val === 'string') return val.trim() === '';
+  if (typeof val === 'number') return val === 0;
+  return false;
+}
+
+function areFieldValuesEqual(key: keyof EmployeeSelfSubmittedFields, a: unknown, b: unknown): boolean {
+  if (
+    key === 'childrenCount' ||
+    key === 'parentsSupportedCount' ||
+    key === 'lifeInsurancePerYear' ||
+    key === 'healthInsurancePerYear'
+  ) {
+    return (Number(a) || 0) === (Number(b) || 0);
+  }
+  const cleanA = String(a ?? '').trim();
+  const cleanB = String(b ?? '').trim();
+  if (key === 'ssoNumber' || key === 'accountNumber' || key === 'phone' || key === 'emergencyPhone') {
+    return cleanA.replace(/\D/g, '') === cleanB.replace(/\D/g, '');
+  }
+  return cleanA === cleanB;
+}
+
+/**
+ * นำข้อมูลครั้งแรก (status == 'first_time') ไปใช้อัตโนมัติเมื่อแอดมินยืนยันตัวตนด้วยอีเมลในหน้า HR
+ * กฎสำคัญ: เติมเฉพาะช่องที่ใน hr_private (และ hr_profiles.nickname) ยังว่างอยู่
+ * ถ้าช่องไหนมีค่าเดิมอยู่แล้วและพนักงานกรอกไม่ตรงกัน ห้ามทับ ให้แยกช่องนั้นออกมาเป็นคำขอ 'pending'
+ */
+export async function autoApplyFirstTimeProfileRequests(
+  currentProfiles: Record<string, HRProfile>,
+  actorEmail: string
+): Promise<{
+  appliedCount: number;
+  conflictCreatedCount: number;
+  updatedProfiles: Record<string, HRProfile>;
+}> {
+  const q = query(collection(db, 'profile_requests'), where('status', '==', 'first_time'));
+  const snap = await getDocs(q);
+  if (snap.empty) {
+    return {
+      appliedCount: 0,
+      conflictCreatedCount: 0,
+      updatedProfiles: currentProfiles,
+    };
+  }
+
+  let appliedCount = 0;
+  let conflictCreatedCount = 0;
+  const nextProfiles: Record<string, HRProfile> = { ...currentProfiles };
+  let profilesChanged = false;
+
+  for (const docSnap of snap.docs) {
+    const req = { ...(docSnap.data() as ProfileRequestDoc), id: docSnap.id };
+    const empId = req.employeeId;
+    const empProfile = nextProfiles[empId] || getDefaultHRProfile(req.employeeName);
+    const priv = await fetchHRPrivateEmployee(empId, empProfile.fullName || req.employeeName);
+
+    const nextPriv: HRPrivateData = { ...priv };
+    const nextEmpProfile: HRProfile = { ...empProfile };
+    const conflicts: Partial<EmployeeSelfSubmittedFields> = {};
+    let hasConflicts = false;
+
+    const submittedData = req.data || {};
+
+    for (const key of ALL_SELF_PROFILE_KEYS) {
+      if (!(key in submittedData)) continue;
+      const submittedVal = submittedData[key];
+      if (submittedVal === undefined || submittedVal === null) continue;
+      if (typeof submittedVal === 'string' && submittedVal.trim() === '') continue;
+
+      if (key === 'nickname') {
+        const curNick = (nextEmpProfile.nickname || '').trim();
+        const newNick = String(submittedVal).trim();
+        if (!curNick) {
+          nextEmpProfile.nickname = newNick;
+          profilesChanged = true;
+        } else if (curNick !== newNick) {
+          conflicts.nickname = newNick;
+          hasConflicts = true;
+        }
+        continue;
+      }
+
+      const curVal = nextPriv[key as keyof HRPrivateData];
+      if (isFieldEmpty(curVal)) {
+        (nextPriv as any)[key] = submittedVal;
+      } else if (!areFieldValuesEqual(key, curVal, submittedVal)) {
+        (conflicts as any)[key] = submittedVal;
+        hasConflicts = true;
+      }
+    }
+
+    // ถ้า fullName ใน hr_profiles ยังว่างหรือเป็นค่าเริ่มต้น และมีการเติมชื่อ-นามสกุลไทย
+    const combinedThName = [nextPriv.firstNameTh, nextPriv.lastNameTh]
+      .map((s) => (s || '').trim())
+      .filter(Boolean)
+      .join(' ');
+    if (combinedThName && !nextEmpProfile.fullName) {
+      nextEmpProfile.fullName = combinedThName;
+      profilesChanged = true;
+    }
+
+    nextProfiles[empId] = nextEmpProfile;
+
+    // 1. บันทึกข้อมูลที่เติมลง hr_private/{empId}
+    await saveHRPrivateEmployee(empId, nextPriv, actorEmail);
+
+    const now = Date.now();
+    // 2. เปลี่ยนสถานะคำขอ first_time เป็น 'applied'
+    await setDoc(
+      doc(db, 'profile_requests', docSnap.id),
+      {
+        status: 'applied',
+        decidedAt: now,
+        decidedBy: actorEmail,
+      },
+      { merge: true }
+    );
+    appliedCount++;
+
+    // 3. หากมีช่องที่ขัดแย้งกัน ให้สร้างคำขอ 'pending' แยกออกมาให้แอดมินกดอนุมัติเอง
+    let pendingReqId: string | null = null;
+    if (hasConflicts) {
+      const conflictRef = doc(collection(db, 'profile_requests'));
+      const conflictDoc: ProfileRequestDoc = {
+        id: conflictRef.id,
+        employeeId: empId,
+        employeeName: nextEmpProfile.fullName || req.employeeName,
+        type: 'edit',
+        status: 'pending',
+        data: conflicts,
+        submittedAt: now,
+        decidedAt: null,
+        decidedBy: null,
+        rejectReason: '',
+      };
+      await setDoc(conflictRef, conflictDoc);
+      pendingReqId = conflictRef.id;
+      conflictCreatedCount++;
+    }
+
+    // 4. อัปเดต profile_status/{empId} พร้อม maskedSummary ที่ตรงกับข้อมูลจริงล่าสุด
+    const latestMasked = buildMaskedSummaryFromHRPrivateAndProfile(nextPriv, nextEmpProfile);
+    const nextStatusDoc: ProfileStatusDoc = {
+      employeeId: empId,
+      hasSubmittedFirstTime: true,
+      pendingRequestId: pendingReqId,
+      lastStatus: hasConflicts ? 'pending' : 'applied',
+      rejectReason: '',
+      submittedAt: req.submittedAt || now,
+      decidedAt: hasConflicts ? null : now,
+      maskedSummary: latestMasked,
+    };
+    await setDoc(doc(db, 'profile_status', empId), nextStatusDoc);
+  }
+
+  if (profilesChanged) {
+    await saveHRProfiles(nextProfiles, actorEmail);
+  }
+
+  return {
+    appliedCount,
+    conflictCreatedCount,
+    updatedProfiles: nextProfiles,
+  };
+}
+
+/**
+ * แอดมินกด "อนุมัติ" คำขอแก้ไขข้อมูลพนักงาน
+ */
+export async function approveEmployeeProfileRequest(params: {
+  request: ProfileRequestDoc;
+  currentProfiles: Record<string, HRProfile>;
+  actorEmail: string;
+}): Promise<{
+  updatedProfiles: Record<string, HRProfile>;
+}> {
+  const { request, currentProfiles, actorEmail } = params;
+  if (!request.id) throw new Error('Missing request ID');
+
+  const empId = request.employeeId;
+  const nextProfiles: Record<string, HRProfile> = { ...currentProfiles };
+  const empProfile: HRProfile = {
+    ...(nextProfiles[empId] || getDefaultHRProfile(request.employeeName)),
+  };
+  const priv = await fetchHRPrivateEmployee(empId, empProfile.fullName || request.employeeName);
+  const nextPriv: HRPrivateData = { ...priv };
+
+  let profileChanged = false;
+  const submittedData = request.data || {};
+
+  for (const key of ALL_SELF_PROFILE_KEYS) {
+    if (!(key in submittedData)) continue;
+    const newVal = submittedData[key];
+    if (newVal === undefined || newVal === null) continue;
+    if (typeof newVal === 'string' && newVal.trim() === '') continue;
+
+    if (key === 'nickname') {
+      empProfile.nickname = String(newVal).trim();
+      profileChanged = true;
+    } else {
+      (nextPriv as any)[key] = newVal;
+    }
+  }
+
+  // ถ้ามีการเปลี่ยนชื่อจริงหรือนามสกุลไทย ให้อัปเดต fullName ใน hr_profiles ด้วย
+  if ('firstNameTh' in submittedData || 'lastNameTh' in submittedData) {
+    const fullTh = [nextPriv.firstNameTh, nextPriv.lastNameTh]
+      .map((s) => (s || '').trim())
+      .filter(Boolean)
+      .join(' ');
+    if (fullTh) {
+      empProfile.fullName = fullTh;
+      profileChanged = true;
+    }
+  }
+
+  nextProfiles[empId] = empProfile;
+
+  await saveHRPrivateEmployee(empId, nextPriv, actorEmail);
+  if (profileChanged) {
+    await saveHRProfiles(nextProfiles, actorEmail);
+  }
+
+  const now = Date.now();
+  await setDoc(
+    doc(db, 'profile_requests', request.id),
+    {
+      status: 'approved',
+      decidedAt: now,
+      decidedBy: actorEmail,
+      rejectReason: '',
+    },
+    { merge: true }
+  );
+
+  const latestMasked = buildMaskedSummaryFromHRPrivateAndProfile(nextPriv, empProfile);
+  const statusPayload: ProfileStatusDoc = {
+    employeeId: empId,
+    hasSubmittedFirstTime: true,
+    pendingRequestId: null,
+    lastStatus: 'approved',
+    rejectReason: '',
+    submittedAt: request.submittedAt || now,
+    decidedAt: now,
+    maskedSummary: latestMasked,
+  };
+  await setDoc(doc(db, 'profile_status', empId), statusPayload);
+
+  return { updatedProfiles: nextProfiles };
+}
+
+/**
+ * แอดมินกด "ไม่อนุมัติ" คำขอแก้ไขข้อมูลพนักงาน (ต้องระบุเหตุผล)
+ */
+export async function rejectEmployeeProfileRequest(params: {
+  request: ProfileRequestDoc;
+  rejectReason: string;
+  currentProfiles: Record<string, HRProfile>;
+  actorEmail: string;
+}): Promise<void> {
+  const { request, rejectReason, currentProfiles, actorEmail } = params;
+  if (!request.id) throw new Error('Missing request ID');
+  const trimmedReason = rejectReason.trim();
+  if (!trimmedReason) throw new Error('กรุณาระบุเหตุผลที่ไม่อนุมัติ');
+
+  const empId = request.employeeId;
+  const empProfile = currentProfiles[empId] || getDefaultHRProfile(request.employeeName);
+  const priv = await fetchHRPrivateEmployee(empId, empProfile.fullName || request.employeeName);
+
+  const now = Date.now();
+  await setDoc(
+    doc(db, 'profile_requests', request.id),
+    {
+      status: 'rejected',
+      rejectReason: trimmedReason,
+      decidedAt: now,
+      decidedBy: actorEmail,
+    },
+    { merge: true }
+  );
+
+  const latestMasked = buildMaskedSummaryFromHRPrivateAndProfile(priv, empProfile);
+  const statusPayload: ProfileStatusDoc = {
+    employeeId: empId,
+    hasSubmittedFirstTime: true,
+    pendingRequestId: null,
+    lastStatus: 'rejected',
+    rejectReason: trimmedReason,
+    submittedAt: request.submittedAt || now,
+    decidedAt: now,
+    maskedSummary: latestMasked,
+  };
+  await setDoc(doc(db, 'profile_status', empId), statusPayload);
+}
+
+/**
+ * ซิงก์ profile_status/{employeeId} ให้ตรงกับข้อมูลล่าสุดเมื่อแอดมินแก้ไขข้อมูลในหน้า HR โดยตรง
+ */
+export async function syncProfileStatusMaskedSummaryByAdmin(
+  employeeId: string,
+  priv: HRPrivateData,
+  profile: HRProfile
+): Promise<void> {
+  try {
+    const existingSnap = await getDoc(doc(db, 'profile_status', employeeId));
+    const existing = existingSnap.exists() ? (existingSnap.data() as ProfileStatusDoc) : null;
+    const latestMasked = buildMaskedSummaryFromHRPrivateAndProfile(priv, profile);
+    const now = Date.now();
+
+    const payload: ProfileStatusDoc = {
+      employeeId,
+      hasSubmittedFirstTime: existing?.hasSubmittedFirstTime ?? true,
+      pendingRequestId: existing?.pendingRequestId ?? null,
+      lastStatus: existing?.lastStatus ?? 'applied',
+      rejectReason: existing?.rejectReason ?? '',
+      submittedAt: existing?.submittedAt ?? now,
+      decidedAt: existing?.decidedAt ?? now,
+      maskedSummary: latestMasked,
+    };
+    await setDoc(doc(db, 'profile_status', employeeId), payload, { merge: true });
+  } catch (err) {
+    console.warn('Could not sync profile_status maskedSummary:', err);
+  }
+}
+
 

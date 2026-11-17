@@ -33,7 +33,8 @@ import {
   Building2,
   KeyRound,
   CalendarCheck,
-  Users
+  Users,
+  User
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
@@ -48,6 +49,7 @@ import { isUserAdmin } from '../store/useStore';
 import { useInactivityTracker } from '../hooks/useInactivityTracker';
 import { InactivityWarningModal } from './InactivityWarningModal';
 import { QuotaExceededBanner } from './QuotaExceededBanner';
+import { fetchPendingProfileRequestsCount } from '../lib/hrService';
 
 interface TechStatusToast {
   id: string;
@@ -108,6 +110,7 @@ export function Layout() {
   const [selectedEmployeeQRId, setSelectedEmployeeQRId] = useState<string | undefined>(undefined);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [pendingTechCount, setPendingTechCount] = useState(0);
+  const [pendingProfileReqCount, setPendingProfileReqCount] = useState(0);
   const [activeTechToast, setActiveTechToast] = useState<TechStatusToast | null>(null);
   const [techNotifications, setTechNotifications] = useState<TechNotificationItem[]>([]);
   const [highlightTechIssueId, setHighlightTechIssueId] = useState<string | undefined>(undefined);
@@ -265,12 +268,30 @@ export function Layout() {
           if (d.status === 'pending') pendingAdv++;
         });
         setPendingAdvanceCount(pendingAdv);
+
+        if (isAdmin) {
+          const pendingProfCount = await fetchPendingProfileRequestsCount();
+          setPendingProfileReqCount(pendingProfCount);
+        } else {
+          setPendingProfileReqCount(0);
+        }
       } catch (e) {
         console.warn('Load badge counts error:', e);
       }
     };
 
     loadBadgeCounts();
+
+    const handleRefreshProfileReqBadge = async () => {
+      if (isAdmin) {
+        const c = await fetchPendingProfileRequestsCount();
+        setPendingProfileReqCount(c);
+      }
+    };
+    window.addEventListener('hr-profile-requests-updated', handleRefreshProfileReqBadge);
+    return () => {
+      window.removeEventListener('hr-profile-requests-updated', handleRefreshProfileReqBadge);
+    };
   }, [user?.uid, user?.username, user?.role]);
 
   useEffect(() => {
@@ -423,6 +444,11 @@ export function Layout() {
                   >
                     <Users className="w-4 h-4 shrink-0" />
                     <span>HR</span>
+                    {pendingProfileReqCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white tabular-nums">
+                        {pendingProfileReqCount}
+                      </span>
+                    )}
                   </Link>
                 )}
 
@@ -802,6 +828,20 @@ export function Layout() {
                   </div>
                 </button>
  
+                <Link
+                  to="/me"
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer shrink-0',
+                    location.pathname === '/me'
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200/70 dark:border-indigo-800/70'
+                  )}
+                  title="ข้อมูลของฉัน (โปรไฟล์พนักงาน)"
+                >
+                  <User className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden sm:inline">ข้อมูลของฉัน</span>
+                </Link>
+
                 <button
                   type="button"
                   onClick={() => setShowChangePasswordModal(true)}
@@ -1037,6 +1077,7 @@ export function Layout() {
           pendingOTCount={pendingOTCount}
           pendingAdvanceCount={pendingAdvanceCount}
           pendingTechCount={pendingTechCount}
+          pendingProfileReqCount={pendingProfileReqCount}
           onOpenOT={() => {
             setOtDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
             setShowOTModal(true);

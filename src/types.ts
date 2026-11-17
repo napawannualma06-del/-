@@ -309,8 +309,141 @@ export interface HRPrivateData {
   ssoRatePercent: number; // ค่าเริ่ม 5
   ssoCapAmount: number;   // ค่าเริ่ม 875
   address?: string;       // ที่อยู่ตามบัตรประชาชน (สำหรับ 50 ทวิ)
+  // ก. ข้อมูลส่วนตัว
+  title?: string;         // นาย/นาง/นางสาว
+  firstNameTh?: string;
+  lastNameTh?: string;
+  firstNameEn?: string;
+  lastNameEn?: string;
+  birthDate?: string;     // YYYY-MM-DD
+  maritalStatus?: string; // โสด/สมรส/หย่า/หม้าย
+  // ข. บัตรประชาชน (ssoNumber, address ใช้ช่องเดิมด้านบน)
+  idCardExpiry?: string;  // YYYY-MM-DD
+  // ค. ติดต่อ
+  currentAddress?: string;
+  phone?: string;
+  email?: string;
+  lineId?: string;
+  // ง. ผู้ติดต่อฉุกเฉิน
+  emergencyName?: string;
+  emergencyRelation?: string;
+  emergencyPhone?: string;
+  // ฉ. ประกันสังคม
+  ssoHospital?: string;
+  hadSsoBefore?: string;  // 'เคยมี' | 'ไม่เคย' | ''
+  // ช. ลดหย่อนภาษี
+  spouseHasIncome?: string; // 'ไม่มีคู่สมรส' | 'มีรายได้' | 'ไม่มีรายได้' | ''
+  childrenCount?: number;
+  parentsSupportedCount?: number; // 0-4
+  lifeInsurancePerYear?: number;
+  healthInsurancePerYear?: number;
+  // ซ. การศึกษา
+  educationLevel?: string;
+  educationInstitute?: string;
   updatedAt?: number;
   updatedBy?: string;
+}
+
+// ===============================================================
+// Employee Self-Service Profile Requests & Masked Status
+// ===============================================================
+
+export interface EmployeeSelfSubmittedFields {
+  // ก. ข้อมูลส่วนตัว (nickname เก็บใน hr_profiles, ที่เหลือเก็บใน hr_private)
+  title?: string;
+  firstNameTh?: string;
+  lastNameTh?: string;
+  firstNameEn?: string;
+  lastNameEn?: string;
+  nickname?: string;
+  birthDate?: string;
+  maritalStatus?: string;
+  // ข. บัตรประชาชน
+  ssoNumber?: string;
+  idCardExpiry?: string;
+  address?: string;
+  // ค. ติดต่อ
+  currentAddress?: string;
+  phone?: string;
+  email?: string;
+  lineId?: string;
+  // ง. ผู้ติดต่อฉุกเฉิน
+  emergencyName?: string;
+  emergencyRelation?: string;
+  emergencyPhone?: string;
+  // จ. บัญชีรับเงินเดือน
+  bankName?: string;
+  accountNumber?: string;
+  accountName?: string;
+  // ฉ. ประกันสังคม
+  ssoHospital?: string;
+  hadSsoBefore?: string;
+  // ช. ลดหย่อนภาษี
+  spouseHasIncome?: string;
+  childrenCount?: number;
+  parentsSupportedCount?: number;
+  lifeInsurancePerYear?: number;
+  healthInsurancePerYear?: number;
+  // ซ. การศึกษา
+  educationLevel?: string;
+  educationInstitute?: string;
+}
+
+export type ProfileRequestType = 'first_time' | 'edit';
+export type ProfileRequestStatus = 'first_time' | 'pending' | 'approved' | 'rejected' | 'applied';
+
+export interface ProfileRequestDoc {
+  id?: string;
+  employeeId: string;
+  employeeName: string;
+  type: ProfileRequestType;
+  status: ProfileRequestStatus;
+  data: Partial<EmployeeSelfSubmittedFields>;
+  submittedAt: number;
+  decidedAt?: number | null;
+  decidedBy?: string | null;
+  rejectReason?: string;
+}
+
+export interface ProfileMaskedSummary {
+  // ชื่อ-สกุล คำนำหน้า ชื่อเล่น (แสดงเต็มได้)
+  title?: string;
+  firstNameTh?: string;
+  lastNameTh?: string;
+  firstNameEn?: string;
+  lastNameEn?: string;
+  nickname?: string;
+  maritalStatus?: string;
+  birthDateStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  // เลขบัตร maskSensitiveNumber
+  ssoNumberMasked?: string;
+  idCardExpiryStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  // เบอร์โทรเห็นแค่ 4 ตัวท้าย
+  phoneMasked?: string;
+  emailStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  lineIdStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  // ธนาคาร + เลขบัญชี maskSensitiveNumber
+  bankName?: string;
+  accountName?: string;
+  accountNumberMasked?: string;
+  // ที่อยู่ / ผู้ติดต่อฉุกเฉิน / ลดหย่อน / ประกันสังคม / การศึกษา = แค่ "กรอกแล้ว" หรือ "ยังไม่กรอก"
+  addressStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  currentAddressStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  emergencyStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  ssoSectionStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  taxDeductionStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+  educationStatus?: 'กรอกแล้ว' | 'ยังไม่กรอก';
+}
+
+export interface ProfileStatusDoc {
+  employeeId?: string;
+  hasSubmittedFirstTime: boolean;
+  pendingRequestId?: string | null;
+  lastStatus: 'pending' | 'approved' | 'rejected' | 'applied';
+  rejectReason?: string;
+  submittedAt: number;
+  decidedAt?: number | null;
+  maskedSummary: ProfileMaskedSummary;
 }
 
 // ===============================================================
