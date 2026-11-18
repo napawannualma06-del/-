@@ -762,7 +762,7 @@ export function AdminPayrollDashboard() {
                   type="button"
                   onClick={() => handleLockHrPrivate(false)}
                   className="ml-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shadow-2xs"
-                  title="ล็อกข้อมูลลับทันที (ล็อกอัตโนมัติเมื่อไม่มีการใช้งาน 15 นาที)"
+                  title="ล็อกข้อมูลลับทันที (ล็อกอัตโนมัติเมื่อไม่มีการใช้งาน 1 ชั่วโมง)"
                 >
                   <Lock className="w-3 h-3" />
                   <span>ล็อกข้อมูลลับ</span>
@@ -1055,7 +1055,7 @@ export function AdminPayrollDashboard() {
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               สลิปเงินเดือน (`payroll_slips`) และข้อมูลเงินเดือน (`hr_private`) เป็นความลับเฉพาะแอดมิน HR
-              กรุณายืนยันตัวตนด้วยอีเมลแอดมินเพื่อดูตารางคำนวณ จัดการสลิปเงินเดือน และดูรายงานสรุปรอบ (ล็อกอัตโนมัติเมื่อไม่ใช้งาน 15 นาที)
+              กรุณายืนยันตัวตนด้วยอีเมลแอดมินเพื่อดูตารางคำนวณ จัดการสลิปเงินเดือน และดูรายงานสรุปรอบ (ล็อกอัตโนมัติเมื่อไม่ใช้งาน 1 ชั่วโมง)
             </p>
           </div>
           <div>
@@ -3790,7 +3790,7 @@ function PayrollAdminUnlockModal({
           )}
 
           <div className="text-[11px] text-slate-400 leading-relaxed">
-            ระบบจะล็อกข้อมูลลับอัตโนมัติเมื่อไม่มีการใช้งานเกิน 15 นาที หรือเมื่อกดปุ่ม "ล็อกข้อมูลลับ"
+            ระบบจะล็อกข้อมูลลับอัตโนมัติเมื่อไม่มีการใช้งานเกิน 1 ชั่วโมง หรือเมื่อกดปุ่ม "ล็อกข้อมูลลับ"
           </div>
 
           <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">

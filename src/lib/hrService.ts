@@ -1229,6 +1229,15 @@ export async function syncProfileStatusMaskedSummaryByAdmin(
 // ===============================================================
 
 const EMPLOYEE_LOGINS_COLLECTION = 'employee_logins';
+export const HR_ADMIN_EMAILS: readonly string[] = ['gr289514@gmail.com'];
+
+/**
+ * ตรวจสอบว่าอีเมลนี้เป็นอีเมลแอดมิน HR หรือไม่
+ */
+export function isHrAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return HR_ADMIN_EMAILS.includes(email.trim().toLowerCase());
+}
 
 /**
  * ตรวจสอบว่า Firebase Auth user ปัจจุบันเป็นการล็อกอินแอดมิน HR (password provider) หรือไม่
@@ -1283,6 +1292,9 @@ export async function saveEmployeeLoginLink(
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
     throw new Error('กรุณากรอกอีเมลให้ถูกต้อง');
+  }
+  if (isHrAdminEmail(cleanEmail)) {
+    throw new Error('ห้ามใช้อีเมลแอดมินผูกกับพนักงาน');
   }
 
   // ตรวจสอบว่าอีเมลนี้ถูกผูกกับพนักงานคนอื่นแล้วหรือไม่

@@ -20,6 +20,7 @@ import { ANIMAL_LIST } from '../components/AnimalAvatar';
 import { clockOutEmployeeAndReturnCases, ShiftActionResult } from '../lib/shiftService';
 import {
   findEmployeeIdByGoogleEmail,
+  isHrAdminEmail,
   signInEmployeeWithGoogle,
   signOutEmployeeGoogleSession,
 } from '../lib/hrService';
@@ -1026,6 +1027,15 @@ export const useStore = create<AppState>((set, get) => {
           return {
             success: false,
             message: 'Gmail นี้ยังไม่ได้ผูกกับพนักงาน กรุณาติดต่อ HR',
+          };
+        }
+
+        if (isHrAdminEmail(email)) {
+          await signOutEmployeeGoogleSession();
+          return {
+            success: false,
+            message:
+              'อีเมลนี้เป็นอีเมลแอดมิน กรุณาเข้าทางล็อกอินแอดมิน (ถ้ารหัสผ่านใช้ไม่ได้ ให้รีเซ็ตรหัสใน Firebase)',
           };
         }
 

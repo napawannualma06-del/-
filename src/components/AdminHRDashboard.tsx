@@ -2968,7 +2968,7 @@ function HrAdminUnlockModal({
           )}
 
           <div className="text-[11px] text-slate-400 leading-relaxed">
-            ระบบจะล็อกข้อมูลลับอัตโนมัติเมื่อไม่มีการใช้งานเกิน 15 นาที หรือเมื่อกดปุ่ม "ล็อกข้อมูลลับ"
+            ระบบจะล็อกข้อมูลลับอัตโนมัติเมื่อไม่มีการใช้งานเกิน 1 ชั่วโมง หรือเมื่อกดปุ่ม "ล็อกข้อมูลลับ"
           </div>
 
           <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">

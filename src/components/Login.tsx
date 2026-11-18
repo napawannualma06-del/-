@@ -333,6 +333,10 @@ export function Login() {
                 <span>{googleLoading ? 'กำลังเข้าสู่ระบบด้วย Google...' : 'เข้าสู่ระบบด้วย Google'}</span>
               </button>
 
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 text-center">
+                แอดมินห้ามกดปุ่มนี้ด้วยอีเมลแอดมิน ให้ใช้ช่องล็อกอินแอดมินแทน
+              </p>
+
               {/* ลิงก์เล็กด้านล่าง: เข้าด้วย ID/PIN (ชั่วคราว) - ซ่อนถ้าแอดมินปิด */}
               {allowPinLogin && (
                 <div className="pt-1 text-center">
