@@ -1,6 +1,7 @@
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -11,6 +12,8 @@ import {
 } from 'firebase/firestore';
 import {
   GoogleAuthProvider,
+  browserLocalPersistence,
+  browserSessionPersistence,
   inMemoryPersistence,
   setPersistence,
   signInAnonymously,
@@ -34,7 +37,7 @@ import {
 export const DEFAULT_PROBATION_DAYS = 119;
 export const DEFAULT_SSO_RATE_PERCENT = 5;
 export const DEFAULT_SSO_CAP_AMOUNT = 875;
-export const HR_PRIVATE_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 นาที
+export const HR_PRIVATE_IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 1 ชั่วโมง (เดิม 15 นาที)
 
 export function getDefaultHRProfile(fallbackName = ''): HRProfile {
   return {
@@ -51,7 +54,7 @@ export function getDefaultHRProfile(fallbackName = ''): HRProfile {
 
 /**
  * โหลดข้อมูลพื้นฐานพนักงานจาก system_settings/hr_profiles ครั้งเดียวด้วย getDoc
- * ถ้ายังไม่มีเอกสาร (ครั้งแรก) จะคืนค่า { profiles: {} }
+ * ถ้ายังไม่มีเอกสาร (ครั้งแรก) จะคืนค่า { profiles: {}, allowPinLogin: true }
  * ถ้าเกิด error ในการดึงข้อมูล จะ throw ออกไปเพื่อให้หน้าจอแสดงข้อความแจ้งเตือนและปิดปุ่มบันทึก
  */
 export async function fetchHRProfiles(): Promise<HRProfilesDoc> {
@@ -61,11 +64,12 @@ export async function fetchHRProfiles(): Promise<HRProfilesDoc> {
       const data = snap.data() as HRProfilesDoc;
       return {
         profiles: data.profiles && typeof data.profiles === 'object' ? data.profiles : {},
+        allowPinLogin: typeof data.allowPinLogin === 'boolean' ? data.allowPinLogin : true,
         updatedAt: data.updatedAt,
         updatedBy: data.updatedBy,
       };
     }
-    return { profiles: {} };
+    return { profiles: {}, allowPinLogin: true };
   } catch (err) {
     console.error('Error fetching HR profiles:', err);
     throw err;
@@ -79,11 +83,35 @@ export async function saveHRProfiles(
   profiles: Record<string, HRProfile>,
   updatedBy: string
 ): Promise<void> {
-  await setDoc(doc(db, 'system_settings', 'hr_profiles'), {
-    profiles,
-    updatedAt: Date.now(),
-    updatedBy,
-  });
+  await setDoc(
+    doc(db, 'system_settings', 'hr_profiles'),
+    {
+      profiles,
+      linkedGmails: deleteField(),
+      updatedAt: Date.now(),
+      updatedBy,
+    },
+    { mergeFields: ['profiles', 'updatedAt', 'updatedBy', 'linkedGmails'] }
+  );
+}
+
+/**
+ * บันทึกสวิตช์ "อนุญาตให้พนักงานเข้าด้วย PIN" ลงใน system_settings/hr_profiles
+ */
+export async function saveAllowPinLoginSetting(
+  allowPinLogin: boolean,
+  updatedBy: string
+): Promise<void> {
+  await setDoc(
+    doc(db, 'system_settings', 'hr_profiles'),
+    {
+      allowPinLogin,
+      linkedGmails: deleteField(),
+      updatedAt: Date.now(),
+      updatedBy,
+    },
+    { merge: true }
+  );
 }
 
 /**
@@ -1290,6 +1318,21 @@ export async function unlinkEmployeeLoginLink(employeeId: string): Promise<void>
 }
 
 /**
+ * ดึงรายการผูก Gmail ทั้งหมดจาก employee_logins (เมื่อแอดมินปลดล็อก HR แล้ว)
+ */
+export async function fetchAllEmployeeLoginLinks(): Promise<Record<string, string>> {
+  const snap = await getDocs(collection(db, EMPLOYEE_LOGINS_COLLECTION));
+  const map: Record<string, string> = {};
+  snap.forEach((d) => {
+    const data = d.data() as Partial<EmployeeLoginDoc>;
+    if (data.email && typeof data.email === 'string') {
+      map[d.id] = data.email.trim().toLowerCase();
+    }
+  });
+  return map;
+}
+
+/**
  * ค้นหา employeeId ที่ผูกกับอีเมล Google นี้
  */
 export async function findEmployeeIdByGoogleEmail(email: string): Promise<string | null> {
@@ -1306,10 +1349,16 @@ export async function findEmployeeIdByGoogleEmail(email: string): Promise<string
 }
 
 /**
- * เข้าสู่ระบบด้วย Google สำหรับพนักงานเพื่อดูข้อมูลเต็มของตัวเองในหน้า /me
+ * เข้าสู่ระบบด้วย Google สำหรับพนักงาน (รองรับ browserLocalPersistence สำหรับเครื่องส่วนตัว และ browserSessionPersistence สำหรับเครื่องส่วนรวม)
+ * ใช้ prompt: 'select_account' ทุกครั้ง
  */
-export async function signInEmployeeWithGoogle(): Promise<FirebaseAuthUser> {
-  await setPersistence(auth, inMemoryPersistence);
+export async function signInEmployeeWithGoogle(
+  isPersonalDevice: boolean = false
+): Promise<FirebaseAuthUser> {
+  await setPersistence(
+    auth,
+    isPersonalDevice ? browserLocalPersistence : browserSessionPersistence
+  );
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   const cred = await signInWithPopup(auth, provider);

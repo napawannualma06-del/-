@@ -24,6 +24,7 @@ export interface UserProfile {
   approvedBy?: string;
   passwordResetRequested?: boolean;
   passwordResetRequestedAt?: number;
+  authMethod?: 'google' | 'pin';
 }
 
 export interface DutyWorker {
@@ -289,6 +290,7 @@ export interface HRProfile {
 
 export interface HRProfilesDoc {
   profiles: Record<string, HRProfile>;
+  allowPinLogin?: boolean;
   updatedAt?: number;
   updatedBy?: string;
 }

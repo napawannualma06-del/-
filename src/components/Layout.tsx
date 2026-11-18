@@ -88,6 +88,36 @@ export function Layout() {
     };
   }, []);
 
+  // ออกจากระบบเองเมื่อไม่มีการใช้งาน 1 ชั่วโมง (สำหรับพนักงานที่เข้าด้วย Google แบบไม่ติ๊กเครื่องส่วนตัว หรือล็อกอิน Google ในหน้า /me)
+  const lastSharedDeviceActivityRef = useRef<number>(Date.now());
+  useEffect(() => {
+    if (!user) return;
+
+    lastSharedDeviceActivityRef.current = Date.now();
+
+    const updateActivity = () => {
+      lastSharedDeviceActivityRef.current = Date.now();
+    };
+
+    // การใช้งาน = ขยับเมาส์ คลิก พิมพ์ หรือแตะหน้าจอ รีเซ็ตเวลานับถอยหลังทุกครั้ง
+    const activityEvents = ['mousemove', 'mousedown', 'click', 'keydown', 'touchstart'];
+    activityEvents.forEach((ev) => window.addEventListener(ev, updateActivity, { passive: true }));
+
+    const timer = window.setInterval(() => {
+      const loginMode = localStorage.getItem('thaiplus_login_mode');
+      if (loginMode === 'google_shared') {
+        if (Date.now() - lastSharedDeviceActivityRef.current >= 60 * 60 * 1000) {
+          logout();
+        }
+      }
+    }, 15000);
+
+    return () => {
+      activityEvents.forEach((ev) => window.removeEventListener(ev, updateActivity));
+      window.clearInterval(timer);
+    };
+  }, [user, logout]);
+
   const [notifGranted, setNotifGranted] = useState(false);
   const [showClockOutModal, setShowClockOutModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
@@ -731,6 +761,32 @@ export function Layout() {
                           </div>
                         </div>
                       </button>
+
+                      <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                      {/* 8. ออกจากระบบ */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowToolsDropdown(false);
+                          logout();
+                        }}
+                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-rose-50 dark:hover:bg-rose-950/40 transition group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 shrink-0">
+                            <LogOut className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-rose-600 dark:text-rose-400 block">
+                              ออกจากระบบ
+                            </span>
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              สลับผู้ใช้ / ออกจากบัญชีปัจจุบัน
+                            </span>
+                          </div>
+                        </div>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -854,10 +910,11 @@ export function Layout() {
                 <button
                   type="button"
                   onClick={logout}
-                  className="hidden md:flex w-9 h-9 items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition cursor-pointer shrink-0"
-                  title="สลับผู้ใช้ / ออกจากระบบ"
+                  className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200/70 dark:border-rose-800/70 rounded-xl transition cursor-pointer shrink-0"
+                  title="ออกจากระบบ"
                 >
-                  <LogOut className="w-4 h-4 shrink-0" />
+                  <LogOut className="w-3.5 h-3.5 shrink-0" />
+                  <span>ออกจากระบบ</span>
                 </button>
               </div>
             </div>

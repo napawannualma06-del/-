@@ -70,7 +70,6 @@ import {
 } from '../lib/shiftScheduleService';
 import { AnimalAvatar } from './AnimalAvatar';
 
-const GOOGLE_SESSION_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 นาที
 const SECRET_REVEAL_TIMEOUT_MS = 30 * 1000; // 30 วินาที
 
 type SecretFieldKey =
@@ -83,7 +82,7 @@ type SecretFieldKey =
   | 'taxDeduction';
 
 export function MyProfilePage() {
-  const { user } = useStore();
+  const { user, logout } = useStore();
 
   const [hrProfile, setHrProfile] = useState<HRProfile>(() =>
     getDefaultHRProfile(user?.name || '')
@@ -94,7 +93,12 @@ export function MyProfilePage() {
   const [reloadCount, setReloadCount] = useState(0);
 
   // Google Sign-In state for viewing full own data
-  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
+  const [googleEmail, setGoogleEmail] = useState<string | null>(() => {
+    if (isEmployeeGoogleAuthUser(auth.currentUser)) {
+      return (auth.currentUser?.email || '').toLowerCase();
+    }
+    return null;
+  });
   const [isHrAdminSessionActive, setIsHrAdminSessionActive] = useState<boolean>(false);
   const [showAdminSessionWarnModal, setShowAdminSessionWarnModal] = useState<boolean>(false);
   const [googleSigningIn, setGoogleSigningIn] = useState<boolean>(false);
@@ -264,30 +268,24 @@ export function MyProfilePage() {
     };
   }, [user?.uid, currentCycle.cycleKey]);
 
-  // Sign out of Google session helper
-  const handleGoogleSignOut = useCallback(
-    async (isAutoIdle = false) => {
-      clearAllSecretReveals();
-      setFullPrivateData(null);
-      setGoogleEmail(null);
-      setGoogleAuthError(null);
+  // Sign out of Google session helper (สำหรับกรณีเข้าด้วย PIN แล้วกดล็อกอิน Google ในหน้า /me หรือต้องการออกจากระบบ)
+  const handleGoogleSignOut = useCallback(async () => {
+    clearAllSecretReveals();
+    setFullPrivateData(null);
+    setGoogleEmail(null);
+    setGoogleAuthError(null);
+    if (user?.authMethod === 'google' || localStorage.getItem('thaiplus_login_mode')?.startsWith('google_')) {
+      await logout();
+    } else {
       await signOutEmployeeGoogleSession();
-      if (isAutoIdle) {
-        setSubmitNotice({
-          type: 'error',
-          message: 'ออกจากระบบ Google อัตโนมัติเนื่องจากไม่มีการใช้งานเกิน 5 นาที',
-        });
-      }
-    },
-    [clearAllSecretReveals]
-  );
+    }
+  }, [clearAllSecretReveals, logout, user?.authMethod]);
 
-  // Auto sign-out when leaving /me (unmount) & cleanup secret reveal timers
+  // Cleanup secret reveal timers on unmount (ห้าม signOut เมื่อออกจากหน้า /me)
   useEffect(() => {
     return () => {
       Object.values(secretTimersRef.current).forEach((t) => clearTimeout(t));
       secretTimersRef.current = {};
-      signOutEmployeeGoogleSession();
     };
   }, []);
 
@@ -367,35 +365,12 @@ export function MyProfilePage() {
     };
   }, [googleEmail, user?.uid, user?.name, hrProfile.fullName, reloadCount]);
 
-  // 5-minute inactivity auto-logout while Google session is active
-  useEffect(() => {
-    if (!googleEmail) return;
-
-    const updateActivity = () => {
-      lastGoogleActivityRef.current = Date.now();
-    };
-
-    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
-    events.forEach((ev) => window.addEventListener(ev, updateActivity, { passive: true }));
-
-    const timer = setInterval(() => {
-      if (Date.now() - lastGoogleActivityRef.current >= GOOGLE_SESSION_IDLE_TIMEOUT_MS) {
-        handleGoogleSignOut(true);
-      }
-    }, 5000);
-
-    return () => {
-      events.forEach((ev) => window.removeEventListener(ev, updateActivity));
-      clearInterval(timer);
-    };
-  }, [googleEmail, handleGoogleSignOut]);
-
   const executeGoogleSignIn = async () => {
     setShowAdminSessionWarnModal(false);
     setGoogleSigningIn(true);
     setGoogleAuthError(null);
     try {
-      await signInEmployeeWithGoogle();
+      await signInEmployeeWithGoogle(false);
       lastGoogleActivityRef.current = Date.now();
     } catch (err: any) {
       console.error('Google sign-in error:', err);
@@ -932,7 +907,7 @@ export function MyProfilePage() {
               </div>
               <p className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5">
                 {isVerifiedOwner
-                  ? 'กดไอคอนรูปตาในแต่ละช่องเพื่อดูข้อมูลลับ (ซ่อนอัตโนมัติใน 30 วินาที และออกจากระบบอัตโนมัติเมื่อไม่ได้ใช้งาน 5 นาทีหรือเปลี่ยนหน้า)'
+                  ? 'กดไอคอนรูปตาในแต่ละช่องเพื่อดูข้อมูลลับ (ซ่อนอัตโนมัติใน 30 วินาที)'
                   : 'ข้อมูลลับจะถูกปิดบางส่วน หากต้องการดูข้อมูลเต็มของคุณ กรุณาเข้าสู่ระบบด้วยบัญชี Google ที่ผูกไว้กับฝ่ายบุคคล'}
               </p>
             </div>
@@ -956,7 +931,7 @@ export function MyProfilePage() {
             ) : (
               <button
                 type="button"
-                onClick={() => handleGoogleSignOut(false)}
+                onClick={() => handleGoogleSignOut()}
                 className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -982,7 +957,7 @@ export function MyProfilePage() {
             {googleEmail && (
               <button
                 type="button"
-                onClick={() => handleGoogleSignOut(false)}
+                onClick={() => handleGoogleSignOut()}
                 className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer shrink-0"
               >
                 ออกจากระบบ

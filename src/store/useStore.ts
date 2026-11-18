@@ -18,6 +18,11 @@ import { db, handleFirestoreError, OperationType, ensureFirebaseAnonymousAuth, i
 import { UserProfile, Role, WorkStatus, AccountStatus, Case, Agent } from '../types';
 import { ANIMAL_LIST } from '../components/AnimalAvatar';
 import { clockOutEmployeeAndReturnCases, ShiftActionResult } from '../lib/shiftService';
+import {
+  findEmployeeIdByGoogleEmail,
+  signInEmployeeWithGoogle,
+  signOutEmployeeGoogleSession,
+} from '../lib/hrService';
 
 export type { Role, WorkStatus, AccountStatus, UserProfile };
 
@@ -178,6 +183,9 @@ interface AppState {
 
   toggleDarkMode: () => void;
   fetchRegisteredUsers: (forceRefresh?: boolean) => Promise<void>;
+  loginWithGoogle: (
+    isPersonalDevice: boolean
+  ) => Promise<{ success: boolean; message?: string }>;
   loginWithUsername: (username: string, pin?: string) => Promise<{ success: boolean; message?: string }>;
   registerEmployee: (name: string, username: string, pin?: string) => Promise<{ success: boolean; message?: string; pendingApproval?: boolean }>;
   approveUser: (uid: string) => Promise<{ success: boolean; message?: string }>;
@@ -917,6 +925,21 @@ export const useStore = create<AppState>((set, get) => {
     },
 
     initAuth: async () => {
+      try {
+        const loginMode = localStorage.getItem('thaiplus_login_mode');
+        // กรณีล็อกอินด้วย Google บนเครื่องที่ใช้ร่วมกัน (ไม่ติ๊กเครื่องส่วนตัว): ปิดแท็บแล้วหลุดทันที
+        if (
+          loginMode === 'google_shared' &&
+          !sessionStorage.getItem('thaiplus_shared_device_session')
+        ) {
+          localStorage.removeItem(USER_STORAGE_KEY);
+          localStorage.removeItem('thaiplus_login_mode');
+          await signOutEmployeeGoogleSession();
+          set({ user: null, loading: false });
+          return;
+        }
+      } catch {}
+
       await ensureFirebaseAnonymousAuth();
 
       try {
@@ -994,6 +1017,128 @@ export const useStore = create<AppState>((set, get) => {
       }
     },
 
+    loginWithGoogle: async (isPersonalDevice: boolean) => {
+      try {
+        const fbUser = await signInEmployeeWithGoogle(isPersonalDevice);
+        const email = (fbUser.email || '').trim().toLowerCase();
+        if (!email) {
+          await signOutEmployeeGoogleSession();
+          return {
+            success: false,
+            message: 'Gmail นี้ยังไม่ได้ผูกกับพนักงาน กรุณาติดต่อ HR',
+          };
+        }
+
+        const employeeId = await findEmployeeIdByGoogleEmail(email);
+        if (!employeeId) {
+          await signOutEmployeeGoogleSession();
+          return {
+            success: false,
+            message: 'Gmail นี้ยังไม่ได้ผูกกับพนักงาน กรุณาติดต่อ HR',
+          };
+        }
+
+        const userRef = doc(db, 'users', employeeId);
+        const userSnap = await getDoc(userRef);
+        let foundData: Record<string, any> | null = userSnap.exists() ? userSnap.data() : null;
+
+        if (!foundData) {
+          const cached = get().registeredUsers.find((u) => u.uid === employeeId);
+          if (cached) {
+            foundData = { ...cached };
+          }
+        }
+
+        if (!foundData) {
+          await signOutEmployeeGoogleSession();
+          return {
+            success: false,
+            message: 'Gmail นี้ยังไม่ได้ผูกกับพนักงาน กรุณาติดต่อ HR',
+          };
+        }
+
+        if (foundData.accountStatus === 'pending') {
+          await signOutEmployeeGoogleSession();
+          return {
+            success: false,
+            message: 'บัญชีของคุณอยู่ระหว่างรอแอดมินอนุมัติ กรุณาแจ้งผู้ดูแลระบบเพื่อเปิดใช้งาน',
+          };
+        }
+
+        if (foundData.accountStatus === 'rejected') {
+          await signOutEmployeeGoogleSession();
+          return {
+            success: false,
+            message: 'บัญชีของคุณไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ',
+          };
+        }
+
+        const now = Date.now();
+        const cleanUsername = String(foundData.username || '').trim().toLowerCase();
+        const assignedEmoji =
+          foundData.avatarEmoji || getDeterministicAnimalEmoji(cleanUsername || employeeId);
+        const isNapawanAdmin =
+          cleanUsername === 'napawan' ||
+          (foundData.name && String(foundData.name).toLowerCase().includes('napawan'));
+        const resolvedRole: Role = isNapawanAdmin ? 'admin' : (foundData.role || 'employee');
+
+        const updates: Record<string, any> = {
+          role: resolvedRole,
+          workStatus: 'working',
+          lastActiveAt: now,
+          lastActionAt: now,
+          clockedInAt: now,
+          autoClockOutReason: '',
+          avatarEmoji: assignedEmoji,
+        };
+
+        try {
+          await updateDoc(userRef, updates);
+        } catch (err) {
+          console.warn('Update user workStatus after Google login warning:', err);
+        }
+
+        const loggedInUser = sanitizeUserProfile(
+          {
+            ...foundData,
+            ...updates,
+            email,
+            authMethod: 'google',
+          },
+          employeeId
+        );
+
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(loggedInUser));
+        localStorage.setItem(
+          'thaiplus_login_mode',
+          isPersonalDevice ? 'google_personal' : 'google_shared'
+        );
+        if (isPersonalDevice) {
+          sessionStorage.removeItem('thaiplus_shared_device_session');
+        } else {
+          sessionStorage.setItem('thaiplus_shared_device_session', 'true');
+        }
+
+        set({ user: loggedInUser });
+        get().startRealtimeListeners();
+        return { success: true };
+      } catch (error: any) {
+        console.error('Google login error:', error);
+        const code = error?.code || '';
+        if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+          return {
+            success: false,
+            message: 'ยกเลิกการเข้าสู่ระบบด้วย Google',
+          };
+        }
+        await signOutEmployeeGoogleSession();
+        return {
+          success: false,
+          message: 'ไม่สามารถเข้าสู่ระบบด้วย Google ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง',
+        };
+      }
+    },
+
     // Item 1: Browser-based PIN verification via Web Crypto (SHA-256 + salt) with automatic migration.
     // Never bypasses PIN check on connection failure.
     loginWithUsername: async (username: string, pin?: string) => {
@@ -1003,7 +1148,10 @@ export const useStore = create<AppState>((set, get) => {
         return { success: false, message: 'กรุณากรอกชื่อผู้ใช้' };
       }
 
+      await signOutEmployeeGoogleSession();
       await ensureFirebaseAnonymousAuth();
+      localStorage.setItem('thaiplus_login_mode', 'pin');
+      sessionStorage.removeItem('thaiplus_shared_device_session');
 
       // 0. Direct Local / Emergency Access Account (Zero Database / Zero Firestore dependency)
       // Requested by user: ID "23", Pass "23"
@@ -1682,6 +1830,9 @@ export const useStore = create<AppState>((set, get) => {
     logout: async () => {
       get().stopRealtimeListeners();
       localStorage.removeItem(USER_STORAGE_KEY);
+      localStorage.removeItem('thaiplus_login_mode');
+      sessionStorage.removeItem('thaiplus_shared_device_session');
+      await signOutEmployeeGoogleSession();
       set({ user: null });
     },
   };

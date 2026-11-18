@@ -206,7 +206,7 @@ export function AdminPayrollDashboard() {
     if (isAutoTimeout) {
       setStatusNotice({
         type: 'error',
-        message: 'ล็อกข้อมูลสลิปเงินเดือนอัตโนมัติเนื่องจากไม่มีการใช้งานเกิน 15 นาที',
+        message: 'ล็อกข้อมูลสลิปเงินเดือนอัตโนมัติเนื่องจากไม่มีการใช้งานเกิน 1 ชั่วโมง',
       });
     } else {
       setStatusNotice({
@@ -217,7 +217,7 @@ export function AdminPayrollDashboard() {
     }
   }, []);
 
-  // Auto-lock after 15 minutes of inactivity
+  // Auto-lock after 1 hour of inactivity
   useEffect(() => {
     if (!isHrUnlocked) return;
 
@@ -226,7 +226,7 @@ export function AdminPayrollDashboard() {
       lastHrActivityRef.current = Date.now();
     };
 
-    const events = ['mousedown', 'keydown', 'touchstart', 'click', 'scroll'];
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'click'];
     events.forEach((ev) => window.addEventListener(ev, updateActivity, { passive: true }));
 
     const timer = window.setInterval(() => {
