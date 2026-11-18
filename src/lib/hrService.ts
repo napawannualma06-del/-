@@ -1,14 +1,27 @@
-import { collection, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
 import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  query,
+  setDoc,
+  where,
+} from 'firebase/firestore';
+import {
+  GoogleAuthProvider,
   inMemoryPersistence,
   setPersistence,
   signInAnonymously,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   User as FirebaseAuthUser,
 } from 'firebase/auth';
 import { auth, db } from './firebase';
 import {
+  EmployeeLoginDoc,
   EmployeeSelfSubmittedFields,
   HRPrivateData,
   HRProfile,
@@ -938,7 +951,10 @@ export async function autoApplyFirstTimeProfileRequests(
       }
 
       const curVal = nextPriv[key as keyof HRPrivateData];
-      if (isFieldEmpty(curVal)) {
+      if (key === 'bankName' || key === 'accountNumber' || key === 'accountName') {
+        (conflicts as any)[key] = submittedVal;
+        hasConflicts = true;
+      } else if (isFieldEmpty(curVal)) {
         (nextPriv as any)[key] = submittedVal;
       } else if (!areFieldValuesEqual(key, curVal, submittedVal)) {
         (conflicts as any)[key] = submittedVal;
@@ -1179,5 +1195,146 @@ export async function syncProfileStatusMaskedSummaryByAdmin(
     console.warn('Could not sync profile_status maskedSummary:', err);
   }
 }
+
+// ===============================================================
+// Employee Google Login & employee_logins/{employeeId}
+// ===============================================================
+
+const EMPLOYEE_LOGINS_COLLECTION = 'employee_logins';
+
+/**
+ * ตรวจสอบว่า Firebase Auth user ปัจจุบันเป็นการล็อกอินแอดมิน HR (password provider) หรือไม่
+ */
+export function isHrAdminAuthUser(fbUser: FirebaseAuthUser | null): boolean {
+  if (!fbUser || fbUser.isAnonymous) return false;
+  const email = (fbUser.email || '').toLowerCase();
+  if (!email) return false;
+  return fbUser.providerData.some((p) => p.providerId === 'password');
+}
+
+/**
+ * ตรวจสอบว่า Firebase Auth user ปัจจุบันเป็นการล็อกอินด้วย Google หรือไม่
+ */
+export function isEmployeeGoogleAuthUser(fbUser: FirebaseAuthUser | null): boolean {
+  if (!fbUser || fbUser.isAnonymous) return false;
+  const email = (fbUser.email || '').toLowerCase();
+  if (!email) return false;
+  return fbUser.providerData.some((p) => p.providerId === 'google.com');
+}
+
+/**
+ * ดึงข้อมูลการผูก Gmail ของพนักงานจาก employee_logins/{employeeId}
+ */
+export async function fetchEmployeeLoginLink(
+  employeeId: string
+): Promise<EmployeeLoginDoc | null> {
+  if (!employeeId) return null;
+  const ref = doc(db, EMPLOYEE_LOGINS_COLLECTION, employeeId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  const data = snap.data() as Partial<EmployeeLoginDoc>;
+  if (!data.email) return null;
+  return {
+    employeeId,
+    email: String(data.email).trim().toLowerCase(),
+    linkedAt: typeof data.linkedAt === 'number' ? data.linkedAt : 0,
+    linkedBy: typeof data.linkedBy === 'string' ? data.linkedBy : '',
+  };
+}
+
+/**
+ * ผูก Gmail กับพนักงานใน employee_logins/{employeeId}
+ * (1 อีเมลผูกได้แค่ 1 พนักงาน ถ้าซ้ำให้โยน Error แจ้งเตือน)
+ */
+export async function saveEmployeeLoginLink(
+  employeeId: string,
+  email: string,
+  linkedBy: string
+): Promise<EmployeeLoginDoc> {
+  if (!employeeId) throw new Error('ไม่พบรหัสพนักงาน');
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('กรุณากรอกอีเมลให้ถูกต้อง');
+  }
+
+  // ตรวจสอบว่าอีเมลนี้ถูกผูกกับพนักงานคนอื่นแล้วหรือไม่
+  const dupQ = query(
+    collection(db, EMPLOYEE_LOGINS_COLLECTION),
+    where('email', '==', cleanEmail)
+  );
+  const dupSnap = await getDocs(dupQ);
+  for (const d of dupSnap.docs) {
+    if (d.id !== employeeId) {
+      throw new Error('อีเมลนี้ถูกผูกกับพนักงานคนอื่นแล้ว (1 อีเมลผูกได้แค่ 1 พนักงาน)');
+    }
+  }
+
+  const payload: EmployeeLoginDoc = {
+    email: cleanEmail,
+    linkedAt: Date.now(),
+    linkedBy,
+  };
+  await setDoc(doc(db, EMPLOYEE_LOGINS_COLLECTION, employeeId), payload);
+  return {
+    employeeId,
+    ...payload,
+  };
+}
+
+/**
+ * ยกเลิกการผูก Gmail ของพนักงาน (ลบ employee_logins/{employeeId})
+ */
+export async function unlinkEmployeeLoginLink(employeeId: string): Promise<void> {
+  if (!employeeId) return;
+  await deleteDoc(doc(db, EMPLOYEE_LOGINS_COLLECTION, employeeId));
+}
+
+/**
+ * ค้นหา employeeId ที่ผูกกับอีเมล Google นี้
+ */
+export async function findEmployeeIdByGoogleEmail(email: string): Promise<string | null> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return null;
+  const q = query(
+    collection(db, EMPLOYEE_LOGINS_COLLECTION),
+    where('email', '==', cleanEmail),
+    limit(2)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  return snap.docs[0].id;
+}
+
+/**
+ * เข้าสู่ระบบด้วย Google สำหรับพนักงานเพื่อดูข้อมูลเต็มของตัวเองในหน้า /me
+ */
+export async function signInEmployeeWithGoogle(): Promise<FirebaseAuthUser> {
+  await setPersistence(auth, inMemoryPersistence);
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  const cred = await signInWithPopup(auth, provider);
+  return cred.user;
+}
+
+/**
+ * ออกจากระบบ Google ของพนักงาน และกลับสู่ Anonymous Auth สำหรับการใช้งานระบบปกติ
+ */
+export async function signOutEmployeeGoogleSession(): Promise<void> {
+  try {
+    if (auth.currentUser && isEmployeeGoogleAuthUser(auth.currentUser)) {
+      await signOut(auth);
+    }
+  } catch (e) {
+    console.warn('Sign out employee google session warning:', e);
+  }
+  try {
+    if (!auth.currentUser) {
+      await signInAnonymously(auth);
+    }
+  } catch (e) {
+    console.warn('Anonymous fallback warning:', e);
+  }
+}
+
 
 

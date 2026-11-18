@@ -446,6 +446,13 @@ export interface ProfileStatusDoc {
   maskedSummary: ProfileMaskedSummary;
 }
 
+export interface EmployeeLoginDoc {
+  employeeId?: string;
+  email: string; // ตัวพิมพ์เล็ก
+  linkedAt: number;
+  linkedBy: string;
+}
+
 // ===============================================================
 // Payroll Settings (system_settings/payroll_settings) & Slips (payroll_slips/{cycleKey}_{employeeId})
 // ===============================================================

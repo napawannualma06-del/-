@@ -319,8 +319,22 @@ service cloud.firestore {
         request.auth.token.email in ['gr289514@gmail.com'];
     }
 
+    function isOwnerEmployee(employeeId) {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/employee_logins/$(employeeId))
+        && get(/databases/$(database)/documents/employee_logins/$(employeeId)).data.email == request.auth.token.email.lower();
+    }
+
+    match /employee_logins/{employeeId} {
+      allow read: if isHrAdmin() || (request.auth != null && resource.data.email == request.auth.token.email.lower());
+      allow write: if isHrAdmin();
+    }
+
     match /hr_private/{employeeId} {
-      allow read, write: if isHrAdmin();
+      allow read: if isHrAdmin() || isOwnerEmployee(employeeId);
+      allow write: if isHrAdmin();
     }
 
     match /payroll_slips/{slipId} {

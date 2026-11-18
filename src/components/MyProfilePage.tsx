@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   AlertCircle,
   Banknote,
@@ -11,12 +11,17 @@ import {
   Clock,
   CreditCard,
   Edit3,
+  Eye,
+  EyeOff,
   FileCheck2,
   HeartHandshake,
+  KeyRound,
   Lock,
+  LogOut,
   Phone,
   RefreshCw,
   Save,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   User,
@@ -24,12 +29,14 @@ import {
   X,
 } from 'lucide-react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 import { clsx } from 'clsx';
-import { db } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import { useStore } from '../store/useStore';
 import {
   AdvanceRequest,
   EmployeeSelfSubmittedFields,
+  HRPrivateData,
   HRProfile,
   OvertimeRequest,
   ProfileMaskedSummary,
@@ -39,9 +46,17 @@ import {
 import {
   calculateTenureText,
   fetchEmployeeProfileStatus,
+  fetchHRPrivateEmployee,
   fetchHRProfiles,
+  findEmployeeIdByGoogleEmail,
   getDefaultHRProfile,
   getProbationBadgeInfo,
+  isEmployeeGoogleAuthUser,
+  isHrAdminAuthUser,
+  maskPhoneLast4,
+  maskSensitiveNumber,
+  signInEmployeeWithGoogle,
+  signOutEmployeeGoogleSession,
   submitEmployeeProfileRequest,
   validateThaiIdCard13Digits,
 } from '../lib/hrService';
@@ -55,6 +70,18 @@ import {
 } from '../lib/shiftScheduleService';
 import { AnimalAvatar } from './AnimalAvatar';
 
+const GOOGLE_SESSION_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 นาที
+const SECRET_REVEAL_TIMEOUT_MS = 30 * 1000; // 30 วินาที
+
+type SecretFieldKey =
+  | 'ssoNumber'
+  | 'accountNumber'
+  | 'phone'
+  | 'address'
+  | 'currentAddress'
+  | 'emergency'
+  | 'taxDeduction';
+
 export function MyProfilePage() {
   const { user } = useStore();
 
@@ -65,6 +92,44 @@ export function MyProfilePage() {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
+
+  // Google Sign-In state for viewing full own data
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
+  const [isHrAdminSessionActive, setIsHrAdminSessionActive] = useState<boolean>(false);
+  const [showAdminSessionWarnModal, setShowAdminSessionWarnModal] = useState<boolean>(false);
+  const [googleSigningIn, setGoogleSigningIn] = useState<boolean>(false);
+  const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
+  const [fullPrivateData, setFullPrivateData] = useState<HRPrivateData | null>(null);
+  const [loadingFullPrivate, setLoadingFullPrivate] = useState<boolean>(false);
+
+  // 30-second reveal toggles per confidential field
+  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
+  const secretTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const lastGoogleActivityRef = useRef<number>(Date.now());
+
+  const clearAllSecretReveals = useCallback(() => {
+    Object.values(secretTimersRef.current).forEach((t) => clearTimeout(t));
+    secretTimersRef.current = {};
+    setRevealedSecrets({});
+  }, []);
+
+  const toggleSecretField = useCallback((fieldKey: SecretFieldKey) => {
+    lastGoogleActivityRef.current = Date.now();
+    setRevealedSecrets((prev) => {
+      const nextVal = !prev[fieldKey];
+      if (secretTimersRef.current[fieldKey]) {
+        clearTimeout(secretTimersRef.current[fieldKey]);
+        delete secretTimersRef.current[fieldKey];
+      }
+      if (nextVal) {
+        secretTimersRef.current[fieldKey] = setTimeout(() => {
+          setRevealedSecrets((curr) => ({ ...curr, [fieldKey]: false }));
+          delete secretTimersRef.current[fieldKey];
+        }, SECRET_REVEAL_TIMEOUT_MS);
+      }
+      return { ...prev, [fieldKey]: nextVal };
+    });
+  }, []);
 
   // Current cycle info (26 - 25)
   const currentCycle = useMemo(() => {
@@ -199,6 +264,158 @@ export function MyProfilePage() {
     };
   }, [user?.uid, currentCycle.cycleKey]);
 
+  // Sign out of Google session helper
+  const handleGoogleSignOut = useCallback(
+    async (isAutoIdle = false) => {
+      clearAllSecretReveals();
+      setFullPrivateData(null);
+      setGoogleEmail(null);
+      setGoogleAuthError(null);
+      await signOutEmployeeGoogleSession();
+      if (isAutoIdle) {
+        setSubmitNotice({
+          type: 'error',
+          message: 'ออกจากระบบ Google อัตโนมัติเนื่องจากไม่มีการใช้งานเกิน 5 นาที',
+        });
+      }
+    },
+    [clearAllSecretReveals]
+  );
+
+  // Auto sign-out when leaving /me (unmount) & cleanup secret reveal timers
+  useEffect(() => {
+    return () => {
+      Object.values(secretTimersRef.current).forEach((t) => clearTimeout(t));
+      secretTimersRef.current = {};
+      signOutEmployeeGoogleSession();
+    };
+  }, []);
+
+  // Listen to Firebase Auth state (detect HR Admin password session vs Employee Google session)
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      if (isHrAdminAuthUser(fbUser)) {
+        setIsHrAdminSessionActive(true);
+        setGoogleEmail(null);
+        setFullPrivateData(null);
+        clearAllSecretReveals();
+      } else if (isEmployeeGoogleAuthUser(fbUser)) {
+        setIsHrAdminSessionActive(false);
+        setGoogleEmail((fbUser?.email || '').toLowerCase());
+        lastGoogleActivityRef.current = Date.now();
+      } else {
+        setIsHrAdminSessionActive(false);
+        setGoogleEmail(null);
+        setFullPrivateData(null);
+        clearAllSecretReveals();
+      }
+    });
+    return () => unsub();
+  }, [clearAllSecretReveals]);
+
+  // Verify Google email against employee_logins and load hr_private/{user.uid} if matched
+  useEffect(() => {
+    if (!googleEmail || !user?.uid) {
+      setFullPrivateData(null);
+      setLoadingFullPrivate(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function verifyAndLoadPrivate() {
+      setLoadingFullPrivate(true);
+      setGoogleAuthError(null);
+      try {
+        const linkedEmpId = await findEmployeeIdByGoogleEmail(googleEmail!);
+        if (isCancelled) return;
+
+        if (!linkedEmpId || linkedEmpId !== user!.uid) {
+          setFullPrivateData(null);
+          setGoogleAuthError('บัญชี Google นี้ไม่ได้ผูกกับพนักงานคนนี้');
+          return;
+        }
+
+        const priv = await fetchHRPrivateEmployee(
+          user!.uid,
+          hrProfile.fullName || user!.name || ''
+        );
+        if (!isCancelled) {
+          setFullPrivateData(priv);
+        }
+      } catch (err: any) {
+        console.error('Error verifying Google login or loading hr_private:', err);
+        if (!isCancelled) {
+          setFullPrivateData(null);
+          const code = err?.code || '';
+          if (code === 'permission-denied' || String(err?.message || '').includes('permission')) {
+            setGoogleAuthError('บัญชี Google นี้ไม่ได้ผูกกับพนักงานคนนี้');
+          } else {
+            setGoogleAuthError('ไม่สามารถดึงข้อมูลเต็มได้ กรุณาลองใหม่อีกครั้ง');
+          }
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingFullPrivate(false);
+        }
+      }
+    }
+
+    verifyAndLoadPrivate();
+    return () => {
+      isCancelled = true;
+    };
+  }, [googleEmail, user?.uid, user?.name, hrProfile.fullName, reloadCount]);
+
+  // 5-minute inactivity auto-logout while Google session is active
+  useEffect(() => {
+    if (!googleEmail) return;
+
+    const updateActivity = () => {
+      lastGoogleActivityRef.current = Date.now();
+    };
+
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach((ev) => window.addEventListener(ev, updateActivity, { passive: true }));
+
+    const timer = setInterval(() => {
+      if (Date.now() - lastGoogleActivityRef.current >= GOOGLE_SESSION_IDLE_TIMEOUT_MS) {
+        handleGoogleSignOut(true);
+      }
+    }, 5000);
+
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, updateActivity));
+      clearInterval(timer);
+    };
+  }, [googleEmail, handleGoogleSignOut]);
+
+  const executeGoogleSignIn = async () => {
+    setShowAdminSessionWarnModal(false);
+    setGoogleSigningIn(true);
+    setGoogleAuthError(null);
+    try {
+      await signInEmployeeWithGoogle();
+      lastGoogleActivityRef.current = Date.now();
+    } catch (err: any) {
+      console.error('Google sign-in error:', err);
+      const code = err?.code || '';
+      if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
+        setGoogleAuthError('เข้าสู่ระบบด้วย Google ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+      }
+    } finally {
+      setGoogleSigningIn(false);
+    }
+  };
+
+  const handleClickGoogleSignIn = () => {
+    if (isHrAdminSessionActive || isHrAdminAuthUser(auth.currentUser)) {
+      setShowAdminSessionWarnModal(true);
+      return;
+    }
+    executeGoogleSignIn();
+  };
+
   const shiftStats = useMemo(() => {
     const templateMap = new Map<string, ShiftTemplate>();
     shiftTemplates.forEach((t) => templateMap.set(t.id, t));
@@ -224,6 +441,7 @@ export function MyProfilePage() {
 
   const hasSubmittedFirstTime = Boolean(profileStatus?.hasSubmittedFirstTime);
   const isPendingApproval = profileStatus?.lastStatus === 'pending';
+  const isVerifiedOwner = Boolean(googleEmail && fullPrivateData && !googleAuthError);
 
   const masked: ProfileMaskedSummary = profileStatus?.maskedSummary || {
     title: '',
@@ -275,6 +493,31 @@ export function MyProfilePage() {
         ยังไม่กรอก
       </span>
     );
+
+  const renderEyeToggleButton = (fieldKey: SecretFieldKey) => {
+    if (!isVerifiedOwner) return null;
+    const isShown = Boolean(revealedSecrets[fieldKey]);
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSecretField(fieldKey)}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/80 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[10px] font-bold transition cursor-pointer"
+        title={isShown ? 'ซ่อนข้อมูล' : 'เปิดดูข้อมูลเต็ม (ซ่อนอัตโนมัติใน 30 วินาที)'}
+      >
+        {isShown ? (
+          <>
+            <EyeOff className="w-3 h-3" />
+            <span>ซ่อน (30วิ)</span>
+          </>
+        ) : (
+          <>
+            <Eye className="w-3 h-3" />
+            <span>ดูข้อมูล</span>
+          </>
+        )}
+      </button>
+    );
+  };
 
   const renderActionButton = (sectionKey: string) => {
     if (isPendingApproval) {
@@ -676,17 +919,77 @@ export function MyProfilePage() {
         </div>
       </div>
 
-      {/* Security Notice Banner */}
-      <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-900/60 flex items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2.5">
-          <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-          <span className="text-slate-700 dark:text-slate-300 font-medium">
-            เพื่อความปลอดภัยสูงสุด ข้อมูลลับส่วนบุคคลจะถูกซ่อนและไม่ถูกดึงกลับมาแสดงแบบเต็มบนหน้าจอนี้
-            {!hasSubmittedFirstTime
-              ? ' (กรอกข้อมูลครั้งแรกบันทึกได้ทันทีไม่ต้องรออนุมัติ)'
-              : ' (การขอแก้ไขข้อมูลครั้งถัดไปจะต้องรอแอดมิน HR อนุมัติ)'}
-          </span>
+      {/* Security & Google Verification Banner */}
+      <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-900/60 space-y-3 text-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5 sm:mt-0" />
+            <div>
+              <div className="font-bold text-slate-900 dark:text-white">
+                {isVerifiedOwner
+                  ? `ยืนยันตัวตนด้วย Google แล้ว (${googleEmail})`
+                  : 'ระบบปกป้องข้อมูลส่วนบุคคลของพนักงาน'}
+              </div>
+              <p className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5">
+                {isVerifiedOwner
+                  ? 'กดไอคอนรูปตาในแต่ละช่องเพื่อดูข้อมูลลับ (ซ่อนอัตโนมัติใน 30 วินาที และออกจากระบบอัตโนมัติเมื่อไม่ได้ใช้งาน 5 นาทีหรือเปลี่ยนหน้า)'
+                  : 'ข้อมูลลับจะถูกปิดบางส่วน หากต้องการดูข้อมูลเต็มของคุณ กรุณาเข้าสู่ระบบด้วยบัญชี Google ที่ผูกไว้กับฝ่ายบุคคล'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {!googleEmail ? (
+              <button
+                type="button"
+                disabled={googleSigningIn}
+                onClick={handleClickGoogleSignIn}
+                className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 text-xs font-bold flex items-center gap-2 shadow-2xs transition cursor-pointer disabled:opacity-50"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>
+                  {googleSigningIn
+                    ? 'กำลังเข้าสู่ระบบ...'
+                    : 'เข้าสู่ระบบด้วย Google เพื่อดูข้อมูลเต็ม'}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleGoogleSignOut(false)}
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>ออกจากระบบ ({googleEmail})</span>
+              </button>
+            )}
+          </div>
         </div>
+
+        {loadingFullPrivate && (
+          <div className="p-2.5 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 flex items-center gap-2 font-semibold">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+            <span>กำลังตรวจสอบสิทธิ์บัญชี Google และโหลดข้อมูลส่วนบุคคล...</span>
+          </div>
+        )}
+
+        {googleAuthError && (
+          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-center justify-between gap-2 font-bold">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              <span>{googleAuthError}</span>
+            </div>
+            {googleEmail && (
+              <button
+                type="button"
+                onClick={() => handleGoogleSignOut(false)}
+                className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer shrink-0"
+              >
+                ออกจากระบบ
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Category Cards (ก - ซ) */}
@@ -712,7 +1015,7 @@ export function MyProfilePage() {
             <div>
               <span className="text-slate-400 block text-[11px]">คำนำหน้า</span>
               <span className="font-bold text-slate-800 dark:text-slate-100">
-                {masked.title || '-'}
+                {(isVerifiedOwner ? fullPrivateData?.title : masked.title) || masked.title || '-'}
               </span>
             </div>
             <div>
@@ -724,7 +1027,9 @@ export function MyProfilePage() {
             <div>
               <span className="text-slate-400 block text-[11px]">ชื่อ-นามสกุล (ไทย)</span>
               <span className="font-bold text-slate-800 dark:text-slate-100">
-                {masked.firstNameTh || masked.lastNameTh
+                {isVerifiedOwner && (fullPrivateData?.firstNameTh || fullPrivateData?.lastNameTh)
+                  ? `${fullPrivateData?.firstNameTh || ''} ${fullPrivateData?.lastNameTh || ''}`.trim()
+                  : masked.firstNameTh || masked.lastNameTh
                   ? `${masked.firstNameTh} ${masked.lastNameTh}`.trim()
                   : '-'}
               </span>
@@ -732,19 +1037,31 @@ export function MyProfilePage() {
             <div>
               <span className="text-slate-400 block text-[11px]">ชื่อ-นามสกุล (อังกฤษ)</span>
               <span className="font-bold text-slate-800 dark:text-slate-100">
-                {masked.firstNameEn || masked.lastNameEn
+                {isVerifiedOwner && (fullPrivateData?.firstNameEn || fullPrivateData?.lastNameEn)
+                  ? `${fullPrivateData?.firstNameEn || ''} ${fullPrivateData?.lastNameEn || ''}`.trim()
+                  : masked.firstNameEn || masked.lastNameEn
                   ? `${masked.firstNameEn} ${masked.lastNameEn}`.trim()
                   : '-'}
               </span>
             </div>
             <div>
               <span className="text-slate-400 block text-[11px]">วันเกิด</span>
-              <div className="mt-0.5">{renderFillStatusBadge(masked.birthDateStatus)}</div>
+              <div className="mt-0.5">
+                {isVerifiedOwner ? (
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.birthDate || '-'}
+                  </span>
+                ) : (
+                  renderFillStatusBadge(masked.birthDateStatus)
+                )}
+              </div>
             </div>
             <div>
               <span className="text-slate-400 block text-[11px]">สถานภาพสมรส</span>
               <span className="font-bold text-slate-800 dark:text-slate-100">
-                {masked.maritalStatus || '-'}
+                {(isVerifiedOwner ? fullPrivateData?.maritalStatus : masked.maritalStatus) ||
+                  masked.maritalStatus ||
+                  '-'}
               </span>
             </div>
           </div>
@@ -769,18 +1086,50 @@ export function MyProfilePage() {
 
           <div className="grid grid-cols-2 gap-2.5 text-xs">
             <div className="col-span-2">
-              <span className="text-slate-400 block text-[11px]">เลขบัตรประชาชน 13 หลัก</span>
-              <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
-                {masked.ssoNumberMasked || '-'}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 block text-[11px]">เลขบัตรประชาชน 13 หลัก</span>
+                {renderEyeToggleButton('ssoNumber')}
+              </div>
+              <span className="font-mono font-bold text-slate-800 dark:text-slate-100 mt-0.5 block">
+                {isVerifiedOwner && revealedSecrets.ssoNumber
+                  ? fullPrivateData?.ssoNumber || '-'
+                  : isVerifiedOwner && fullPrivateData?.ssoNumber
+                  ? maskSensitiveNumber(fullPrivateData.ssoNumber)
+                  : masked.ssoNumberMasked || '-'}
               </span>
             </div>
             <div>
               <span className="text-slate-400 block text-[11px]">วันหมดอายุบัตร</span>
-              <div className="mt-0.5">{renderFillStatusBadge(masked.idCardExpiryStatus)}</div>
+              <div className="mt-0.5">
+                {isVerifiedOwner ? (
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.idCardExpiry || '-'}
+                  </span>
+                ) : (
+                  renderFillStatusBadge(masked.idCardExpiryStatus)
+                )}
+              </div>
             </div>
             <div>
-              <span className="text-slate-400 block text-[11px]">ที่อยู่ตามบัตรประชาชน</span>
-              <div className="mt-0.5">{renderFillStatusBadge(masked.addressStatus)}</div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 block text-[11px]">ที่อยู่ตามบัตรประชาชน</span>
+                {renderEyeToggleButton('address')}
+              </div>
+              <div className="mt-0.5">
+                {isVerifiedOwner && revealedSecrets.address ? (
+                  <span className="font-bold text-slate-800 dark:text-slate-100 break-words">
+                    {fullPrivateData?.address || '-'}
+                  </span>
+                ) : (
+                  renderFillStatusBadge(
+                    isVerifiedOwner
+                      ? fullPrivateData?.address
+                        ? 'กรอกแล้ว'
+                        : 'ยังไม่กรอก'
+                      : masked.addressStatus
+                  )
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -804,22 +1153,62 @@ export function MyProfilePage() {
 
           <div className="grid grid-cols-2 gap-2.5 text-xs">
             <div>
-              <span className="text-slate-400 block text-[11px]">เบอร์มือถือ</span>
-              <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
-                {masked.phoneMasked || '-'}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 block text-[11px]">เบอร์มือถือ</span>
+                {renderEyeToggleButton('phone')}
+              </div>
+              <span className="font-mono font-bold text-slate-800 dark:text-slate-100 mt-0.5 block">
+                {isVerifiedOwner && revealedSecrets.phone
+                  ? fullPrivateData?.phone || '-'
+                  : isVerifiedOwner && fullPrivateData?.phone
+                  ? maskPhoneLast4(fullPrivateData.phone)
+                  : masked.phoneMasked || '-'}
               </span>
             </div>
             <div>
-              <span className="text-slate-400 block text-[11px]">ที่อยู่ปัจจุบัน</span>
-              <div className="mt-0.5">{renderFillStatusBadge(masked.currentAddressStatus)}</div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 block text-[11px]">ที่อยู่ปัจจุบัน</span>
+                {renderEyeToggleButton('currentAddress')}
+              </div>
+              <div className="mt-0.5">
+                {isVerifiedOwner && revealedSecrets.currentAddress ? (
+                  <span className="font-bold text-slate-800 dark:text-slate-100 break-words">
+                    {fullPrivateData?.currentAddress || '-'}
+                  </span>
+                ) : (
+                  renderFillStatusBadge(
+                    isVerifiedOwner
+                      ? fullPrivateData?.currentAddress
+                        ? 'กรอกแล้ว'
+                        : 'ยังไม่กรอก'
+                      : masked.currentAddressStatus
+                  )
+                )}
+              </div>
             </div>
             <div>
               <span className="text-slate-400 block text-[11px]">อีเมลส่วนตัว</span>
-              <div className="mt-0.5">{renderFillStatusBadge(masked.emailStatus)}</div>
+              <div className="mt-0.5">
+                {isVerifiedOwner ? (
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100 break-all">
+                    {fullPrivateData?.email || '-'}
+                  </span>
+                ) : (
+                  renderFillStatusBadge(masked.emailStatus)
+                )}
+              </div>
             </div>
             <div>
               <span className="text-slate-400 block text-[11px]">LINE ID</span>
-              <div className="mt-0.5">{renderFillStatusBadge(masked.lineIdStatus)}</div>
+              <div className="mt-0.5">
+                {isVerifiedOwner ? (
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.lineId || '-'}
+                  </span>
+                ) : (
+                  renderFillStatusBadge(masked.lineIdStatus)
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -844,11 +1233,43 @@ export function MyProfilePage() {
           <div className="text-xs space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-slate-500">ข้อมูลผู้ติดต่อฉุกเฉิน</span>
-              {renderFillStatusBadge(masked.emergencyStatus)}
+              <div className="flex items-center gap-1.5">
+                {renderFillStatusBadge(
+                  isVerifiedOwner
+                    ? fullPrivateData?.emergencyName || fullPrivateData?.emergencyPhone
+                      ? 'กรอกแล้ว'
+                      : 'ยังไม่กรอก'
+                    : masked.emergencyStatus
+                )}
+                {renderEyeToggleButton('emergency')}
+              </div>
             </div>
-            <p className="text-[11px] text-slate-400">
-              ข้อมูลชื่อ ความสัมพันธ์ และเบอร์ติดต่อฉุกเฉินถูกเก็บรักษาเป็นความลับเฉพาะฝ่ายบุคคล
-            </p>
+            {isVerifiedOwner && revealedSecrets.emergency ? (
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 grid grid-cols-3 gap-2">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">ชื่อผู้ติดต่อ</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.emergencyName || '-'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">ความสัมพันธ์</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.emergencyRelation || '-'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">เบอร์โทรศัพท์</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.emergencyPhone || '-'}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                ข้อมูลชื่อ ความสัมพันธ์ และเบอร์ติดต่อฉุกเฉินถูกซ่อนไว้เพื่อความปลอดภัย
+              </p>
+            )}
           </div>
         </div>
 
@@ -873,21 +1294,37 @@ export function MyProfilePage() {
             <div>
               <span className="text-slate-400 block text-[11px]">ธนาคาร</span>
               <span className="font-bold text-slate-800 dark:text-slate-100">
-                {masked.bankName || '-'}
+                {(isVerifiedOwner ? fullPrivateData?.bankName : masked.bankName) ||
+                  masked.bankName ||
+                  '-'}
               </span>
             </div>
             <div>
               <span className="text-slate-400 block text-[11px]">ชื่อบัญชี</span>
               <span className="font-bold text-slate-800 dark:text-slate-100">
-                {masked.accountName || '-'}
+                {(isVerifiedOwner ? fullPrivateData?.accountName : masked.accountName) ||
+                  masked.accountName ||
+                  '-'}
               </span>
             </div>
             <div className="col-span-2">
-              <span className="text-slate-400 block text-[11px]">เลขที่บัญชี</span>
-              <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
-                {masked.accountNumberMasked || '-'}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 block text-[11px]">เลขที่บัญชี</span>
+                {renderEyeToggleButton('accountNumber')}
+              </div>
+              <span className="font-mono font-bold text-slate-800 dark:text-slate-100 mt-0.5 block">
+                {isVerifiedOwner && revealedSecrets.accountNumber
+                  ? fullPrivateData?.accountNumber || '-'
+                  : isVerifiedOwner && fullPrivateData?.accountNumber
+                  ? maskSensitiveNumber(fullPrivateData.accountNumber)
+                  : masked.accountNumberMasked || '-'}
               </span>
             </div>
+          </div>
+
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>การเปลี่ยนบัญชีรับเงินต้องรอ HR อนุมัติทุกครั้ง</span>
           </div>
         </div>
 
@@ -913,6 +1350,22 @@ export function MyProfilePage() {
               <span className="text-slate-500">ข้อมูลสถานพยาบาลและประวัติ สปส.</span>
               {renderFillStatusBadge(masked.ssoSectionStatus)}
             </div>
+            {isVerifiedOwner && (
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">รพ. ประกันสังคม</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.ssoHospital || '-'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">เคยมี สปส. มาก่อน</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.hadSsoBefore || '-'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -938,8 +1391,45 @@ export function MyProfilePage() {
           <div className="text-xs space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-slate-500">ข้อมูลคู่สมรส บุตร บิดามารดา และเบี้ยประกัน</span>
-              {renderFillStatusBadge(masked.taxDeductionStatus)}
+              <div className="flex items-center gap-1.5">
+                {renderFillStatusBadge(masked.taxDeductionStatus)}
+                {renderEyeToggleButton('taxDeduction')}
+              </div>
             </div>
+            {isVerifiedOwner && revealedSecrets.taxDeduction && (
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">คู่สมรส</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.spouseHasIncome || '-'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">บุตร (คน)</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.childrenCount ?? 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">บิดามารดา (คน)</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.parentsSupportedCount ?? 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">ประกันชีวิต/ปี</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                    {(fullPrivateData?.lifeInsurancePerYear ?? 0).toLocaleString()} บ.
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">ประกันสุขภาพ/ปี</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                    {(fullPrivateData?.healthInsurancePerYear ?? 0).toLocaleString()} บ.
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -965,9 +1455,64 @@ export function MyProfilePage() {
               <span className="text-slate-500">ข้อมูลวุฒิการศึกษาและสถานศึกษา</span>
               {renderFillStatusBadge(masked.educationStatus)}
             </div>
+            {isVerifiedOwner && (
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">วุฒิการศึกษาสูงสุด</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.educationLevel || '-'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block">สถานศึกษา</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    {fullPrivateData?.educationInstitute || '-'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Warning Modal if HR Admin session is active on the same device */}
+      {showAdminSessionWarnModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-amber-300 dark:border-amber-800 w-full max-w-md p-5 space-y-4">
+            <div className="flex items-start gap-3">
+              <span className="p-2.5 rounded-xl bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 shrink-0">
+                <ShieldAlert className="w-5 h-5" />
+              </span>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  คำเตือน: เครื่องนี้กำลังล็อกอินแอดมิน HR ค้างไว้
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  การเข้าสู่ระบบด้วย Google สำหรับพนักงานจะทำให้เซสชันแอดมิน HR ปัจจุบันออกจากระบบทันที
+                  คุณต้องการดำเนินการต่อหรือไม่?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowAdminSessionWarnModal(false)}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={executeGoogleSignIn}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer shadow-2xs"
+              >
+                ยืนยันและเข้าสู่ระบบด้วย Google
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Self-Service Form Modal */}
       {showFormModal && (
@@ -981,6 +1526,7 @@ export function MyProfilePage() {
           onClose={() => setShowFormModal(false)}
           onSuccess={(newStatus, isFirstTime) => {
             setProfileStatus(newStatus);
+            setReloadCount((c) => c + 1);
             setShowFormModal(false);
             setSubmitNotice({
               type: 'success',

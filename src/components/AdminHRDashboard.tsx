@@ -31,6 +31,7 @@ import { auth, db } from '../lib/firebase';
 import { useStore, isUserAdmin } from '../store/useStore';
 import {
   AdvanceRequest,
+  EmployeeLoginDoc,
   EmployeeSelfSubmittedFields,
   HRPrivateData,
   HRProbationStatus,
@@ -51,6 +52,7 @@ import {
   calculateProbationEndDate,
   calculateTenureText,
   exportHRProfilesToCsv,
+  fetchEmployeeLoginLink,
   fetchHRPrivateEmployee,
   fetchHRProfiles,
   getDefaultHRPrivateData,
@@ -59,10 +61,12 @@ import {
   lockHrAdminEmailSession,
   maskSensitiveNumber,
   rejectEmployeeProfileRequest,
+  saveEmployeeLoginLink,
   saveHRPrivateEmployee,
   saveHRProfiles,
   signInHrAdminEmail,
   syncProfileStatusMaskedSummaryByAdmin,
+  unlinkEmployeeLoginLink,
 } from '../lib/hrService';
 import { getOTCycleFromDate, getOTCycleInfo } from '../lib/otUtils';
 import { AnimalAvatar } from './AnimalAvatar';
@@ -796,12 +800,15 @@ export function AdminHRDashboard() {
             <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden">
               {pendingProfileRequests.map((req) => {
                 const changedCount = Object.keys(req.data || {}).length;
+                const hasBankAccountChange = Boolean(
+                  req.data?.accountNumber && String(req.data.accountNumber).trim() !== ''
+                );
                 return (
                   <div
                     key={req.id}
                     className="p-3 sm:px-4 bg-white dark:bg-slate-900 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs transition"
                   >
-                    <div className="space-y-0.5">
+                    <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-slate-900 dark:text-white">
                           {req.employeeName || req.employeeId}
@@ -809,6 +816,12 @@ export function AdminHRDashboard() {
                         <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-[10px] font-bold">
                           รออนุมัติ ({changedCount} ช่อง)
                         </span>
+                        {hasBankAccountChange && (
+                          <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-extrabold inline-flex items-center gap-1 shadow-2xs">
+                            <AlertCircle className="w-3 h-3 shrink-0" />
+                            <span>เปลี่ยนบัญชีรับเงิน — โปรดยืนยันกับพนักงานก่อนอนุมัติ</span>
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400">
                         ส่งเมื่อ:{' '}
@@ -1176,7 +1189,16 @@ function EmployeeHRProfileModal({
   const [showFullAccountNum, setShowFullAccountNum] = useState<boolean>(false);
   const [showFullSsoNum, setShowFullSsoNum] = useState<boolean>(false);
 
-  // Load hr_private/{employee.uid} ONLY when unlocked
+  // Employee Google Login Link state (employee_logins/{employee.uid})
+  const [loginLink, setLoginLink] = useState<EmployeeLoginDoc | null>(null);
+  const [gmailInput, setGmailInput] = useState<string>('');
+  const [savingGmail, setSavingGmail] = useState<boolean>(false);
+  const [gmailNotice, setGmailNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  // Load hr_private/{employee.uid} and employee_logins/{employee.uid} ONLY when unlocked
   useEffect(() => {
     if (!isHrUnlocked) {
       setPrivateData(getDefaultHRPrivateData(initialProfile.fullName || employee.name || ''));
@@ -1184,6 +1206,9 @@ function EmployeeHRProfileModal({
       setLoadingPrivate(false);
       setShowFullAccountNum(false);
       setShowFullSsoNum(false);
+      setLoginLink(null);
+      setGmailInput('');
+      setGmailNotice(null);
       return;
     }
 
@@ -1193,12 +1218,17 @@ function EmployeeHRProfileModal({
       setLoadingPrivate(true);
       setPrivateLoadError(null);
       try {
-        const loaded = await fetchHRPrivateEmployee(
-          employee.uid,
-          initialProfile.fullName || employee.name || ''
-        );
+        const [loaded, linkedDoc] = await Promise.all([
+          fetchHRPrivateEmployee(
+            employee.uid,
+            initialProfile.fullName || employee.name || ''
+          ),
+          fetchEmployeeLoginLink(employee.uid).catch(() => null),
+        ]);
         if (!isCancelled) {
           setPrivateData(loaded);
+          setLoginLink(linkedDoc);
+          setGmailInput(linkedDoc?.email || '');
         }
       } catch (err: any) {
         console.error('Error loading HR private doc:', err);
@@ -1226,6 +1256,54 @@ function EmployeeHRProfileModal({
       isCancelled = true;
     };
   }, [isHrUnlocked, employee.uid, employee.name, initialProfile.fullName, privateReloadCount]);
+
+  const handleSaveGmailLink = async () => {
+    if (!isHrUnlocked || savingGmail) return;
+    setGmailNotice(null);
+    setSavingGmail(true);
+    try {
+      const saved = await saveEmployeeLoginLink(
+        employee.uid,
+        gmailInput,
+        hrUnlockedEmail || 'admin'
+      );
+      setLoginLink(saved);
+      setGmailInput(saved.email);
+      setGmailNotice({
+        type: 'success',
+        message: `ผูกอีเมล ${saved.email} สำเร็จ (พนักงานสามารถใช้บัญชี Google นี้ดูข้อมูลตัวเองในหน้า /me ได้)`,
+      });
+    } catch (err: any) {
+      setGmailNotice({
+        type: 'error',
+        message: err?.message || 'ไม่สามารถผูก Gmail ได้ กรุณาลองใหม่',
+      });
+    } finally {
+      setSavingGmail(false);
+    }
+  };
+
+  const handleUnlinkGmail = async () => {
+    if (!isHrUnlocked || savingGmail) return;
+    setGmailNotice(null);
+    setSavingGmail(true);
+    try {
+      await unlinkEmployeeLoginLink(employee.uid);
+      setLoginLink(null);
+      setGmailInput('');
+      setGmailNotice({
+        type: 'success',
+        message: 'ยกเลิกการผูก Gmail สำหรับดูข้อมูลตัวเองเรียบร้อยแล้ว',
+      });
+    } catch (err: any) {
+      setGmailNotice({
+        type: 'error',
+        message: err?.message || 'ไม่สามารถยกเลิกการผูก Gmail ได้',
+      });
+    } finally {
+      setSavingGmail(false);
+    }
+  };
 
   // When startDate or probationDays changes by user interaction, auto-recalculate probationEndDate
   const handleStartDateChange = (newStart: string) => {
@@ -1628,6 +1706,75 @@ function EmployeeHRProfileModal({
               </div>
             ) : (
               <div className="space-y-3">
+                {/* Gmail สำหรับดูข้อมูลตัวเอง (employee_logins/{employeeId}) */}
+                <div className="p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/80 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Gmail สำหรับดูข้อมูลตัวเอง (1 อีเมลผูกได้แค่ 1 พนักงาน)</span>
+                    </label>
+                    {loginLink?.email ? (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 text-[10px] font-bold">
+                        ผูกแล้ว: {loginLink.email}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-semibold">
+                        ยังไม่ได้ผูก Gmail
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="email"
+                      value={gmailInput}
+                      onChange={(e) => setGmailInput(e.target.value.toLowerCase())}
+                      placeholder="เช่น employee@gmail.com"
+                      disabled={savingGmail}
+                      className="flex-1 px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 text-xs font-mono text-slate-900 dark:text-white"
+                    />
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={savingGmail || !gmailInput.trim()}
+                        onClick={handleSaveGmailLink}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                      >
+                        <Save className="w-3 h-3" />
+                        <span>{savingGmail ? 'กำลังบันทึก...' : 'บันทึกการผูก'}</span>
+                      </button>
+                      {loginLink?.email && (
+                        <button
+                          type="button"
+                          disabled={savingGmail}
+                          onClick={handleUnlinkGmail}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-100 dark:bg-rose-950/70 hover:bg-rose-200 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 text-[11px] font-bold transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                        >
+                          ยกเลิกการผูก
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {gmailNotice && (
+                    <div
+                      className={clsx(
+                        'p-2 rounded-lg text-[11px] font-semibold flex items-center gap-1.5',
+                        gmailNotice.type === 'success'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                          : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                      )}
+                    >
+                      {gmailNotice.type === 'success' ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      )}
+                      <span>{gmailNotice.message}</span>
+                    </div>
+                  )}
+                </div>
+
                 {/* Bank Info & Salary */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -2741,6 +2888,14 @@ function ProfileRequestComparisonModal({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Red Warning Badge if Account Number is Changed */}
+        {rows.some((r) => r.key === 'accountNumber' && r.isChanged) && (
+          <div className="p-3 rounded-xl bg-rose-600 text-white text-xs font-extrabold flex items-center gap-2 shadow-sm shrink-0">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>เปลี่ยนบัญชีรับเงิน — โปรดยืนยันกับพนักงานก่อนอนุมัติ</span>
+          </div>
+        )}
 
         {/* 3-Column Comparison Table: ช่อง | ค่าเดิม | ค่าใหม่ */}
         <div className="overflow-y-auto flex-1 border border-slate-200 dark:border-slate-800 rounded-xl">
