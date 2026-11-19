@@ -19,6 +19,7 @@ import { UserProfile, Role, WorkStatus, AccountStatus, Case, Agent } from '../ty
 import { ANIMAL_LIST } from '../components/AnimalAvatar';
 import { clockOutEmployeeAndReturnCases, ShiftActionResult } from '../lib/shiftService';
 import {
+  PRIMARY_ADMIN_USER_ID,
   createPendingAccessRequest,
   fetchAccessRequestByEmail,
   fetchUserRoleByEmail,
@@ -1031,6 +1032,72 @@ export const useStore = create<AppState>((set, get) => {
         }
 
         if (isHrAdminEmail(email)) {
+          const adminRef = doc(db, 'users', PRIMARY_ADMIN_USER_ID);
+          const adminSnap = await getDoc(adminRef);
+
+          if (adminSnap.exists()) {
+            const foundData = adminSnap.data();
+            const now = Date.now();
+            const cleanUsername = String(foundData.username || 'gametpl').trim().toLowerCase();
+            const assignedEmoji =
+              foundData.avatarEmoji ||
+              getDeterministicAnimalEmoji(cleanUsername || PRIMARY_ADMIN_USER_ID);
+            const resolvedRole: Role = foundData.role || 'admin';
+            const resolvedName =
+              foundData.name === 'คุณเกม' || !foundData.name
+                ? 'Game'
+                : String(foundData.name);
+
+            const updates: Record<string, any> = {
+              role: resolvedRole,
+              workStatus: 'working',
+              lastActiveAt: now,
+              lastActionAt: now,
+              clockedInAt: now,
+              autoClockOutReason: '',
+              avatarEmoji: assignedEmoji,
+            };
+
+            try {
+              await updateDoc(adminRef, updates);
+            } catch (err) {
+              console.warn('Update primary admin workStatus after Google login warning:', err);
+            }
+
+            const loggedInAdmin = sanitizeUserProfile(
+              {
+                ...foundData,
+                ...updates,
+                uid: PRIMARY_ADMIN_USER_ID,
+                username: foundData.username || 'gametpl',
+                name: resolvedName,
+                role: resolvedRole,
+                avatarEmoji: assignedEmoji,
+                email,
+                authMethod: 'google',
+                systemRole: 'super',
+                isRoleOnlyUser: false,
+              },
+              PRIMARY_ADMIN_USER_ID
+            );
+
+            localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(loggedInAdmin));
+            localStorage.setItem(
+              'thaiplus_login_mode',
+              isPersonalDevice ? 'google_personal' : 'google_shared'
+            );
+            if (isPersonalDevice) {
+              sessionStorage.removeItem('thaiplus_shared_device_session');
+            } else {
+              sessionStorage.setItem('thaiplus_shared_device_session', 'true');
+            }
+
+            set({ user: loggedInAdmin });
+            get().startRealtimeListeners();
+            return { success: true };
+          }
+
+          // ทางสำรอง: ถ้าไม่มีเอกสาร users/admin_gametpl ค่อยใช้แบบ "แอดมินหลัก" เดิม
           const now = Date.now();
           const assignedEmoji = getDeterministicAnimalEmoji(email);
           const primaryAdminUser: UserProfile = {

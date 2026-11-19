@@ -1303,6 +1303,7 @@ export async function syncProfileStatusMaskedSummaryByAdmin(
 
 const EMPLOYEE_LOGINS_COLLECTION = 'employee_logins';
 export const HR_ADMIN_EMAILS: readonly string[] = ['gr289514@gmail.com'];
+export const PRIMARY_ADMIN_USER_ID = 'admin_gametpl';
 
 /**
  * ตรวจสอบว่าอีเมลนี้เป็นอีเมลแอดมิน HR หรือไม่
