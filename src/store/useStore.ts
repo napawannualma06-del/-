@@ -27,10 +27,11 @@ import {
   signInEmployeeWithGoogle,
   signOutEmployeeGoogleSession,
 } from '../lib/hrService';
+import { getCurrentPermissions } from '../lib/permissions';
 
 export type { Role, WorkStatus, AccountStatus, UserProfile };
 
-function getDeterministicAnimalEmoji(identifier: string): string {
+export function getDeterministicAnimalEmoji(identifier: string): string {
   const clean = (identifier || 'default').trim().toLowerCase();
   let hash = 0;
   for (let i = 0; i < clean.length; i++) {
@@ -241,19 +242,6 @@ const DEFAULT_INITIAL_CASES: Case[] = [
     updatedAt: Date.now() - 3600000,
   },
   {
-    id: 'sample_case_2',
-    caseKey: 'TP-102',
-    agentName: 'ตัวแทน วนิดา (ขอนแก่น)',
-    iphoneModel: 'iPhone 15 128GB Black',
-    province: 'ขอนแก่น',
-    status: 'credit_check',
-    assigneeId: 'emp_23',
-    assigneeName: 'พนักงาน 23',
-    acceptedAt: Date.now() - 1800000,
-    createdAt: Date.now() - 7200000,
-    updatedAt: Date.now() - 1800000,
-  },
-  {
     id: 'sample_case_3',
     caseKey: 'TP-103',
     agentName: 'ตัวแทน กิตติ (นครราชสีมา)',
@@ -274,7 +262,6 @@ const DEFAULT_INITIAL_USERS: UserProfile[] = [
   { uid: 'emp_cantaloop', username: 'cantaloop', name: 'แคนตาลูป', role: 'employee', avatarEmoji: '🐰', workStatus: 'working', createdAt: Date.now() },
   { uid: 'emp_suthalinee', username: 'suthalinee', name: 'เจน (Suthalinee)', role: 'employee', avatarEmoji: '🐱', workStatus: 'working', createdAt: Date.now() },
   { uid: 'emp_11', username: '11', name: 'พนักงาน 11', role: 'employee', avatarEmoji: '🐼', workStatus: 'working', createdAt: Date.now() },
-  { uid: 'emp_23', username: '23', name: 'พนักงาน 23', role: 'admin', avatarEmoji: '⚡', workStatus: 'working', createdAt: Date.now() },
   { uid: 'emp_somchai', username: 'somchai', name: 'สมชาย', role: 'employee', avatarEmoji: '🐻', workStatus: 'working', createdAt: Date.now() },
   { uid: 'emp_wipa', username: 'wipa', name: 'วิภา', role: 'employee', avatarEmoji: '🦊', workStatus: 'working', createdAt: Date.now() },
 ];
@@ -596,9 +583,19 @@ export const useStore = create<AppState>((set, get) => {
                     currentUser.avatarEmoji !== matched.avatarEmoji;
 
                   if (hasRealChange) {
-                    updatedCurrentUser = matched;
+                    const mergedCurrentUser: UserProfile = {
+                      ...matched,
+                      ...(currentUser.email ? { email: currentUser.email } : {}),
+                      ...(currentUser.authMethod ? { authMethod: currentUser.authMethod } : {}),
+                      ...(currentUser.systemRole ? { systemRole: currentUser.systemRole } : {}),
+                      ...(currentUser.isRoleOnlyUser !== undefined
+                        ? { isRoleOnlyUser: currentUser.isRoleOnlyUser }
+                        : {}),
+                      ...(currentUser.photoURL ? { photoURL: currentUser.photoURL } : {}),
+                    };
+                    updatedCurrentUser = mergedCurrentUser;
                     try {
-                      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(matched));
+                      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(mergedCurrentUser));
                     } catch {}
                   } else {
                     updatedCurrentUser = currentUser; // Keep existing reference to avoid downstream cascade
@@ -1034,12 +1031,41 @@ export const useStore = create<AppState>((set, get) => {
         }
 
         if (isHrAdminEmail(email)) {
-          await signOutEmployeeGoogleSession();
-          return {
-            success: false,
-            message:
-              'อีเมลนี้เป็นอีเมลแอดมิน กรุณาเข้าทางล็อกอินแอดมิน (ถ้ารหัสผ่านใช้ไม่ได้ ให้รีเซ็ตรหัสใน Firebase)',
+          const now = Date.now();
+          const assignedEmoji = getDeterministicAnimalEmoji(email);
+          const primaryAdminUser: UserProfile = {
+            uid: `role_${email}`,
+            username: email.split('@')[0],
+            name: 'แอดมินหลัก',
+            email,
+            role: 'employee',
+            systemRole: 'super',
+            isRoleOnlyUser: true,
+            photoURL: fbUser.photoURL || '',
+            avatarEmoji: assignedEmoji,
+            workStatus: 'working',
+            lastActiveAt: now,
+            lastActionAt: now,
+            clockedInAt: now,
+            accountStatus: 'approved',
+            createdAt: now,
+            authMethod: 'google',
           };
+
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(primaryAdminUser));
+          localStorage.setItem(
+            'thaiplus_login_mode',
+            isPersonalDevice ? 'google_personal' : 'google_shared'
+          );
+          if (isPersonalDevice) {
+            sessionStorage.removeItem('thaiplus_shared_device_session');
+          } else {
+            sessionStorage.setItem('thaiplus_shared_device_session', 'true');
+          }
+
+          set({ user: primaryAdminUser });
+          get().startRealtimeListeners();
+          return { success: true };
         }
 
         const [employeeId, roleDoc] = await Promise.all([
@@ -1246,36 +1272,6 @@ export const useStore = create<AppState>((set, get) => {
       localStorage.setItem('thaiplus_login_mode', 'pin');
       sessionStorage.removeItem('thaiplus_shared_device_session');
 
-      // 0. Direct Local / Emergency Access Account (Zero Database / Zero Firestore dependency)
-      // Requested by user: ID "23", Pass "23"
-      if (cleanUsername === '23') {
-        if (inputPin !== '23') {
-          return {
-            success: false,
-            message: 'รหัสผ่านสำหรับบัญชี 23 ไม่ถูกต้อง (กรุณากรอกรหัสผ่าน 23)',
-          };
-        }
-
-        const emergencyUser: UserProfile = {
-          uid: 'emp_23',
-          username: '23',
-          name: 'พนักงาน 23 (ผู้ดูแลระบบฉุกเฉิน)',
-          role: 'admin',
-          avatarEmoji: '⚡',
-          workStatus: 'working',
-          lastActiveAt: Date.now(),
-          lastActionAt: Date.now(),
-          clockedInAt: Date.now(),
-          accountStatus: 'approved',
-          createdAt: Date.now(),
-        };
-
-        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(emergencyUser));
-        set({ user: emergencyUser });
-        get().startRealtimeListeners();
-        return { success: true };
-      }
-
       // Super Admin "gametpl"
       if (cleanUsername === 'gametpl') {
         if (inputPin !== 'gametpl') {
@@ -1320,7 +1316,10 @@ export const useStore = create<AppState>((set, get) => {
           console.warn('Sync admin_gametpl to Firestore failed (proceeding locally):', err?.code || err);
         }
 
-        const sanitizedAdmin = sanitizeUserProfile(adminProfile, adminUid);
+        const sanitizedAdmin: UserProfile = {
+          ...sanitizeUserProfile(adminProfile, adminUid),
+          authMethod: 'pin',
+        };
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(sanitizedAdmin));
         set({ user: sanitizedAdmin });
         get().startRealtimeListeners();
@@ -1435,13 +1434,16 @@ export const useStore = create<AppState>((set, get) => {
 
         await updateDoc(doc(db, 'users', foundDocId), updates);
 
-        const loggedInUser = sanitizeUserProfile(
-          {
-            ...foundData,
-            ...updates,
-          },
-          foundDocId
-        );
+        const loggedInUser: UserProfile = {
+          ...sanitizeUserProfile(
+            {
+              ...foundData,
+              ...updates,
+            },
+            foundDocId
+          ),
+          authMethod: 'pin',
+        };
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(loggedInUser));
         set({ user: loggedInUser });
         get().startRealtimeListeners();
@@ -1472,6 +1474,7 @@ export const useStore = create<AppState>((set, get) => {
             ? {
                 ...matched,
                 role: resolvedRole,
+                authMethod: 'pin',
                 workStatus: 'working',
                 lastActiveAt: now,
                 lastActionAt: now,
@@ -1482,6 +1485,7 @@ export const useStore = create<AppState>((set, get) => {
                 username: cleanUsername,
                 name: cleanUsername === '11' ? 'พนักงาน 11' : `พนักงาน ${cleanUsername}`,
                 role: resolvedRole,
+                authMethod: 'pin',
                 avatarEmoji: getDeterministicAnimalEmoji(cleanUsername),
                 workStatus: 'working',
                 lastActiveAt: now,
@@ -1516,78 +1520,18 @@ export const useStore = create<AppState>((set, get) => {
       }
     },
 
-    // Item 2: Register new employee directly in browser with SHA-256 + salt
-    registerEmployee: async (name: string, username: string, pin?: string) => {
-      const cleanName = name.trim();
-      const cleanUsername = username.trim().toLowerCase();
-      const cleanPin = pin?.trim() || '';
-
-      if (!cleanName || !cleanUsername) {
-        return { success: false, message: 'กรุณากรอกชื่อและรหัสพนักงาน/ชื่อผู้ใช้ให้ครบถ้วน' };
-      }
-
-      if (cleanUsername === 'gametpl') {
-        return {
-          success: false,
-          message: 'ชื่อผู้ใช้นี้ถูกสงวนไว้สำหรับผู้ดูแลระบบหลัก (Super Admin)',
-        };
-      }
-
-      await ensureFirebaseAnonymousAuth();
-
-      try {
-        const uid = `emp_${cleanUsername}`;
-        const existingSnap = await getDoc(doc(db, 'users', uid));
-        if (existingSnap.exists()) {
-          const existingData = existingSnap.data();
-          if (existingData.accountStatus === 'pending') {
-            return {
-              success: false,
-              message: 'รหัสพนักงาน/ชื่อผู้ใช้นี้ได้ลงทะเบียนแล้ว และกำลังรอแอดมินอนุมัติ',
-            };
-          }
-          return {
-            success: false,
-            message: 'รหัสพนักงาน/ชื่อผู้ใช้นี้มีในระบบแล้ว กรุณาใช้หน้าเข้าสู่ระบบ',
-          };
-        }
-
-        const now = Date.now();
-        const newProfile: Record<string, any> = {
-          uid,
-          username: cleanUsername,
-          name: cleanName,
-          role: 'employee',
-          pin: '',
-          hasPin: Boolean(cleanPin),
-          workStatus: 'off_work',
-          avatarEmoji: getDeterministicAnimalEmoji(cleanUsername),
-          createdAt: now,
-          accountStatus: 'pending',
-        };
-
-        if (cleanPin) {
-          const pinSalt = generatePinSalt();
-          const pinHash = await computePinHash(cleanPin, pinSalt);
-          newProfile.pinHash = pinHash;
-          newProfile.pinSalt = pinSalt;
-        }
-
-        await setDoc(doc(db, 'users', uid), newProfile);
-        return { success: true, pendingApproval: true };
-      } catch (error) {
-        console.error('Register error:', error);
-        return {
-          success: false,
-          message: 'ไม่สามารถเชื่อมต่อระบบฐานข้อมูลเพื่อลงทะเบียนได้ กรุณาลองใหม่อีกครั้ง',
-        };
-      }
+    // Item 2: PIN registration disabled — new employees register via Google Login
+    registerEmployee: async (_name: string, _username: string, _pin?: string) => {
+      return {
+        success: false,
+        message: 'ปิดการสมัครด้วย PIN แล้ว กรุณาสมัครด้วย Google',
+      };
     },
 
     approveUser: async (uid: string) => {
       const currentUser = get().user;
-      if (!isUserAdmin(currentUser)) {
-        return { success: false, message: 'เฉพาะผู้ดูแลระบบเท่านั้นที่สามารถอนุมัติผู้ใช้งานได้' };
+      if (!getCurrentPermissions(currentUser).manageUsers) {
+        return { success: false, message: 'เฉพาะผู้ดูแลระบบหรือฝ่ายบุคคลเท่านั้นที่สามารถอนุมัติผู้ใช้งานได้' };
       }
       try {
         const userRef = doc(db, 'users', uid);
@@ -1606,8 +1550,8 @@ export const useStore = create<AppState>((set, get) => {
 
     rejectUser: async (uid: string) => {
       const currentUser = get().user;
-      if (!isUserAdmin(currentUser)) {
-        return { success: false, message: 'เฉพาะผู้ดูแลระบบเท่านั้นที่สามารถปฏิเสธผู้ใช้งานได้' };
+      if (!getCurrentPermissions(currentUser).manageUsers) {
+        return { success: false, message: 'เฉพาะผู้ดูแลระบบหรือฝ่ายบุคคลเท่านั้นที่สามารถปฏิเสธผู้ใช้งานได้' };
       }
       try {
         const userRef = doc(db, 'users', uid);
@@ -1623,8 +1567,8 @@ export const useStore = create<AppState>((set, get) => {
 
     deleteUserAccount: async (uid: string) => {
       const currentUser = get().user;
-      if (!isUserAdmin(currentUser)) {
-        return { success: false, message: 'เฉพาะผู้ดูแลระบบเท่านั้นที่สามารถลบบัญชีผู้ใช้งานได้' };
+      if (!getCurrentPermissions(currentUser).manageUsers) {
+        return { success: false, message: 'เฉพาะผู้ดูแลระบบหรือฝ่ายบุคคลเท่านั้นที่สามารถลบบัญชีผู้ใช้งานได้' };
       }
       if (uid === 'admin_gametpl') {
         return { success: false, message: 'ไม่สามารถลบบัญชี Super Admin หลักได้' };
@@ -1646,21 +1590,29 @@ export const useStore = create<AppState>((set, get) => {
         return;
       }
 
+      await signOutEmployeeGoogleSession();
+      await ensureFirebaseAnonymousAuth();
+      localStorage.setItem('thaiplus_login_mode', 'pin');
+      sessionStorage.removeItem('thaiplus_shared_device_session');
+
       const assignedEmoji =
         selectedUser.avatarEmoji || getDeterministicAnimalEmoji(selectedUser.username || selectedUser.uid);
       const now = Date.now();
-      const updatedUser: UserProfile = sanitizeUserProfile(
-        {
-          ...selectedUser,
-          workStatus: 'working',
-          lastActiveAt: now,
-          lastActionAt: now,
-          clockedInAt: now,
-          autoClockOutReason: '',
-          avatarEmoji: assignedEmoji,
-        },
-        selectedUser.uid
-      );
+      const updatedUser: UserProfile = {
+        ...sanitizeUserProfile(
+          {
+            ...selectedUser,
+            workStatus: 'working',
+            lastActiveAt: now,
+            lastActionAt: now,
+            clockedInAt: now,
+            autoClockOutReason: '',
+            avatarEmoji: assignedEmoji,
+          },
+          selectedUser.uid
+        ),
+        authMethod: 'pin',
+      };
       localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
       set({ user: updatedUser });
       get().startRealtimeListeners();

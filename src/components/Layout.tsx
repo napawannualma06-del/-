@@ -8,8 +8,7 @@ import { AvatarSelectorModal } from './AvatarSelectorModal';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { NotificationCenter, TechNotificationItem } from './NotificationCenter';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth, db } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import { playNotificationChime } from '../lib/sound';
 import { 
   LogOut, 
@@ -47,19 +46,15 @@ import { EmployeeQRModal } from './EmployeeQRModal';
 import { EmployeeShiftModal } from './EmployeeShiftModal';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { MobileBottomNav } from './MobileBottomNav';
-import { isUserAdmin } from '../store/useStore';
 import { useInactivityTracker } from '../hooks/useInactivityTracker';
 import { InactivityWarningModal } from './InactivityWarningModal';
 import { QuotaExceededBanner } from './QuotaExceededBanner';
 import {
   fetchPendingAccessRequestsCount,
   fetchPendingProfileRequestsCount,
-  fetchUserRoleByEmail,
-  isEmployeeGoogleAuthUser,
-  isHrAdminAuthUser,
   SYSTEM_ROLE_LABELS,
 } from '../lib/hrService';
-import { SystemRole } from '../types';
+import { usePermissions } from '../lib/permissions';
 import { getRoleBadgeStyle } from './RoleManagementPage';
 
 interface TechStatusToast {
@@ -141,6 +136,8 @@ export function Layout() {
   const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const toolsDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const userDropdownRef = useRef<HTMLDivElement | null>(null);
   const [showRefinanceModal, setShowRefinanceModal] = useState(false);
   const [refinanceModalModel, setRefinanceModalModel] = useState<string | undefined>(undefined);
   const [showMessengerModal, setShowMessengerModal] = useState(false);
@@ -153,8 +150,6 @@ export function Layout() {
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [pendingProfileReqCount, setPendingProfileReqCount] = useState(0);
   const [pendingAccessReqCount, setPendingAccessReqCount] = useState(0);
-  const [isHrAdminUnlocked, setIsHrAdminUnlocked] = useState(false);
-  const [liveGoogleRole, setLiveGoogleRole] = useState<SystemRole | null>(null);
   const [activeTechToast, setActiveTechToast] = useState<TechStatusToast | null>(null);
   const [techNotifications, setTechNotifications] = useState<TechNotificationItem[]>([]);
   const [highlightTechIssueId, setHighlightTechIssueId] = useState<string | undefined>(undefined);
@@ -164,35 +159,19 @@ export function Layout() {
   const lastBadgeLoadTimeRef = useRef<number>(0);
   const isOffWork = user?.workStatus === 'off_work';
 
-  // ตรวจสถานะแอดมินสูงสุด (แอดมิน HR ที่ปลดล็อกแล้ว หรือคนที่ role = 'super' ล็อกอินด้วย Google)
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (fbUser) => {
-      const hrUnlocked = isHrAdminAuthUser(fbUser);
-      setIsHrAdminUnlocked(hrUnlocked);
-      if (fbUser && isEmployeeGoogleAuthUser(fbUser) && fbUser.email) {
-        try {
-          const rDoc = await fetchUserRoleByEmail(fbUser.email);
-          setLiveGoogleRole(rDoc?.role || 'employee');
-        } catch {
-          setLiveGoogleRole(null);
-        }
-      } else {
-        setLiveGoogleRole(null);
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  const effectiveSystemRole: SystemRole = isHrAdminUnlocked
-    ? 'super'
-    : liveGoogleRole || user?.systemRole || 'employee';
-
-  const isSuperAdmin =
-    isHrAdminUnlocked ||
-    (user?.authMethod === 'google' && (effectiveSystemRole === 'super' || user?.systemRole === 'super'));
+  const {
+    effectiveSystemRole,
+    viewAdminDashboard,
+    canAccessHRPage,
+    manageRoles,
+    viewOTAdmin,
+    viewAdvanceAdmin,
+    viewAllTechnicalIssues,
+    editHRPrivate,
+  } = usePermissions();
 
   useEffect(() => {
-    if (!isSuperAdmin) {
+    if (!manageRoles) {
       setPendingAccessReqCount(0);
       return;
     }
@@ -209,7 +188,7 @@ export function Layout() {
     return () => {
       window.removeEventListener('role-access-requests-updated', loadAccessReqBadge);
     };
-  }, [isSuperAdmin]);
+  }, [manageRoles]);
 
   // Read notification keys tracking
   const [readNotifKeys, setReadNotifKeys] = useState<Set<string>>(() => {
@@ -287,9 +266,8 @@ export function Layout() {
       setTechNotifications([]);
       return;
     }
-    const isAdmin = isUserAdmin(user);
 
-    const qTech = isAdmin
+    const qTech = viewAllTechnicalIssues
       ? query(
           collection(db, 'technical_issues'),
           where('status', 'in', ['pending', 'in_progress'])
@@ -299,11 +277,11 @@ export function Layout() {
           where('reporterId', '==', user.uid)
         );
 
-    const otQuery = isAdmin
+    const otQuery = viewOTAdmin
       ? query(collection(db, 'overtime_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid));
 
-    const advanceQuery = isAdmin
+    const advanceQuery = viewAdvanceAdmin
       ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
 
@@ -360,8 +338,8 @@ export function Layout() {
         });
         setPendingAdvanceCount(pendingAdv);
 
-        if (isAdmin) {
-          const pendingProfCount = await fetchPendingProfileRequestsCount();
+        if (editHRPrivate) {
+          const pendingProfCount = await fetchPendingProfileRequestsCount().catch(() => 0);
           setPendingProfileReqCount(pendingProfCount);
         } else {
           setPendingProfileReqCount(0);
@@ -374,8 +352,8 @@ export function Layout() {
     loadBadgeCounts();
 
     const handleRefreshProfileReqBadge = async () => {
-      if (isAdmin) {
-        const c = await fetchPendingProfileRequestsCount();
+      if (editHRPrivate) {
+        const c = await fetchPendingProfileRequestsCount().catch(() => 0);
         setPendingProfileReqCount(c);
       }
     };
@@ -383,7 +361,15 @@ export function Layout() {
     return () => {
       window.removeEventListener('hr-profile-requests-updated', handleRefreshProfileReqBadge);
     };
-  }, [user?.uid, user?.username, user?.role]);
+  }, [
+    user?.uid,
+    user?.username,
+    user?.role,
+    viewAllTechnicalIssues,
+    viewOTAdmin,
+    viewAdvanceAdmin,
+    editHRPrivate,
+  ]);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -448,21 +434,31 @@ export function Layout() {
     };
   }, []);
 
-  // Click outside to close tools dropdown
+  // Click outside to close tools or user dropdown
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (toolsDropdownRef.current && !toolsDropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (toolsDropdownRef.current && !toolsDropdownRef.current.contains(target)) {
         setShowToolsDropdown(false);
+      }
+      if (userDropdownRef.current && !userDropdownRef.current.contains(target)) {
+        setShowUserDropdown(false);
       }
     };
 
-    if (showToolsDropdown) {
+    if (showToolsDropdown || showUserDropdown) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showToolsDropdown]);
+  }, [showToolsDropdown, showUserDropdown]);
+
+  // Close dropdowns on route navigation
+  useEffect(() => {
+    setShowToolsDropdown(false);
+    setShowUserDropdown(false);
+  }, [location.pathname]);
 
   const handleRequestNotification = async () => {
     if ('Notification' in window) {
@@ -497,36 +493,38 @@ export function Layout() {
                 <Link
                   to="/"
                   className={clsx(
-                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                    'inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
                     location.pathname === '/' 
                       ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   )}
-                  title="กระดานคิว"
+                  title="คิวงาน"
                 >
                   <ListTodo className="w-4 h-4 shrink-0" />
-                  <span>คิวงาน</span>
+                  <span className="hidden xl:inline">คิวงาน</span>
                 </Link>
  
-                <Link
-                  to="/admin"
-                  className={clsx(
-                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
-                    location.pathname === '/admin' 
-                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  )}
-                  title="แดชบอร์ด & สถิติ"
-                >
-                  <BarChart3 className="w-4 h-4 shrink-0" />
-                  <span>แดชบอร์ด</span>
-                </Link>
+                {viewAdminDashboard && (
+                  <Link
+                    to="/admin"
+                    className={clsx(
+                      'inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                      location.pathname === '/admin' 
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    )}
+                    title="แดชบอร์ด & สถิติ"
+                  >
+                    <BarChart3 className="w-4 h-4 shrink-0" />
+                    <span className="hidden xl:inline">แดชบอร์ด</span>
+                  </Link>
+                )}
 
-                {isUserAdmin(user) && (
+                {canAccessHRPage && (
                   <Link
                     to="/hr"
                     className={clsx(
-                      'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                      'inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
                       location.pathname === '/hr' 
                         ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -534,7 +532,7 @@ export function Layout() {
                     title="ระบบพนักงาน HR"
                   >
                     <Users className="w-4 h-4 shrink-0" />
-                    <span>HR</span>
+                    <span className="hidden xl:inline">HR</span>
                     {pendingProfileReqCount > 0 && (
                       <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white tabular-nums">
                         {pendingProfileReqCount}
@@ -543,11 +541,11 @@ export function Layout() {
                   </Link>
                 )}
 
-                {isSuperAdmin && (
+                {manageRoles && (
                   <Link
                     to="/roles"
                     className={clsx(
-                      'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                      'inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
                       location.pathname === '/roles'
                         ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs font-bold'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -555,7 +553,7 @@ export function Layout() {
                     title="จัดการสิทธิ์ผู้ใช้งาน (เฉพาะแอดมินสูงสุด)"
                   >
                     <Shield className="w-4 h-4 shrink-0" />
-                    <span>จัดการสิทธิ์</span>
+                    <span className="hidden xl:inline">จัดการสิทธิ์</span>
                     {pendingAccessReqCount > 0 && (
                       <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white tabular-nums">
                         {pendingAccessReqCount}
@@ -570,7 +568,7 @@ export function Layout() {
                     type="button"
                     onClick={() => setShowToolsDropdown(!showToolsDropdown)}
                     className={clsx(
-                      'relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                      'relative inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
                       showToolsDropdown
                         ? 'bg-indigo-600 text-white shadow-2xs'
                         : (pendingOTCount > 0 || pendingAdvanceCount > 0 || pendingTechCount > 0)
@@ -580,7 +578,7 @@ export function Layout() {
                     title="บริการและคำขอ (OT, เบิกแอดวานซ์, เรทผ่อน, แจ้งปัญหา)"
                   >
                     <Layers className={clsx("w-4 h-4 shrink-0", showToolsDropdown ? "text-white" : "text-indigo-500")} />
-                    <span>บริการ & คำขอ</span>
+                    <span className="hidden xl:inline">บริการ & คำขอ</span>
                     
                     {/* Badge รวมเตือนรายการรอดำเนินการ */}
                     {(pendingOTCount > 0 || pendingAdvanceCount > 0 || pendingTechCount > 0) && (
@@ -590,7 +588,7 @@ export function Layout() {
                     )}
 
                     <ChevronDown className={clsx(
-                      "w-3.5 h-3.5 transition-transform duration-200 shrink-0 opacity-70",
+                      "w-3.5 h-3.5 transition-transform duration-200 shrink-0 opacity-70 hidden xl:inline-block",
                       showToolsDropdown && "rotate-180"
                     )} />
                   </button>
@@ -628,7 +626,7 @@ export function Layout() {
                         type="button"
                         onClick={() => {
                           setShowToolsDropdown(false);
-                          setAdvanceDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+                          setAdvanceDefaultTab(viewAdvanceAdmin ? 'admin' : 'my');
                           setShowAdvanceModal(true);
                         }}
                         className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
@@ -659,7 +657,7 @@ export function Layout() {
                         type="button"
                         onClick={() => {
                           setShowToolsDropdown(false);
-                          setOtDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+                          setOtDefaultTab(viewOTAdmin ? 'admin' : 'my');
                           setShowOTModal(true);
                         }}
                         className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
@@ -939,108 +937,175 @@ export function Layout() {
                 )}
               </button>
  
-              {/* Current Member Badge */}
-              <div className="flex items-center pl-1.5 sm:pl-2 border-l border-slate-200/80 dark:border-slate-800 shrink-0 gap-1.5">
-                <button
-                  id="open-avatar-selector-btn"
-                  type="button"
-                  onClick={() => setShowAvatarModal(true)}
-                  className="group relative flex items-center gap-2 p-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/80 transition cursor-pointer text-left shrink-0"
-                  title="คลิกเพื่อเปลี่ยนรูปตัวการ์ตูนประจำตัว"
-                >
-                  <div className="relative shrink-0">
-                    <AnimalAvatar 
-                      avatarEmoji={user?.avatarEmoji}
-                      identifier={user?.username || user?.uid || 'user'} 
-                      name={user?.name || 'User'} 
-                      size="sm" 
-                    />
-                  </div>
-                  <div className="hidden lg:block text-left mr-1 shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[100px] block leading-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                        {user?.name}
-                      </span>
-                      <span
-                        className={clsx(
-                          'inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold border leading-tight shrink-0',
-                          getRoleBadgeStyle(effectiveSystemRole)
-                        )}
-                      >
-                        {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
+              {/* User Profile & Actions Dropdown */}
+              {user && (
+                <div className="relative pl-1.5 sm:pl-2 border-l border-slate-200/80 dark:border-slate-800 shrink-0" ref={userDropdownRef}>
+                  <button
+                    id="open-avatar-selector-btn"
+                    type="button"
+                    onClick={() => setShowUserDropdown(!showUserDropdown)}
+                    className={clsx(
+                      "group flex items-center gap-1.5 sm:gap-2 p-1 rounded-xl transition cursor-pointer text-left shrink-0",
+                      showUserDropdown
+                        ? "bg-slate-100 dark:bg-slate-800 ring-2 ring-indigo-500/20"
+                        : "hover:bg-slate-100 dark:hover:bg-slate-800/80"
+                    )}
+                    title={user?.name ? `${user.name} (${SYSTEM_ROLE_LABELS[effectiveSystemRole]}) - เมนูผู้ใช้` : "เมนูผู้ใช้"}
+                    aria-expanded={showUserDropdown}
+                    aria-haspopup="true"
+                  >
+                    <div className="relative shrink-0">
+                      <AnimalAvatar 
+                        avatarEmoji={user?.avatarEmoji}
+                        identifier={user?.username || user?.uid || 'user'} 
+                        name={user?.name || 'User'} 
+                        size="sm" 
+                      />
+                    </div>
+
+                    {/* ชื่อผู้ใช้ + ป้ายสิทธิ์: แสดงเต็มเฉพาะจอกว้างมาก (2xl ขึ้นไป) */}
+                    <div className="hidden 2xl:block text-left mr-0.5 shrink-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[110px] block leading-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                          {user?.name}
+                        </span>
+                        <span
+                          className={clsx(
+                            'inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold border leading-tight shrink-0',
+                            getRoleBadgeStyle(effectiveSystemRole)
+                          )}
+                        >
+                          {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 block leading-tight">
+                        @{user?.username || 'member'}
                       </span>
                     </div>
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500 block leading-tight">
-                      @{user?.username || 'member'}
-                    </span>
-                  </div>
-                </button>
 
-                {/* Mobile/Tablet Role Badge next to avatar */}
-                <span
-                  className={clsx(
-                    'lg:hidden inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0',
-                    getRoleBadgeStyle(effectiveSystemRole)
+                    <ChevronDown className={clsx(
+                      "w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0",
+                      showUserDropdown && "rotate-180"
+                    )} />
+                  </button>
+
+                  {/* Dropdown Menu Panel */}
+                  {showUserDropdown && (
+                    <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200/90 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                      {/* ส่วนบนสุด: ชื่อผู้ใช้ + ป้ายสิทธิ์ */}
+                      <div className="px-3.5 py-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
+                        <div className="relative shrink-0">
+                          <AnimalAvatar 
+                            avatarEmoji={user?.avatarEmoji}
+                            identifier={user?.username || user?.uid || 'user'} 
+                            name={user?.name || 'User'} 
+                            size="md" 
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-slate-900 dark:text-white truncate block">
+                              {user?.name}
+                            </span>
+                            <span
+                              className={clsx(
+                                'inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold border leading-tight shrink-0',
+                                getRoleBadgeStyle(effectiveSystemRole)
+                              )}
+                            >
+                              {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 block truncate mt-0.5">
+                            @{user?.username || 'member'} {user?.email ? `· ${user.email}` : ''}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowUserDropdown(false);
+                              setShowAvatarModal(true);
+                            }}
+                            className="mt-1 text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
+                          >
+                            <Smile className="w-3 h-3 shrink-0" />
+                            <span>เปลี่ยนรูปตัวการ์ตูน</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* เมนูตัวเลือก */}
+                      <div className="py-1">
+                        {/* 1. ข้อมูลของฉัน */}
+                        {!user?.isRoleOnlyUser && (
+                          <Link
+                            to="/me"
+                            onClick={() => setShowUserDropdown(false)}
+                            className="w-full px-3.5 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
+                          >
+                            <span className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 shrink-0">
+                              <User className="w-4 h-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
+                                ข้อมูลของฉัน
+                              </span>
+                              <span className="text-[11px] text-slate-400 block truncate">
+                                โปรไฟล์พนักงาน สลิปเงินเดือน เอกสารภาษี
+                              </span>
+                            </div>
+                          </Link>
+                        )}
+
+                        {/* 2. เปลี่ยนรหัสผ่าน / PIN */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowUserDropdown(false);
+                            setShowChangePasswordModal(true);
+                          }}
+                          className="w-full px-3.5 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
+                        >
+                          <span className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 shrink-0">
+                            <KeyRound className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-amber-600 dark:group-hover:text-amber-400">
+                              เปลี่ยนรหัสผ่าน / PIN
+                            </span>
+                            <span className="text-[11px] text-slate-400 block truncate">
+                              ตั้งหรือเปลี่ยนรหัสผ่าน 4 หลัก
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* 3. ออกจากระบบ (ล่างสุดสีแดง) */}
+                      <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowUserDropdown(false);
+                            logout();
+                          }}
+                          className="w-full px-3.5 py-2.5 text-left flex items-center gap-2.5 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition group cursor-pointer"
+                        >
+                          <span className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 shrink-0">
+                            <LogOut className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-rose-600 dark:text-rose-400 block">
+                              ออกจากระบบ
+                            </span>
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500 block truncate">
+                              สลับผู้ใช้ / ออกจากบัญชีปัจจุบัน
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
                   )}
-                >
-                  {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
-                </span>
-
-                {isSuperAdmin && (
-                  <Link
-                    to="/roles"
-                    className={clsx(
-                      'md:hidden inline-flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer shrink-0',
-                      location.pathname === '/roles'
-                        ? 'bg-purple-600 text-white shadow-2xs'
-                        : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200/70 dark:border-purple-800/70'
-                    )}
-                    title="จัดการสิทธิ์"
-                  >
-                    <Shield className="w-3.5 h-3.5 shrink-0" />
-                    {pendingAccessReqCount > 0 && (
-                      <span className="px-1 rounded-full text-[10px] font-bold bg-rose-500 text-white">
-                        {pendingAccessReqCount}
-                      </span>
-                    )}
-                  </Link>
-                )}
-
-                {!user?.isRoleOnlyUser && (
-                  <Link
-                    to="/me"
-                    className={clsx(
-                      'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer shrink-0',
-                      location.pathname === '/me'
-                        ? 'bg-indigo-600 text-white shadow-2xs'
-                        : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200/70 dark:border-indigo-800/70'
-                    )}
-                    title="ข้อมูลของฉัน (โปรไฟล์พนักงาน)"
-                  >
-                    <User className="w-3.5 h-3.5 shrink-0" />
-                    <span className="hidden sm:inline">ข้อมูลของฉัน</span>
-                  </Link>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setShowChangePasswordModal(true)}
-                  className="hidden md:flex w-9 h-9 items-center justify-center text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-xl transition cursor-pointer shrink-0"
-                  title="เปลี่ยนรหัสผ่าน / PIN พนักงาน"
-                >
-                  <KeyRound className="w-4 h-4 shrink-0" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200/70 dark:border-rose-800/70 rounded-xl transition cursor-pointer shrink-0"
-                  title="ออกจากระบบ"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" />
-                  <span>ออกจากระบบ</span>
-                </button>
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1053,52 +1118,7 @@ export function Layout() {
             <QuotaExceededBanner />
           </div>
         )}
-        {user?.isRoleOnlyUser && !(isSuperAdmin && location.pathname === '/roles') ? (
-          <div className="max-w-xl mx-auto my-12 p-8 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm text-center space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
-              <Shield className="w-7 h-7" />
-            </div>
-            <div className="space-y-1.5">
-              <div className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                สวัสดีคุณ <span className="font-bold text-slate-900 dark:text-white">{user.name}</span>
-              </div>
-              <h1 className="text-xl font-bold text-slate-900 dark:text-white">
-                ยินดีต้อนรับ สิทธิ์ของคุณ: {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
-              </h1>
-            </div>
-            <div className="flex items-center justify-center">
-              <span
-                className={clsx(
-                  'inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border',
-                  getRoleBadgeStyle(effectiveSystemRole)
-                )}
-              >
-                {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              เมนูตามสิทธิ์ของคุณจะเปิดให้ใช้งานในรอบถัดไป
-            </p>
-            {isSuperAdmin && (
-              <div className="pt-2">
-                <Link
-                  to="/roles"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition-colors"
-                >
-                  <Shield className="w-4 h-4" />
-                  <span>เปิดหน้าจัดการสิทธิ์</span>
-                  {pendingAccessReqCount > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white">
-                      {pendingAccessReqCount}
-                    </span>
-                  )}
-                </Link>
-              </div>
-            )}
-          </div>
-        ) : (
-          <Outlet />
-        )}
+        <Outlet />
       </main>
 
       {/* Avatar Customization Modal */}
@@ -1304,12 +1324,13 @@ export function Layout() {
           pendingAdvanceCount={pendingAdvanceCount}
           pendingTechCount={pendingTechCount}
           pendingProfileReqCount={pendingProfileReqCount}
+          pendingAccessReqCount={pendingAccessReqCount}
           onOpenOT={() => {
-            setOtDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+            setOtDefaultTab(viewOTAdmin ? 'admin' : 'my');
             setShowOTModal(true);
           }}
           onOpenAdvance={() => {
-            setAdvanceDefaultTab(isUserAdmin(user) ? 'admin' : 'my');
+            setAdvanceDefaultTab(viewAdvanceAdmin ? 'admin' : 'my');
             setShowAdvanceModal(true);
           }}
           onOpenShift={() => {

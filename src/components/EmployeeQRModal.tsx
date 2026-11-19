@@ -32,7 +32,8 @@ import {
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { EmployeePaymentMethod, PeerRepayment, RepaymentCategory, PromptPayTargetType } from '../types';
 import { db } from '../lib/firebase';
 import {
@@ -94,7 +95,7 @@ export function EmployeeQRModal({
   initialTab = 'directory'
 }: EmployeeQRModalProps) {
   const { user, registeredUsers, fetchRegisteredUsers } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { manageUsers: isAdmin } = usePermissions();
 
   const [activeTab, setActiveTab] = useState<'directory' | 'my_qr' | 'history'>(initialTab);
   const [methods, setMethods] = useState<EmployeePaymentMethod[]>([]);

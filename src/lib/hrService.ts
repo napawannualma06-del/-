@@ -10,12 +10,14 @@ import {
   query,
   setDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
   browserSessionPersistence,
   inMemoryPersistence,
+  reauthenticateWithPopup,
   setPersistence,
   signInAnonymously,
   signInWithEmailAndPassword,
@@ -23,6 +25,7 @@ import {
   signOut,
   User as FirebaseAuthUser,
 } from 'firebase/auth';
+import { ANIMAL_LIST } from '../components/AnimalAvatar';
 import { auth, db } from './firebase';
 import {
   AccessRequestDoc,
@@ -559,8 +562,16 @@ export async function signInHrAdminEmail(
 
 /**
  * ล็อกข้อมูลลับและออกจากระบบอีเมลทันที พร้อมคืนค่าการเชื่อมต่อปกติของแอป
+ * (หากล็อกอินหลักด้วย Google จะล็อกเฉพาะหน้าจอข้อมูลลับโดยไม่ signOut บัญชี Google หลัก)
  */
 export async function lockHrAdminEmailSession(): Promise<void> {
+  if (
+    auth.currentUser &&
+    isEmployeeGoogleAuthUser(auth.currentUser) &&
+    !isHrAdminAuthUser(auth.currentUser)
+  ) {
+    return;
+  }
   try {
     await signOut(auth);
   } catch (err) {
@@ -572,6 +583,62 @@ export async function lockHrAdminEmailSession(): Promise<void> {
     await signInAnonymously(auth);
   } catch {
     // ignore if anonymous auth is disabled
+  }
+}
+
+/**
+ * ยืนยันตัวตนด้วย Google Popup (กดครั้งเดียว) สำหรับปลดล็อกข้อมูลลับหลังถูกล็อก 1 ชม.
+ * บังคับว่าต้องเป็นอีเมลเดียวกับที่ล็อกอินอยู่ในระบบเท่านั้น ถ้าเป็นอีเมลอื่นจะปฏิเสธ
+ */
+export async function reverifyGoogleSessionForUnlock(expectedEmail: string): Promise<string> {
+  const cleanExpected = (expectedEmail || '').trim().toLowerCase();
+  if (!cleanExpected) {
+    throw new Error('ไม่พบอีเมล Google ที่ล็อกอินอยู่ในระบบ');
+  }
+
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({
+    prompt: 'select_account',
+    login_hint: cleanExpected,
+  });
+
+  const currentFbUser = auth.currentUser;
+  const currentFbEmail = (currentFbUser?.email || '').trim().toLowerCase();
+
+  try {
+    if (
+      currentFbUser &&
+      !currentFbUser.isAnonymous &&
+      isEmployeeGoogleAuthUser(currentFbUser) &&
+      currentFbEmail === cleanExpected
+    ) {
+      const cred = await reauthenticateWithPopup(currentFbUser, provider);
+      const verifiedEmail = (cred.user.email || '').trim().toLowerCase();
+      if (verifiedEmail !== cleanExpected) {
+        throw new Error(
+          `อีเมลที่เลือก (${verifiedEmail || '-'}) ไม่ตรงกับบัญชีที่ล็อกอินอยู่ (${cleanExpected})`
+        );
+      }
+      return verifiedEmail;
+    }
+
+    const cred = await signInWithPopup(auth, provider);
+    const verifiedEmail = (cred.user.email || '').trim().toLowerCase();
+    if (verifiedEmail !== cleanExpected) {
+      throw new Error(
+        `อีเมลที่เลือก (${verifiedEmail || '-'}) ไม่ตรงกับบัญชีที่ล็อกอินอยู่ (${cleanExpected})`
+      );
+    }
+    return verifiedEmail;
+  } catch (err: any) {
+    const code = err?.code || '';
+    if (code === 'auth/user-mismatch') {
+      throw new Error(`กรุณาเลือกบัญชี Google อีเมลเดิมที่ล็อกอินอยู่ (${cleanExpected}) เท่านั้น`);
+    }
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      throw new Error('ยกเลิกการยืนยันตัวตนด้วย Google');
+    }
+    throw err;
   }
 }
 
@@ -1767,6 +1834,209 @@ export async function fetchPendingAccessRequestsCount(): Promise<number> {
   return list.length;
 }
 
+function computeDeterministicAnimalEmoji(identifier: string): string {
+  const clean = (identifier || 'default').trim().toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  return ANIMAL_LIST[hash % ANIMAL_LIST.length].emoji;
+}
+
+export type AccessRequestApproveMode = 'new_employee' | 'existing_employee' | 'role_only';
+
+/**
+ * อนุมัติคำขอสิทธิ์ใน access_requests/{email} รองรับ 3 แบบด้วย writeBatch (สำเร็จพร้อมกันหรือไม่สำเร็จเลย):
+ * - 'new_employee' (ก. พนักงานใหม่): สร้าง users/{employeeId} + employee_logins/{employeeId} + user_roles/{email} + access_requests approved + role_audit
+ * - 'existing_employee' (ข. ผูกกับพนักงานเดิม): เขียน employee_logins/{employeeId} + user_roles/{email} (พร้อม employeeId) + access_requests approved + role_audit
+ * - 'role_only' (ค. สิทธิ์อย่างเดียว HR/ผู้บริหาร/super): เขียน user_roles/{email} + access_requests approved + role_audit
+ */
+export async function approveAccessRequestBatch(params: {
+  mode: AccessRequestApproveMode;
+  email: string;
+  role: SystemRole;
+  displayName: string;
+  employeeId?: string;
+  actorEmail: string;
+}): Promise<{ employeeId?: string; username?: string }> {
+  const cleanEmail = (params.email || '').trim().toLowerCase();
+  const cleanActorEmail = (
+    auth.currentUser?.email ||
+    params.actorEmail ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
+  const actorBy = cleanActorEmail || params.actorEmail || 'super_admin';
+
+  if (!cleanEmail) throw new Error('ไม่พบอีเมลคำขอสิทธิ์');
+  if (!isValidSystemRole(params.role)) {
+    throw new Error('สิทธิ์ที่เลือกไม่ถูกต้อง');
+  }
+  if (cleanActorEmail && cleanEmail === cleanActorEmail) {
+    throw new Error('ห้ามแก้สิทธิ์ของตัวเอง');
+  }
+  if (isHrAdminEmail(cleanEmail)) {
+    throw new Error('ห้ามใช้อีเมลแอดมินหลัก');
+  }
+
+  // ก่อนบันทึกทุกแบบ: เช็คว่าอีเมลนี้ยังไม่ได้ผูกกับพนักงานคนอื่น
+  const dupQ = query(
+    collection(db, EMPLOYEE_LOGINS_COLLECTION),
+    where('email', '==', cleanEmail)
+  );
+  const dupSnap = await getDocs(dupQ);
+  if (!dupSnap.empty) {
+    const linkedEmpId = dupSnap.docs[0].id;
+    throw new Error(
+      `อีเมล ${cleanEmail} ถูกผูกกับพนักงาน (${linkedEmpId}) อยู่แล้ว ไม่สามารถบันทึกซ้ำได้`
+    );
+  }
+
+  const now = Date.now();
+  const cleanDisplayName = (params.displayName || cleanEmail.split('@')[0] || 'พนักงาน').trim();
+  if (!cleanDisplayName) {
+    throw new Error('กรุณากรอกชื่อที่แสดง');
+  }
+
+  const batch = writeBatch(db);
+  let resolvedEmployeeId: string | undefined;
+  let resolvedUsername: string | undefined;
+
+  if (params.mode === 'new_employee') {
+    if (params.role !== 'employee' && params.role !== 'supervisor') {
+      throw new Error('สำหรับพนักงานใหม่ กรุณาเลือกสิทธิ์เป็น พนักงาน (employee) หรือ หัวหน้างาน (supervisor)');
+    }
+
+    // สร้าง employeeId = 'emp_' + ชื่อหน้าอีเมลแบบตัวพิมพ์เล็ก ตัดอักขระพิเศษ ถ้าซ้ำให้เติมเลขต่อท้าย
+    const localPart = cleanEmail.split('@')[0] || 'user';
+    const baseUsername = localPart.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
+
+    const [usersSnap, linksSnap] = await Promise.all([
+      getDocs(collection(db, 'users')),
+      getDocs(collection(db, EMPLOYEE_LOGINS_COLLECTION)),
+    ]);
+
+    const takenUserIds = new Set<string>();
+    const takenUsernames = new Set<string>();
+    usersSnap.forEach((d) => {
+      takenUserIds.add(d.id.toLowerCase());
+      const uname = String(d.data()?.username || '').trim().toLowerCase();
+      if (uname) takenUsernames.add(uname);
+    });
+    linksSnap.forEach((d) => {
+      takenUserIds.add(d.id.toLowerCase());
+    });
+
+    let candidateUsername = baseUsername.slice(0, 80);
+    let suffix = 2;
+    while (
+      takenUserIds.has(`emp_${candidateUsername}`) ||
+      takenUsernames.has(candidateUsername)
+    ) {
+      candidateUsername = `${baseUsername.slice(0, 75)}${suffix}`;
+      suffix++;
+    }
+
+    resolvedUsername = candidateUsername;
+    resolvedEmployeeId = `emp_${candidateUsername}`;
+
+    const newUserDoc = {
+      uid: resolvedEmployeeId,
+      username: resolvedUsername,
+      name: cleanDisplayName.slice(0, 99),
+      email: cleanEmail,
+      role: 'employee',
+      accountStatus: 'approved',
+      approvedAt: now,
+      approvedBy: actorBy.slice(0, 100),
+      hasPin: false,
+      workStatus: 'off_work',
+      avatarEmoji: computeDeterministicAnimalEmoji(resolvedUsername),
+      createdAt: now,
+    };
+
+    batch.set(doc(db, 'users', resolvedEmployeeId), newUserDoc);
+    batch.set(doc(db, EMPLOYEE_LOGINS_COLLECTION, resolvedEmployeeId), {
+      email: cleanEmail,
+      linkedAt: now,
+      linkedBy: actorBy,
+    });
+    batch.set(doc(db, USER_ROLES_COLLECTION, cleanEmail), {
+      role: params.role,
+      displayName: cleanDisplayName,
+      employeeId: resolvedEmployeeId,
+      updatedAt: now,
+      updatedBy: actorBy,
+    });
+  } else if (params.mode === 'existing_employee') {
+    const targetEmpId = (params.employeeId || '').trim();
+    if (!targetEmpId) {
+      throw new Error('กรุณาเลือกพนักงานเดิมที่ต้องการผูก Gmail');
+    }
+
+    const existingLinkSnap = await getDoc(doc(db, EMPLOYEE_LOGINS_COLLECTION, targetEmpId));
+    if (existingLinkSnap.exists() && existingLinkSnap.data()?.email) {
+      throw new Error(`พนักงานรหัส ${targetEmpId} มีการผูก Gmail ไว้แล้ว`);
+    }
+
+    resolvedEmployeeId = targetEmpId;
+
+    batch.set(doc(db, EMPLOYEE_LOGINS_COLLECTION, targetEmpId), {
+      email: cleanEmail,
+      linkedAt: now,
+      linkedBy: actorBy,
+    });
+    batch.set(doc(db, USER_ROLES_COLLECTION, cleanEmail), {
+      role: params.role,
+      displayName: cleanDisplayName,
+      employeeId: targetEmpId,
+      updatedAt: now,
+      updatedBy: actorBy,
+    });
+  } else {
+    // 'role_only' (ค. สิทธิ์อย่างเดียว HR/ผู้บริหาร/super)
+    batch.set(doc(db, USER_ROLES_COLLECTION, cleanEmail), {
+      role: params.role,
+      displayName: cleanDisplayName,
+      updatedAt: now,
+      updatedBy: actorBy,
+    });
+  }
+
+  // อัปเดต access_requests/{email} -> approved
+  batch.set(
+    doc(db, ACCESS_REQUESTS_COLLECTION, cleanEmail),
+    {
+      status: 'approved',
+      decidedAt: now,
+      decidedBy: actorBy,
+    },
+    { merge: true }
+  );
+
+  // บันทึก role_audit/{autoId}
+  const auditRef = doc(collection(db, ROLE_AUDIT_COLLECTION));
+  batch.set(auditRef, {
+    targetEmail: cleanEmail,
+    fromRole: 'pending_request',
+    toRole: params.role,
+    byEmail: actorBy,
+    at: now,
+  });
+
+  await batch.commit();
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('role-access-requests-updated'));
+  }
+
+  return {
+    employeeId: resolvedEmployeeId,
+    username: resolvedUsername,
+  };
+}
+
 /**
  * อนุมัติคำขอสิทธิ์ใน access_requests/{email} พร้อมกำหนดสิทธิ์ใน user_roles/{email} และบันทึก role_audit
  */
@@ -1777,43 +2047,14 @@ export async function approveAccessRequestWithRole(params: {
   employeeId?: string;
   actorEmail: string;
 }): Promise<void> {
-  const cleanEmail = (params.email || '').trim().toLowerCase();
-  const cleanActorEmail = (
-    auth.currentUser?.email ||
-    params.actorEmail ||
-    ''
-  )
-    .trim()
-    .toLowerCase();
-
-  if (!cleanEmail) throw new Error('ไม่พบอีเมลคำขอสิทธิ์');
-  if (cleanActorEmail && cleanEmail === cleanActorEmail) {
-    throw new Error('ห้ามแก้สิทธิ์ของตัวเอง');
-  }
-
-  // บันทึก user_roles และ role_audit
-  await saveUserRoleWithAudit({
-    targetEmail: cleanEmail,
-    newRole: params.role,
+  await approveAccessRequestBatch({
+    mode: params.employeeId ? 'existing_employee' : 'role_only',
+    email: params.email,
+    role: params.role,
     displayName: params.displayName,
     employeeId: params.employeeId,
-    actorEmail: cleanActorEmail || params.actorEmail,
+    actorEmail: params.actorEmail,
   });
-
-  // อัปเดตสถานะใน access_requests/{email} เป็น approved
-  await setDoc(
-    doc(db, ACCESS_REQUESTS_COLLECTION, cleanEmail),
-    {
-      status: 'approved',
-      decidedAt: Date.now(),
-      decidedBy: cleanActorEmail || params.actorEmail || 'super_admin',
-    },
-    { merge: true }
-  );
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('role-access-requests-updated'));
-  }
 }
 
 /**

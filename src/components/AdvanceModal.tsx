@@ -12,7 +12,8 @@ import {
   limit 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { AdvanceRequest, AdvanceStatus } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { recordSystemAction } from '../lib/activityService';
@@ -92,7 +93,7 @@ const COMMON_BANKS = [
 
 export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModalProps) {
   const { user } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { viewAdvanceAdmin: isAdmin, approveAdvance: canApproveAdvance } = usePermissions();
 
   // Tabs
   // Tabs
@@ -295,7 +296,7 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
 
   // Admin Approve / Reject / Attach Slip Action
   const handleReviewAction = async (requestId: string, status: 'approved' | 'rejected') => {
-    if (!isAdmin || !user) return;
+    if (!canApproveAdvance || !user) return;
 
     // หากเป็นการอนุมัติ ต้องบังคับเพิ่มสลิปการโอนเงิน
     const targetReq = requests.find((r) => r.id === requestId);
@@ -340,7 +341,7 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
 
   // Attach / Update Slip directly on an existing request (e.g. upload after transferred)
   const handleAttachSlipOnly = async (requestId: string) => {
-    if (!adminSlipData || !user) return;
+    if (!canApproveAdvance || !adminSlipData || !user) return;
     setIsReviewing(true);
 
     try {
@@ -349,7 +350,7 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
         slipUrl: adminSlipData.dataUrl,
         slipFileName: adminSlipData.fileName,
         slipUploadedAt: Date.now(),
-        slipUploadedBy: user.name || (isAdmin ? 'แอดมิน' : 'พนักงาน'),
+        slipUploadedBy: user.name || (canApproveAdvance ? 'แอดมิน' : 'พนักงาน'),
         updatedAt: Date.now(),
       });
 
@@ -1030,7 +1031,7 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
                             {/* Actions */}
                             <div className="flex items-center gap-1.5">
                               {/* Admin Approve / Review Button */}
-                              {isAdmin && !isReviewingThis && (
+                              {canApproveAdvance && !isReviewingThis && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -1046,7 +1047,7 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
                               )}
 
                               {/* Delete for Admin or pending creator */}
-                              {(isAdmin || (isOwner && req.status === 'pending')) && (
+                              {(canApproveAdvance || (isOwner && req.status === 'pending')) && (
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteRequest(req.id)}
@@ -1061,7 +1062,7 @@ export function AdvanceModal({ isOpen, onClose, defaultTab = 'my' }: AdvanceModa
                         </div>
 
                         {/* Inline Admin Review & Slip Attachment Panel */}
-                        {isReviewingThis && isAdmin && (
+                        {isReviewingThis && canApproveAdvance && (
                           <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/70 p-4 rounded-xl space-y-3 animate-in fade-in">
                             <div className="flex items-center justify-between">
                               <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">

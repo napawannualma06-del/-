@@ -79,7 +79,8 @@ import {
   AUTO_CANCEL_REMARK 
 } from '../lib/autoCancelService';
 import { clockInEmployee } from '../lib/shiftService';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { Wrench } from 'lucide-react';
 
 interface EmployeeProfile {
@@ -108,7 +109,15 @@ export function AdminDashboard() {
     fetchHistoricalCases,
     fetchTotalCaseCounts,
   } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const {
+    loading: permissionsLoading,
+    viewAdminDashboard,
+    manageApiIntegration,
+    manageUsers,
+    viewAllTechnicalIssues,
+    viewOTAdmin,
+    viewAdvanceAdmin,
+  } = usePermissions();
   const [showUserModal, setShowUserModal] = useState(false);
 
   // Merge active + today's cases with on-demand historical cases
@@ -163,12 +172,12 @@ export function AdminDashboard() {
   const [leaderboardSortBy, setLeaderboardSortBy] = useState<'closed' | 'speed_fast' | 'speed_slow'>('closed');
   const [showTimeAnalytics, setShowTimeAnalytics] = useState(false);
 
-  // Ensure non-admin employees can only view the cases section
+  // Ensure users without API integration permission can only view the cases section
   useEffect(() => {
-    if (!isAdmin && mainTab !== 'cases') {
+    if (!manageApiIntegration && mainTab !== 'cases') {
       setMainTab('cases');
     }
-  }, [isAdmin, mainTab]);
+  }, [manageApiIntegration, mainTab]);
 
   // Fetch total case counts aggregation once on mount
   useEffect(() => {
@@ -226,7 +235,7 @@ export function AdminDashboard() {
     }
     lastAdminBadgeLoadRef.current = now;
 
-    const qTech = isAdmin
+    const qTech = viewAllTechnicalIssues
       ? query(
           collection(db, 'technical_issues'),
           where('status', 'in', ['pending', 'in_progress'])
@@ -236,11 +245,11 @@ export function AdminDashboard() {
           where('reporterId', '==', user.uid)
         );
 
-    const qOT = isAdmin
+    const qOT = viewOTAdmin
       ? query(collection(db, 'overtime_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid));
 
-    const qAdv = isAdmin
+    const qAdv = viewAdvanceAdmin
       ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
 
@@ -275,7 +284,7 @@ export function AdminDashboard() {
     };
 
     loadBadges();
-  }, [user?.uid, isAdmin]);
+  }, [user?.uid, viewAllTechnicalIssues, viewOTAdmin, viewAdvanceAdmin]);
 
   if (loading) {
     return (
@@ -529,6 +538,18 @@ export function AdminDashboard() {
     return (a.timeStats.averageMs || 0) - (b.timeStats.averageMs || 0);
   });
 
+  if (permissionsLoading) {
+    return (
+      <div className="py-16 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+
+  if (!viewAdminDashboard) {
+    return <Navigate to="/" replace />;
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto">
       {/* Top Header - Clean Card Surface */}
@@ -549,8 +570,8 @@ export function AdminDashboard() {
 
           {/* Action Modals and Tab Switchers */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Main Section Switcher (Admin Only) */}
-            {isAdmin ? (
+            {/* Main Section Switcher (Super Admin Only for API tab) */}
+            {manageApiIntegration ? (
               <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/70 dark:border-slate-700/60 overflow-x-auto max-w-full">
                 <button
                   type="button"
@@ -735,8 +756,8 @@ export function AdminDashboard() {
         )}
       </div>
 
-      {/* Pending Approvals Alert Banner for Admins */}
-      {isAdmin && registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
+      {/* Pending Approvals Alert Banner for HR / Super Admins */}
+      {manageUsers && registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
         <div className="p-4 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/60 border border-amber-300 dark:border-amber-700 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
@@ -766,7 +787,7 @@ export function AdminDashboard() {
       )}
 
       {/* Conditional Rendering based on Main Tab */}
-      {isAdmin && mainTab === 'api' ? (
+      {manageApiIntegration && mainTab === 'api' ? (
         <AdminApiIntegration currentAdminName={user?.name || 'Admin'} cases={cases} />
       ) : (
         <>

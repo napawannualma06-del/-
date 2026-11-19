@@ -36,7 +36,8 @@ import { format } from 'date-fns';
 import { clsx } from 'clsx';
 import ExcelJS from 'exceljs';
 import { auth, db } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import {
   HRPrivateData,
   HRProfile,
@@ -53,7 +54,9 @@ import {
   fetchHRProfiles,
   getDefaultHRProfile,
   lockHrAdminEmailSession,
+  maskEmailForDisplay,
   maskSensitiveNumber,
+  reverifyGoogleSessionForUnlock,
   signInHrAdminEmail,
 } from '../lib/hrService';
 import {
@@ -99,7 +102,13 @@ interface EmployeeRowComputedData {
 
 export function AdminPayrollDashboard() {
   const { user, registeredUsers } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const {
+    viewHRPrivate,
+    editHRPrivate,
+    canAutoUnlockHRByGoogle,
+    isHrAdminUnlocked,
+    authEmail,
+  } = usePermissions();
 
   // Cycle & Pay Date
   const availableCycles = useMemo(() => getAvailableOTCycles(), []);
@@ -125,9 +134,10 @@ export function AdminPayrollDashboard() {
   const [baseLoadError, setBaseLoadError] = useState<boolean>(false);
   const [baseReloadCount, setBaseReloadCount] = useState<number>(0);
 
-  // HR Confidential Unlock State (Firebase Email/Password Auth)
+  // HR Confidential Unlock State (Firebase Email/Password Auth or Google HR/Super/Executive Role)
   const [isHrUnlocked, setIsHrUnlocked] = useState<boolean>(false);
   const [hrUnlockedEmail, setHrUnlockedEmail] = useState<string | null>(null);
+  const [isGoogleHrManuallyLocked, setIsGoogleHrManuallyLocked] = useState<boolean>(false);
   const [showUnlockModal, setShowUnlockModal] = useState<boolean>(false);
   const lastHrActivityRef = useRef<number>(Date.now());
 
@@ -180,24 +190,29 @@ export function AdminPayrollDashboard() {
   >([]);
   const batchPrintContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Sync Firebase Auth state for email/password provider
+  // Sync Firebase Auth state for email/password provider OR Google role (hr, super, executive)
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (fbUser) => {
-      const isPasswordProvider = fbUser?.providerData?.some((p) => p.providerId === 'password');
-      if (fbUser && !fbUser.isAnonymous && isPasswordProvider && fbUser.email) {
-        setIsHrUnlocked(true);
-        setHrUnlockedEmail(fbUser.email);
-        lastHrActivityRef.current = Date.now();
-      } else {
-        setIsHrUnlocked(false);
-        setHrUnlockedEmail(null);
-      }
-    });
-    return () => unsub();
+    if (isHrAdminUnlocked && authEmail) {
+      setIsHrUnlocked(true);
+      setHrUnlockedEmail(authEmail);
+      lastHrActivityRef.current = Date.now();
+    } else if (canAutoUnlockHRByGoogle && !isGoogleHrManuallyLocked && authEmail) {
+      setIsHrUnlocked(true);
+      setHrUnlockedEmail(authEmail);
+      lastHrActivityRef.current = Date.now();
+    } else {
+      setIsHrUnlocked(false);
+      setHrUnlockedEmail(null);
+    }
+  }, [isHrAdminUnlocked, canAutoUnlockHRByGoogle, isGoogleHrManuallyLocked, authEmail]);
+
+  const handleRequestUnlockHr = useCallback(() => {
+    setShowUnlockModal(true);
   }, []);
 
   const handleLockHrPrivate = useCallback(async (isAutoTimeout = false) => {
     await lockHrAdminEmailSession();
+    setIsGoogleHrManuallyLocked(true);
     setIsHrUnlocked(false);
     setHrUnlockedEmail(null);
     setActiveEmployeeId(null);
@@ -213,7 +228,7 @@ export function AdminPayrollDashboard() {
     } else {
       setStatusNotice({
         type: 'success',
-        message: 'ล็อกข้อมูลลับสลิปเงินเดือนและออกจากระบบยืนยันตัวตนอีเมลเรียบร้อยแล้ว',
+        message: 'ล็อกข้อมูลลับสลิปเงินเดือนเรียบร้อยแล้ว',
       });
       setTimeout(() => setStatusNotice(null), 4000);
     }
@@ -508,7 +523,7 @@ export function AdminPayrollDashboard() {
 
   // Save Payroll Settings Handler
   const handleSaveSettings = async (nextSettings: PayrollSettingsDoc) => {
-    if (!user || baseLoadError) return;
+    if (!editHRPrivate || !user || baseLoadError) return;
     const actorName = hrUnlockedEmail || user.name || user.username || 'Admin';
     const saved = await savePayrollSettings(nextSettings, actorName);
     setSettings(saved);
@@ -718,7 +733,7 @@ export function AdminPayrollDashboard() {
     }
   };
 
-  if (!isAdmin) return null;
+  if (!viewHRPrivate) return null;
 
   const activeRow = activeEmployeeId
     ? computedRows.find((r) => r.emp.uid === activeEmployeeId) || null
@@ -748,7 +763,7 @@ export function AdminPayrollDashboard() {
             {!isHrUnlocked ? (
               <button
                 type="button"
-                onClick={() => setShowUnlockModal(true)}
+                onClick={handleRequestUnlockHr}
                 className="px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
               >
                 <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
@@ -759,6 +774,7 @@ export function AdminPayrollDashboard() {
                 <Unlock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
                   ปลดล็อกข้อมูลลับ: {hrUnlockedEmail}
+                  {!editHRPrivate ? ' (โหมดดูอย่างเดียว)' : ''}
                 </span>
                 <button
                   type="button"
@@ -772,20 +788,22 @@ export function AdminPayrollDashboard() {
               </div>
             )}
 
-            <button
-              type="button"
-              disabled={baseLoading || baseLoadError}
-              onClick={() => setShowSettingsModal(true)}
-              className={clsx(
-                'px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50',
-                !multipliersReady
-                  ? 'border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100'
-                  : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
-              )}
-            >
-              <Settings className="w-3.5 h-3.5 text-indigo-500" />
-              <span>ตั้งค่าสลิป / ตัวคูณ OT / รายการเงินได้-หัก</span>
-            </button>
+            {editHRPrivate && (
+              <button
+                type="button"
+                disabled={baseLoading || baseLoadError}
+                onClick={() => setShowSettingsModal(true)}
+                className={clsx(
+                  'px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50',
+                  !multipliersReady
+                    ? 'border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100'
+                    : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
+                )}
+              >
+                <Settings className="w-3.5 h-3.5 text-indigo-500" />
+                <span>ตั้งค่าสลิป / ตัวคูณ OT / รายการเงินได้-หัก</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -826,15 +844,17 @@ export function AdminPayrollDashboard() {
             </div>
           </div>
 
-          <button
-            type="button"
-            disabled={baseLoading || baseLoadError}
-            onClick={() => setShowSettingsModal(true)}
-            className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>แก้ไขการตั้งค่า ({settings.payItems.filter((i) => i.enabled).length} รายการเปิดใช้)</span>
-          </button>
+          {editHRPrivate && (
+            <button
+              type="button"
+              disabled={baseLoading || baseLoadError}
+              onClick={() => setShowSettingsModal(true)}
+              className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>แก้ไขการตั้งค่า ({settings.payItems.filter((i) => i.enabled).length} รายการเปิดใช้)</span>
+            </button>
+          )}
         </div>
 
         {/* Warning if OT Multipliers are not complete */}
@@ -851,13 +871,15 @@ export function AdminPayrollDashboard() {
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowSettingsModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-2xs"
-            >
-              กรอกตัวคูณ OT ตอนนี้
-            </button>
+            {editHRPrivate && (
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer shadow-2xs"
+              >
+                กรอกตัวคูณ OT ตอนนี้
+              </button>
+            )}
           </div>
         )}
 
@@ -947,8 +969,9 @@ export function AdminPayrollDashboard() {
               <input
                 type="date"
                 value={payDate}
+                disabled={!editHRPrivate}
                 onChange={(e) => setPayDate(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white cursor-pointer"
+                className="w-full px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white cursor-pointer disabled:opacity-60"
               />
             </div>
           </div>
@@ -1077,7 +1100,7 @@ export function AdminPayrollDashboard() {
           <div>
             <button
               type="button"
-              onClick={() => setShowUnlockModal(true)}
+              onClick={handleRequestUnlockHr}
               className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-md transition cursor-pointer"
             >
               <KeyRound className="w-4 h-4" />
@@ -1102,6 +1125,7 @@ export function AdminPayrollDashboard() {
           profiles={profiles}
           registeredUsers={registeredUsers || []}
           isHrUnlocked={isHrUnlocked}
+          readOnly={!editHRPrivate}
           actorName={hrUnlockedEmail || user?.name || user?.username || 'Admin'}
           onOpenSettings={() => setShowSettingsModal(true)}
           reloadTrigger={summaryReloadTrigger}
@@ -1433,7 +1457,7 @@ export function AdminPayrollDashboard() {
       )}
 
       {/* MODAL 1: Payroll Settings Modal (Company Name, 4 OT Multipliers, PayItems CRUD & Reorder) */}
-      {showSettingsModal && (
+      {showSettingsModal && editHRPrivate && (
         <PayrollSettingsModal
           initialSettings={settings}
           loadedSlipsMap={loadedSlipsMap}
@@ -1457,6 +1481,7 @@ export function AdminPayrollDashboard() {
           initialRowData={activeRow.rowData}
           actorName={hrUnlockedEmail || user?.name || user?.username || 'Admin'}
           isHrUnlocked={isHrUnlocked}
+          readOnly={!editHRPrivate}
           downloadingPdf={downloadingSingleEmpId === activeRow.emp.uid}
           onPreviewSlip={(slip, ytd) => {
             if (!isHrUnlocked) return;
@@ -1535,11 +1560,17 @@ export function AdminPayrollDashboard() {
         />
       )}
 
-      {/* MODAL 3: HR Admin Email & Password Verification Modal */}
+      {/* MODAL 3: HR Admin Email & Password / Google Re-Verification Modal */}
       {showUnlockModal && (
         <PayrollAdminUnlockModal
+          googleLoginEmail={
+            canAutoUnlockHRByGoogle && user?.authMethod === 'google' && user?.email
+              ? user.email.trim().toLowerCase()
+              : null
+          }
           onClose={() => setShowUnlockModal(false)}
           onSuccess={(email) => {
+            setIsGoogleHrManuallyLocked(false);
             setIsHrUnlocked(true);
             setHrUnlockedEmail(email);
             lastHrActivityRef.current = Date.now();
@@ -2651,6 +2682,7 @@ function EmployeePayrollSlipModal({
   initialRowData,
   actorName,
   isHrUnlocked,
+  readOnly = false,
   downloadingPdf,
   onPreviewSlip,
   onDownloadSlipPdf,
@@ -2669,6 +2701,7 @@ function EmployeePayrollSlipModal({
   initialRowData?: EmployeeRowComputedData;
   actorName: string;
   isHrUnlocked: boolean;
+  readOnly?: boolean;
   downloadingPdf: boolean;
   onPreviewSlip: (slip: PayrollSlip, ytd: PayslipYTDInfo) => void;
   onDownloadSlipPdf: (slip: PayrollSlip, ytd: PayslipYTDInfo) => void;
@@ -2886,7 +2919,7 @@ function EmployeePayrollSlipModal({
   }, [yearConfirmedSlips, existingSlip]);
 
   const handleSave = async (targetStatus: 'draft' | 'confirmed') => {
-    if (loading || loadError || !liveCalc || !privateData || !multipliersReady) return;
+    if (readOnly || loading || loadError || !liveCalc || !privateData || !multipliersReady) return;
     if (targetStatus === 'confirmed' && !hasSalary) {
       setActionError('ไม่สามารถยืนยันสลิปได้ เนื่องจากพนักงานยังไม่มีข้อมูลเงินเดือนในข้อมูลลับ HR');
       return;
@@ -2931,6 +2964,7 @@ function EmployeePayrollSlipModal({
   };
 
   const handleUnconfirm = async () => {
+    if (readOnly) return;
     if (!existingSlip || !unconfirmReason.trim()) {
       setActionError('กรุณาระบุเหตุผลในการยกเลิกการยืนยันสลิป');
       return;
@@ -3090,13 +3124,15 @@ function EmployeePayrollSlipModal({
                 ยังไม่ได้ตั้งค่าตัวคูณ OT ครบทั้ง 4 ประเภท กรุณาตั้งค่าตัวคูณ OT ก่อนคำนวณและบันทึกสลิป
               </span>
             </div>
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold shrink-0 cursor-pointer"
-            >
-              ไปที่ตั้งค่าตัวคูณ OT
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold shrink-0 cursor-pointer"
+              >
+                ไปที่ตั้งค่าตัวคูณ OT
+              </button>
+            )}
           </div>
         )}
 
@@ -3626,7 +3662,11 @@ function EmployeePayrollSlipModal({
                   <span>{downloadingPdf ? 'กำลังสร้าง PDF...' : 'ดาวน์โหลด PDF'}</span>
                 </button>
 
-                {isConfirmed ? (
+                {readOnly ? (
+                  <span className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-700">
+                    โหมดดูอย่างเดียว (ผู้บริหาร)
+                  </span>
+                ) : isConfirmed ? (
                   !showUnconfirmBox && (
                     <button
                       type="button"
@@ -3695,16 +3735,33 @@ function EmployeePayrollSlipModal({
 // ===============================================================
 
 function PayrollAdminUnlockModal({
+  googleLoginEmail,
   onClose,
   onSuccess,
 }: {
+  googleLoginEmail?: string | null;
   onClose: () => void;
   onSuccess: (email: string) => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleGoogleReverify = async () => {
+    if (!googleLoginEmail) return;
+    setGoogleSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const verifiedEmail = await reverifyGoogleSessionForUnlock(googleLoginEmail);
+      onSuccess(verifiedEmail || googleLoginEmail);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'เกิดข้อผิดพลาดในการยืนยันด้วย Google');
+    } finally {
+      setGoogleSubmitting(false);
+    }
+  };
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3768,6 +3825,27 @@ function PayrollAdminUnlockModal({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {googleLoginEmail && (
+          <div className="space-y-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={handleGoogleReverify}
+              disabled={googleSubmitting || submitting}
+              className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Unlock className="w-4 h-4" />
+              <span>
+                {googleSubmitting
+                  ? 'กำลังยืนยันด้วย Google...'
+                  : `ยืนยันด้วย Google (${maskEmailForDisplay(googleLoginEmail)})`}
+              </span>
+            </button>
+            <div className="text-center text-[10px] text-slate-400 font-semibold">
+              หรือ ยืนยันด้วยอีเมลแอดมิน + รหัสผ่าน (สำรอง)
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleUnlock} className="space-y-3.5 text-xs" autoComplete="off">
           <div>
@@ -5096,6 +5174,7 @@ function TaxCertificate50TawiSection({
   profiles,
   registeredUsers,
   isHrUnlocked,
+  readOnly = false,
   actorName,
   onOpenSettings,
   reloadTrigger,
@@ -5110,6 +5189,7 @@ function TaxCertificate50TawiSection({
     accountStatus?: string;
   }>;
   isHrUnlocked: boolean;
+  readOnly?: boolean;
   actorName: string;
   onOpenSettings: () => void;
   reloadTrigger: number;
@@ -5627,7 +5707,7 @@ function TaxCertificate50TawiSection({
   };
 
   const handleSaveSingleRow = async (empId: string, empName: string) => {
-    if (!isHrUnlocked || savingEmpId || savingAll) return;
+    if (readOnly || !isHrUnlocked || savingEmpId || savingAll) return;
     setSavingEmpId(empId);
     setNotice(null);
     try {
@@ -5649,7 +5729,7 @@ function TaxCertificate50TawiSection({
   };
 
   const handleSaveAllRows = async () => {
-    if (!isHrUnlocked || savingAll || savingEmpId || employeesData.length === 0) return;
+    if (readOnly || !isHrUnlocked || savingAll || savingEmpId || employeesData.length === 0) return;
     setSavingAll(true);
     setNotice(null);
     try {
@@ -5704,17 +5784,19 @@ function TaxCertificate50TawiSection({
             </select>
           </div>
 
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
-              ตั้งวันที่ออกหนังสือรับรองพร้อมกันทุกคน
-            </label>
-            <input
-              type="date"
-              defaultValue={format(new Date(), 'yyyy-MM-dd')}
-              onChange={(e) => handleApplyIssueDateToAll(e.target.value)}
-              className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white cursor-pointer"
-            />
-          </div>
+          {!readOnly && (
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                ตั้งวันที่ออกหนังสือรับรองพร้อมกันทุกคน
+              </label>
+              <input
+                type="date"
+                defaultValue={format(new Date(), 'yyyy-MM-dd')}
+                onChange={(e) => handleApplyIssueDateToAll(e.target.value)}
+                className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white cursor-pointer"
+              />
+            </div>
+          )}
 
           <div className="pt-4 text-xs text-slate-600 dark:text-slate-300 font-semibold">
             พร้อมออกเอกสาร:{' '}
@@ -5726,15 +5808,17 @@ function TaxCertificate50TawiSection({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={loading || savingAll || employeesData.length === 0}
-            onClick={handleSaveAllRows}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition cursor-pointer disabled:opacity-50"
-          >
-            <Save className="w-3.5 h-3.5" />
-            <span>{savingAll ? 'กำลังบันทึกทั้งหมด...' : 'บันทึกทั้งหมด'}</span>
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              disabled={loading || savingAll || employeesData.length === 0}
+              onClick={handleSaveAllRows}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition cursor-pointer disabled:opacity-50"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{savingAll ? 'กำลังบันทึกทั้งหมด...' : 'บันทึกทั้งหมด'}</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -5771,13 +5855,15 @@ function TaxCertificate50TawiSection({
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer"
-          >
-            ตั้งค่าข้อมูล 50 ทวิ
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer"
+            >
+              ตั้งค่าข้อมูล 50 ทวิ
+            </button>
+          )}
         </div>
       )}
 
@@ -6053,22 +6139,24 @@ function TaxCertificate50TawiSection({
                     <td className="px-3 py-3 text-right">
                       <div className="flex flex-col items-end gap-1.5">
                         <div className="inline-flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            disabled={savingEmpId === emp.employeeId || savingAll}
-                            onClick={() =>
-                              handleSaveSingleRow(
-                                emp.employeeId,
-                                form.nameOnDoc || emp.defaultFullName
-                              )
-                            }
-                            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-[11px] font-bold inline-flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
-                          >
-                            <Save className="w-3 h-3" />
-                            <span>
-                              {savingEmpId === emp.employeeId ? 'กำลังบันทึก...' : 'บันทึก'}
-                            </span>
-                          </button>
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              disabled={savingEmpId === emp.employeeId || savingAll}
+                              onClick={() =>
+                                handleSaveSingleRow(
+                                  emp.employeeId,
+                                  form.nameOnDoc || emp.defaultFullName
+                                )
+                              }
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-[11px] font-bold inline-flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
+                            >
+                              <Save className="w-3 h-3" />
+                              <span>
+                                {savingEmpId === emp.employeeId ? 'กำลังบันทึก...' : 'บันทึก'}
+                              </span>
+                            </button>
+                          )}
 
                           <button
                             type="button"

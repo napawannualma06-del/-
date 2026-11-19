@@ -5,7 +5,7 @@
 
 import { useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useStore, isUserAdmin } from './store/useStore';
+import { useStore } from './store/useStore';
 import { Login } from './components/Login';
 import { Queue } from './components/Queue';
 import { AdminDashboard } from './components/AdminDashboard';

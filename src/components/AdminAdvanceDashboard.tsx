@@ -13,7 +13,8 @@ import {
   addDoc 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { AdvanceRequest, AdvanceStatus } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { 
@@ -69,7 +70,7 @@ const STATUS_CONFIG: Record<
 
 export function AdminAdvanceDashboard() {
   const { user } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { approveAdvance: isAdmin } = usePermissions();
 
   const availableCycles = useMemo(() => getAvailableOTCycles(), []);
   const [selectedCycleKey, setSelectedCycleKey] = useState<string>(() => {

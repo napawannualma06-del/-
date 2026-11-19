@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { DutyWorker, CreditCheckDuty } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { 
@@ -26,7 +27,7 @@ interface CreditCheckDutyStationProps {
 
 export function CreditCheckDutyStation({ onStatusChange, compact = false }: CreditCheckDutyStationProps) {
   const { user, clockIn } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { manageCases: isAdmin } = usePermissions();
   const [workers, setWorkers] = useState<DutyWorker[]>([]);
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);

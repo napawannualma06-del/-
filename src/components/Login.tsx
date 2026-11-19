@@ -25,18 +25,15 @@ export function Login() {
   const { 
     loginWithGoogle,
     loginWithUsername, 
-    registerEmployee, 
     fetchRegisteredUsers,
     isDarkMode,
     toggleDarkMode
   } = useStore();
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [pendingApprovalNotice, setPendingApprovalNotice] = useState<string | null>(null);
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
 
   // Google Primary Login State
@@ -47,11 +44,6 @@ export function Login() {
   // Login Form (ID/PIN ชั่วคราว)
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPin, setLoginPin] = useState('');
-
-  // Register Form
-  const [regName, setRegName] = useState('');
-  const [regUsername, setRegUsername] = useState('');
-  const [regPin, setRegPin] = useState('');
 
   useEffect(() => {
     fetchRegisteredUsers();
@@ -102,32 +94,6 @@ export function Login() {
       setLoading(false);
     }
   };
-
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    setPendingApprovalNotice(null);
-    setLoading(true);
-    try {
-      const res = await registerEmployee(regName, regUsername, regPin);
-      if (!res.success) {
-        setErrorMsg(res.message || 'ลงทะเบียนไม่สำเร็จ');
-      } else if (res.pendingApproval) {
-        setPendingApprovalNotice(
-          `ลงทะเบียนสำเร็จเรียบร้อยแล้ว! บัญชีของคุณ "${regName}" (${regUsername}) อยู่ระหว่างรอผู้ดูแลระบบ (แอดมิน) อนุมัติการเข้าใช้งาน กรุณาแจ้งแอดมินเพื่อกดอนุมัติก่อนเข้าสู่ระบบ`
-        );
-        setRegName('');
-        setRegUsername('');
-        setRegPin('');
-      } else {
-        setSuccessMsg('ลงทะเบียนสำเร็จ กำลังเข้าสู่ระบบ...');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-center py-8 px-4 sm:px-6 lg:px-8 transition-colors duration-200">
@@ -180,60 +146,7 @@ export function Login() {
 
       <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white dark:bg-slate-900 py-6 px-4 shadow-sm border border-slate-200 dark:border-slate-800 rounded-2xl sm:px-8 transition-colors">
-          
-          {/* Tab Selector */}
-          <div className="flex p-1 space-x-1 bg-slate-100 dark:bg-slate-800 rounded-xl mb-6">
-            <button
-              type="button"
-              onClick={() => { setActiveTab('login'); setErrorMsg(null); }}
-              className={clsx(
-                'flex-1 py-2 text-sm font-semibold rounded-lg transition-all flex items-center justify-center',
-                activeTab === 'login'
-                  ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              )}
-            >
-              <LogIn className="w-4 h-4 mr-1.5" />
-              เข้าสู่ระบบ
-            </button>
-            <button
-              type="button"
-              onClick={() => { setActiveTab('register'); setErrorMsg(null); }}
-              className={clsx(
-                'flex-1 py-2 text-sm font-semibold rounded-lg transition-all flex items-center justify-center',
-                activeTab === 'register'
-                  ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              )}
-            >
-              <UserPlus className="w-4 h-4 mr-1.5" />
-              ลงทะเบียนเข้าใช้งาน
-            </button>
-          </div>
-
           {/* Messages */}
-          {pendingApprovalNotice && (
-            <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/60 rounded-xl text-amber-900 dark:text-amber-200 text-xs leading-relaxed space-y-2 shadow-xs">
-              <div className="flex items-center gap-2 font-bold text-sm text-amber-800 dark:text-amber-300">
-                <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span>รอผู้ดูแลระบบ (แอดมิน) อนุมัติ</span>
-              </div>
-              <p>{pendingApprovalNotice}</p>
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('login');
-                    setPendingApprovalNotice(null);
-                  }}
-                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold text-xs transition cursor-pointer"
-                >
-                  ไปที่หน้าเข้าสู่ระบบ
-                </button>
-              </div>
-            </div>
-          )}
-
           {errorMsg && (
             errorMsg.includes('โควต้า') || errorMsg.includes('Quota') ? (
               <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 rounded-xl text-amber-900 dark:text-amber-200 text-xs space-y-2.5 shadow-xs">
@@ -277,224 +190,143 @@ export function Login() {
           )}
 
           {/* LOGIN FORM */}
-          {activeTab === 'login' && (
-            <div className="space-y-4">
-              {/* ช่องติ๊ก "นี่คือมือถือ/เครื่องส่วนตัวของฉัน" เหนือปุ่มเข้าสู่ระบบด้วย Google */}
-              <div className="space-y-2.5">
-                <label className="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={isPersonalDevice}
-                    onChange={(e) => setIsPersonalDevice(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                  />
-                  <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">
-                    นี่คือมือถือ/เครื่องส่วนตัวของฉัน
-                  </span>
-                </label>
-
-                {!isPersonalDevice && (
-                  <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-xs leading-relaxed flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                    <span>
-                      เครื่องที่ใช้ร่วมกัน: กรุณาเปิด Chrome แบบไม่ระบุตัวตน (Cmd+Shift+N หรือ Ctrl+Shift+N) ก่อนล็อกอิน และปิดหน้าต่างเมื่อใช้เสร็จ
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* ปุ่มหลักใหญ่: เข้าสู่ระบบด้วย Google */}
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                disabled={googleLoading || loading}
-                className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-bold text-sm sm:text-base rounded-xl shadow-md shadow-indigo-200 dark:shadow-none transition disabled:opacity-50 flex items-center justify-center gap-2.5 cursor-pointer"
-              >
-                <span className="w-6 h-6 rounded-lg bg-white flex items-center justify-center shrink-0">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                    />
-                  </svg>
+          <div className="space-y-4">
+            {/* ช่องติ๊ก "นี่คือมือถือ/เครื่องส่วนตัวของฉัน" เหนือปุ่มเข้าสู่ระบบด้วย Google */}
+            <div className="space-y-2.5">
+              <label className="flex items-center gap-2.5 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={isPersonalDevice}
+                  onChange={(e) => setIsPersonalDevice(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+                <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">
+                  นี่คือมือถือ/เครื่องส่วนตัวของฉัน
                 </span>
-                <span>{googleLoading ? 'กำลังเข้าสู่ระบบด้วย Google...' : 'เข้าสู่ระบบด้วย Google'}</span>
-              </button>
+              </label>
 
-              <p className="text-[11px] text-slate-400 dark:text-slate-500 text-center">
-                แอดมินห้ามกดปุ่มนี้ด้วยอีเมลแอดมิน ให้ใช้ช่องล็อกอินแอดมินแทน
-              </p>
-
-              {/* ลิงก์เล็กด้านล่าง: เข้าด้วย ID/PIN (ชั่วคราว) - ซ่อนถ้าแอดมินปิด */}
-              {allowPinLogin && (
-                <div className="pt-1 text-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowPinForm((prev) => !prev);
-                      setErrorMsg(null);
-                    }}
-                    className="text-xs font-semibold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 underline underline-offset-4 transition cursor-pointer"
-                  >
-                    เข้าด้วย ID/PIN (ชั่วคราว)
-                  </button>
+              {!isPersonalDevice && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-xs leading-relaxed flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <span>
+                    เครื่องที่ใช้ร่วมกัน: กรุณาเปิด Chrome แบบไม่ระบุตัวตน (Cmd+Shift+N หรือ Ctrl+Shift+N) ก่อนล็อกอิน และปิดหน้าต่างเมื่อใช้เสร็จ
+                  </span>
                 </div>
               )}
+            </div>
 
-              {/* ฟอร์มเข้าด้วย ID/PIN เดิม */}
-              {allowPinLogin && showPinForm && (
-                <form
-                  onSubmit={handleLogin}
-                  className="space-y-4 pt-3 border-t border-slate-200 dark:border-slate-800 animate-in fade-in duration-150"
+            {/* ปุ่มหลักใหญ่: เข้าสู่ระบบด้วย Google */}
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={googleLoading || loading}
+              className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-bold text-sm sm:text-base rounded-xl shadow-md shadow-indigo-200 dark:shadow-none transition disabled:opacity-50 flex items-center justify-center gap-2.5 cursor-pointer"
+            >
+              <span className="w-6 h-6 rounded-lg bg-white flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                  />
+                </svg>
+              </span>
+              <span>{googleLoading ? 'กำลังเข้าสู่ระบบด้วย Google...' : 'เข้าสู่ระบบด้วย Google'}</span>
+            </button>
+
+            <div className="p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 text-indigo-800 dark:text-indigo-200 text-xs font-semibold text-center">
+              พนักงานใหม่: กดปุ่มเข้าสู่ระบบด้วย Google แล้วรอแอดมินอนุมัติ
+            </div>
+
+            {/* ลิงก์เล็กด้านล่าง: เข้าด้วย ID/PIN (ชั่วคราว) - ซ่อนถ้าแอดมินปิด */}
+            {allowPinLogin && (
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPinForm((prev) => !prev);
+                    setErrorMsg(null);
+                  }}
+                  className="text-xs font-semibold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 underline underline-offset-4 transition cursor-pointer"
                 >
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                      ชื่อผู้ใช้ / รหัสพนักงาน
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        required
-                        placeholder="เช่น emp01, somchai"
-                        value={loginUsername}
-                        onChange={(e) => setLoginUsername(e.target.value)}
-                        className="w-full pl-10 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-                      />
-                      <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                    </div>
+                  เข้าด้วย ID/PIN (ชั่วคราว)
+                </button>
+              </div>
+            )}
+
+            {/* ฟอร์มเข้าด้วย ID/PIN เดิม */}
+            {allowPinLogin && showPinForm && (
+              <form
+                onSubmit={handleLogin}
+                className="space-y-4 pt-3 border-t border-slate-200 dark:border-slate-800 animate-in fade-in duration-150"
+              >
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    ชื่อผู้ใช้ / รหัสพนักงาน
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      placeholder="เช่น emp01, somchai"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
+                    />
+                    <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                   </div>
+                </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
-                      รหัสผ่าน หรือ PIN (ถ้ามีตั้งไว้)
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="password"
-                        placeholder="หากไม่มี PIN เว้นว่างได้"
-                        value={loginPin}
-                        onChange={(e) => setLoginPin(e.target.value)}
-                        className="w-full pl-10 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-                      />
-                      <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                    </div>
-                    <div className="flex justify-end mt-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowForgotPasswordModal(true);
-                          setErrorMsg(null);
-                        }}
-                        className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold hover:underline transition cursor-pointer"
-                      >
-                        ลืมรหัสผ่าน / PIN?
-                      </button>
-                    </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                    รหัสผ่าน หรือ PIN (ถ้ามีตั้งไว้)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      placeholder="หากไม่มี PIN เว้นว่างได้"
+                      value={loginPin}
+                      onChange={(e) => setLoginPin(e.target.value)}
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
+                    />
+                    <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                   </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full mt-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 active:scale-[0.99] text-white font-semibold text-sm rounded-xl transition disabled:opacity-50 flex items-center justify-center cursor-pointer"
-                  >
-                    <LogIn className="w-4 h-4 mr-2" />
-                    {loading ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบด้วย ID/PIN'}
-                  </button>
-
-                  <div className="pt-1 text-center">
+                  <div className="flex justify-end mt-1.5">
                     <button
                       type="button"
                       onClick={() => {
-                        setLoginUsername('23');
-                        setLoginPin('23');
+                        setShowForgotPasswordModal(true);
                         setErrorMsg(null);
                       }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-xs font-semibold transition cursor-pointer border border-indigo-200/80 dark:border-indigo-800/80 shadow-xs"
-                      title="คลิกเพื่อกรอกชื่อผู้ใช้ 23 และรหัส 23 อัตโนมัติ"
+                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold hover:underline transition cursor-pointer"
                     >
-                      <span>⚡ บัญชีด่วนฉุกเฉิน (ไม่ใช้ Database):</span>
-                      <span className="font-mono bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-700 text-indigo-900 dark:text-indigo-100 font-bold">23 / 23</span>
+                      ลืมรหัสผ่าน / PIN?
                     </button>
                   </div>
-                </form>
-              )}
-            </div>
-          )}
+                </div>
 
-          {/* REGISTER FORM */}
-          {activeTab === 'register' && (
-            <form onSubmit={handleRegister} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
-                  ชื่อ-นามสกุล หรือชื่อเล่น *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="เช่น สมชาย สดใส หรือ น้องแนน"
-                  value={regName}
-                  onChange={(e) => setRegName(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
-                  รหัสพนักงาน หรือ Username (ภาษาอังกฤษ/ตัวเลข) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="เช่น emp01, staff_nan"
-                  value={regUsername}
-                  onChange={(e) => setRegUsername(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
-                  รหัสผ่าน หรือ PIN 4-6 หลัก (ไม่บังคับ)
-                </label>
-                <input
-                  type="password"
-                  placeholder="เช่น 1234 หรือ เว้นว่างได้"
-                  value={regPin}
-                  onChange={(e) => setRegPin(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition placeholder:text-slate-400"
-                />
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-400 flex items-start gap-2">
-                <ShieldAlert className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
-                <span>
-                  <strong>การสมัครใหม่:</strong> เมื่อกดลงทะเบียน บัญชีจะถูกส่งให้ผู้ดูแลระบบ (แอดมิน) อนุมัติก่อน จึงจะสามารถเข้าสู่ระบบและเริ่มทำงานได้
-                </span>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full mt-2 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-semibold text-sm rounded-xl shadow-md shadow-emerald-200 dark:shadow-none transition disabled:opacity-50 flex items-center justify-center cursor-pointer"
-              >
-                <UserPlus className="w-4 h-4 mr-2" />
-                {loading ? 'กำลังส่งคำขอลงทะเบียน...' : 'ลงทะเบียนขอเข้าใช้งาน (รอแอดมินอนุมัติ)'}
-              </button>
-            </form>
-          )}
-
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full mt-2 py-2.5 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 active:scale-[0.99] text-white font-semibold text-sm rounded-xl transition disabled:opacity-50 flex items-center justify-center cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4 mr-2" />
+                  {loading ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบด้วย ID/PIN'}
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </div>
 

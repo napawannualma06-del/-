@@ -28,7 +28,8 @@ import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { clsx } from 'clsx';
 import { auth, db } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import {
   AdvanceRequest,
   EmployeeLoginDoc,
@@ -60,8 +61,10 @@ import {
   getDefaultHRProfile,
   getProbationBadgeInfo,
   lockHrAdminEmailSession,
+  maskEmailForDisplay,
   maskSensitiveNumber,
   rejectEmployeeProfileRequest,
+  reverifyGoogleSessionForUnlock,
   saveAllowPinLoginSetting,
   saveEmployeeLoginLink,
   saveHRPrivateEmployee,
@@ -75,7 +78,13 @@ import { AnimalAvatar } from './AnimalAvatar';
 
 export function AdminHRDashboard() {
   const { user, registeredUsers } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const {
+    viewHRPrivate,
+    editHRPrivate,
+    canAutoUnlockHRByGoogle,
+    isHrAdminUnlocked,
+    authEmail,
+  } = usePermissions();
 
   const [profiles, setProfiles] = useState<Record<string, HRProfile>>({});
   const [allowPinLogin, setAllowPinLogin] = useState<boolean>(true);
@@ -100,13 +109,14 @@ export function AdminHRDashboard() {
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [showNotEmployeeModal, setShowNotEmployeeModal] = useState(false);
 
-  // HR Confidential Unlock State (Firebase Email/Password Auth)
+  // HR Confidential Unlock State (Firebase Email/Password Auth or Google HR/Super/Executive Role)
   const [isHrUnlocked, setIsHrUnlocked] = useState<boolean>(false);
   const [hrUnlockedEmail, setHrUnlockedEmail] = useState<string | null>(null);
+  const [isGoogleHrManuallyLocked, setIsGoogleHrManuallyLocked] = useState<boolean>(false);
   const [showUnlockModal, setShowUnlockModal] = useState<boolean>(false);
   const lastHrActivityRef = useRef<number>(Date.now());
 
-  // Profile Edit Requests State (loaded ONLY when isHrUnlocked is true)
+  // Profile Edit Requests State (loaded ONLY when isHrUnlocked && editHRPrivate is true)
   const [profileRequestsTab, setProfileRequestsTab] = useState<'pending' | 'history'>('pending');
   const [pendingProfileRequests, setPendingProfileRequests] = useState<ProfileRequestDoc[]>([]);
   const [historyProfileRequests, setHistoryProfileRequests] = useState<ProfileRequestDoc[]>([]);
@@ -115,27 +125,30 @@ export function AdminHRDashboard() {
   const [inspectingRequest, setInspectingRequest] = useState<ProfileRequestDoc | null>(null);
   const autoAppliedOnUnlockRef = useRef<boolean>(false);
 
-  // Sync Firebase Auth state for email/password provider
+  // Sync Firebase Auth state for email/password provider OR Google role (hr, super, executive)
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (fbUser) => {
-      const isPasswordProvider = fbUser?.providerData?.some(
-        (p) => p.providerId === 'password'
-      );
-      if (fbUser && !fbUser.isAnonymous && isPasswordProvider && fbUser.email) {
-        setIsHrUnlocked(true);
-        setHrUnlockedEmail(fbUser.email);
-        lastHrActivityRef.current = Date.now();
-      } else {
-        setIsHrUnlocked(false);
-        setHrUnlockedEmail(null);
-        autoAppliedOnUnlockRef.current = false;
-      }
-    });
-    return () => unsub();
+    if (isHrAdminUnlocked && authEmail) {
+      setIsHrUnlocked(true);
+      setHrUnlockedEmail(authEmail);
+      lastHrActivityRef.current = Date.now();
+    } else if (canAutoUnlockHRByGoogle && !isGoogleHrManuallyLocked && authEmail) {
+      setIsHrUnlocked(true);
+      setHrUnlockedEmail(authEmail);
+      lastHrActivityRef.current = Date.now();
+    } else {
+      setIsHrUnlocked(false);
+      setHrUnlockedEmail(null);
+      autoAppliedOnUnlockRef.current = false;
+    }
+  }, [isHrAdminUnlocked, canAutoUnlockHRByGoogle, isGoogleHrManuallyLocked, authEmail]);
+
+  const handleRequestUnlockHr = useCallback(() => {
+    setShowUnlockModal(true);
   }, []);
 
   const handleLockHrPrivate = useCallback(async (isAutoTimeout = false) => {
     await lockHrAdminEmailSession();
+    setIsGoogleHrManuallyLocked(true);
     setIsHrUnlocked(false);
     setHrUnlockedEmail(null);
     autoAppliedOnUnlockRef.current = false;
@@ -151,7 +164,7 @@ export function AdminHRDashboard() {
     } else {
       setStatusNotice({
         type: 'success',
-        message: 'ล็อกข้อมูลลับ HR และออกจากระบบยืนยันตัวตนอีเมลเรียบร้อยแล้ว',
+        message: 'ล็อกข้อมูลลับ HR เรียบร้อยแล้ว',
       });
       setTimeout(() => setStatusNotice(null), 4000);
     }
@@ -223,10 +236,19 @@ export function AdminHRDashboard() {
     async function syncAndLoadProfileRequests() {
       setLoadingProfileRequests(true);
       try {
-        // 0. Load all linked Gmails from employee_logins collection (admin-only)
+        // 0. Load all linked Gmails from employee_logins collection (readable by HR & Executive)
         const linksMap = await fetchAllEmployeeLoginLinks().catch(() => ({}));
         if (!isCancelled) {
           setLinkedGmailsMap(linksMap);
+        }
+
+        // Only HR / Super Admin (editHRPrivate) can auto-apply or read profile_requests
+        if (!editHRPrivate) {
+          if (!isCancelled) {
+            setPendingProfileRequests([]);
+            setHistoryProfileRequests([]);
+          }
+          return;
         }
 
         // 1. Auto-apply first_time requests once per unlock session (or on manual refresh)
@@ -298,7 +320,7 @@ export function AdminHRDashboard() {
     return () => {
       isCancelled = true;
     };
-  }, [isHrUnlocked, hrUnlockedEmail, loading, loadError, profileRequestsReloadTrigger]);
+  }, [isHrUnlocked, hrUnlockedEmail, editHRPrivate, loading, loadError, profileRequestsReloadTrigger]);
 
   // All non-rejected registered users
   const allActiveUsers = useMemo(() => {
@@ -395,7 +417,7 @@ export function AdminHRDashboard() {
   }, [visibleEmployees, profiles, linkedGmailsMap]);
 
   const executeTogglePinLogin = async (nextAllowPin: boolean) => {
-    if (!user || loadError || loading || savingPinToggle) return;
+    if (!editHRPrivate || !user || loadError || loading || savingPinToggle) return;
     setShowDisablePinWarnModal(false);
     setSavingPinToggle(true);
     try {
@@ -421,11 +443,11 @@ export function AdminHRDashboard() {
   };
 
   const handleTogglePinLoginClick = async () => {
-    if (loadError || loading || savingPinToggle) return;
+    if (!editHRPrivate || loadError || loading || savingPinToggle) return;
     const nextAllowPin = !allowPinLogin;
     if (!nextAllowPin) {
       if (!isHrUnlocked) {
-        setShowUnlockModal(true);
+        handleRequestUnlockHr();
         setStatusNotice({
           type: 'error',
           message:
@@ -456,7 +478,7 @@ export function AdminHRDashboard() {
 
   // Quick Confirm Probation Passed directly from row or modal
   const handleConfirmPassProbation = async (empId: string, empFallbackName: string) => {
-    if (!user || loadError || loading || isSaving) return;
+    if (!editHRPrivate || !user || loadError || loading || isSaving) return;
 
     setIsSaving(true);
     try {
@@ -497,7 +519,7 @@ export function AdminHRDashboard() {
     updatedProfile: HRProfile,
     updatedPrivateData?: HRPrivateData
   ) => {
-    if (!user || loadError || loading || isSaving) return;
+    if (!editHRPrivate || !user || loadError || loading || isSaving) return;
 
     setIsSaving(true);
     try {
@@ -535,7 +557,7 @@ export function AdminHRDashboard() {
 
   // Save notEmployee flags from settings modal
   const handleSaveNotEmployeeSettings = async (notEmployeeMap: Record<string, boolean>) => {
-    if (!user || loadError || loading || isSaving) return;
+    if (!editHRPrivate || !user || loadError || loading || isSaving) return;
 
     setIsSaving(true);
     try {
@@ -567,7 +589,7 @@ export function AdminHRDashboard() {
     }
   };
 
-  if (!isAdmin) return null;
+  if (!viewHRPrivate) return null;
 
   const editingEmployee = editingEmployeeId
     ? allActiveUsers.find((u) => u.uid === editingEmployeeId) || null
@@ -597,7 +619,7 @@ export function AdminHRDashboard() {
             {!isHrUnlocked ? (
               <button
                 type="button"
-                onClick={() => setShowUnlockModal(true)}
+                onClick={handleRequestUnlockHr}
                 className="px-3 py-2 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-xs font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
               >
                 <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
@@ -608,6 +630,7 @@ export function AdminHRDashboard() {
                 <Unlock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
                   ปลดล็อกข้อมูลลับ: {hrUnlockedEmail}
+                  {!editHRPrivate ? ' (โหมดดูอย่างเดียว)' : ''}
                 </span>
                 <button
                   type="button"
@@ -621,15 +644,17 @@ export function AdminHRDashboard() {
               </div>
             )}
 
-            <button
-              type="button"
-              disabled={loadError || loading}
-              onClick={() => setShowNotEmployeeModal(true)}
-              className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-            >
-              <Settings className="w-3.5 h-3.5 text-indigo-500" />
-              <span>ตั้งค่าบัญชีที่ไม่ใช่พนักงาน</span>
-            </button>
+            {editHRPrivate && (
+              <button
+                type="button"
+                disabled={loadError || loading}
+                onClick={() => setShowNotEmployeeModal(true)}
+                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+              >
+                <Settings className="w-3.5 h-3.5 text-indigo-500" />
+                <span>ตั้งค่าบัญชีที่ไม่ใช่พนักงาน</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -691,7 +716,7 @@ export function AdminHRDashboard() {
               type="button"
               role="switch"
               aria-checked={allowPinLogin}
-              disabled={loadError || loading || savingPinToggle}
+              disabled={!editHRPrivate || loadError || loading || savingPinToggle}
               onClick={handleTogglePinLoginClick}
               className={clsx(
                 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden disabled:opacity-50',
@@ -864,7 +889,8 @@ export function AdminHRDashboard() {
         )}
       </div>
 
-      {/* BOX: คำขอแก้ไขข้อมูล (Profile Edit Requests Approval & History) */}
+      {/* BOX: คำขอแก้ไขข้อมูล (Profile Edit Requests Approval & History — HR / Super only) */}
+      {editHRPrivate && (
       <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-5 border border-amber-300/80 dark:border-amber-800/80 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
@@ -1084,6 +1110,7 @@ export function AdminHRDashboard() {
           </div>
         )}
       </div>
+      )}
 
       {/* Main HR Table Card */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
@@ -1202,7 +1229,7 @@ export function AdminHRDashboard() {
                             {badge.label}
                           </span>
 
-                          {p.probationStatus !== 'passed' && (
+                          {editHRPrivate && p.probationStatus !== 'passed' && (
                             <button
                               type="button"
                               disabled={loadError || loading || isSaving}
@@ -1234,9 +1261,10 @@ export function AdminHRDashboard() {
           employee={editingEmployee}
           initialProfile={profiles[editingEmployee.uid] || getDefaultHRProfile(editingEmployee.name)}
           disabledSave={loadError || loading || isSaving}
+          readOnly={!editHRPrivate}
           isHrUnlocked={isHrUnlocked}
           hrUnlockedEmail={hrUnlockedEmail}
-          onRequestUnlock={() => setShowUnlockModal(true)}
+          onRequestUnlock={handleRequestUnlockHr}
           onLockHr={() => handleLockHrPrivate(false)}
           onClose={() => setEditingEmployeeId(null)}
           onGmailLinkedChange={(empId, emailOrNull) => {
@@ -1345,11 +1373,17 @@ export function AdminHRDashboard() {
         />
       )}
 
-      {/* MODAL 3: Admin Email + Password Verification for HR Confidential Data */}
+      {/* MODAL 3: Admin Email + Password / Google Re-Verification for HR Confidential Data */}
       {showUnlockModal && (
         <HrAdminUnlockModal
+          googleLoginEmail={
+            canAutoUnlockHRByGoogle && user?.authMethod === 'google' && user?.email
+              ? user.email.trim().toLowerCase()
+              : null
+          }
           onClose={() => setShowUnlockModal(false)}
           onSuccess={(email) => {
+            setIsGoogleHrManuallyLocked(false);
             setIsHrUnlocked(true);
             setHrUnlockedEmail(email);
             lastHrActivityRef.current = Date.now();
@@ -1405,6 +1439,7 @@ function EmployeeHRProfileModal({
   employee,
   initialProfile,
   disabledSave,
+  readOnly = false,
   isHrUnlocked,
   hrUnlockedEmail,
   onRequestUnlock,
@@ -1416,6 +1451,7 @@ function EmployeeHRProfileModal({
   employee: { uid: string; name: string; username?: string; avatarEmoji?: string };
   initialProfile: HRProfile;
   disabledSave: boolean;
+  readOnly?: boolean;
   isHrUnlocked: boolean;
   hrUnlockedEmail: string | null;
   onRequestUnlock: () => void;
@@ -1517,7 +1553,7 @@ function EmployeeHRProfileModal({
   }, [isHrUnlocked, employee.uid, employee.name, initialProfile.fullName, privateReloadCount]);
 
   const handleSaveGmailLink = async () => {
-    if (!isHrUnlocked || savingGmail) return;
+    if (readOnly || !isHrUnlocked || savingGmail) return;
     setGmailNotice(null);
     setSavingGmail(true);
     try {
@@ -1544,7 +1580,7 @@ function EmployeeHRProfileModal({
   };
 
   const handleUnlinkGmail = async () => {
-    if (!isHrUnlocked || savingGmail) return;
+    if (readOnly || !isHrUnlocked || savingGmail) return;
     setGmailNotice(null);
     setSavingGmail(true);
     try {
@@ -1835,26 +1871,28 @@ function EmployeeHRProfileModal({
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
-                {probationStatus !== 'passed' ? (
-                  <button
-                    type="button"
-                    onClick={() => setProbationStatus('passed')}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-2xs transition cursor-pointer"
-                  >
-                    <UserCheck className="w-3.5 h-3.5" />
-                    <span>ยืนยันผ่านโปร</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setProbationStatus('probation')}
-                    className="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 text-[11px] font-semibold transition cursor-pointer"
-                  >
-                    เปลี่ยนกลับเป็นทดลองงาน
-                  </button>
-                )}
-              </div>
+              {!readOnly && (
+                <div className="flex items-center gap-2">
+                  {probationStatus !== 'passed' ? (
+                    <button
+                      type="button"
+                      onClick={() => setProbationStatus('passed')}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      <span>ยืนยันผ่านโปร</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setProbationStatus('probation')}
+                      className="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 text-[11px] font-semibold transition cursor-pointer"
+                    >
+                      เปลี่ยนกลับเป็นทดลองงาน
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1985,37 +2023,39 @@ function EmployeeHRProfileModal({
                     )}
                   </div>
 
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <input
-                      type="email"
-                      value={gmailInput}
-                      onChange={(e) => setGmailInput(e.target.value.toLowerCase())}
-                      placeholder="เช่น employee@gmail.com"
-                      disabled={savingGmail}
-                      className="flex-1 px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 text-xs font-mono text-slate-900 dark:text-white"
-                    />
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        disabled={savingGmail || !gmailInput.trim()}
-                        onClick={handleSaveGmailLink}
-                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                      >
-                        <Save className="w-3 h-3" />
-                        <span>{savingGmail ? 'กำลังบันทึก...' : 'บันทึกการผูก'}</span>
-                      </button>
-                      {loginLink?.email && (
+                  {!readOnly && (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <input
+                        type="email"
+                        value={gmailInput}
+                        onChange={(e) => setGmailInput(e.target.value.toLowerCase())}
+                        placeholder="เช่น employee@gmail.com"
+                        disabled={savingGmail}
+                        className="flex-1 px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 text-xs font-mono text-slate-900 dark:text-white"
+                      />
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          disabled={savingGmail}
-                          onClick={handleUnlinkGmail}
-                          className="px-2.5 py-1.5 rounded-lg bg-rose-100 dark:bg-rose-950/70 hover:bg-rose-200 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 text-[11px] font-bold transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                          disabled={savingGmail || !gmailInput.trim()}
+                          onClick={handleSaveGmailLink}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
                         >
-                          ยกเลิกการผูก
+                          <Save className="w-3 h-3" />
+                          <span>{savingGmail ? 'กำลังบันทึก...' : 'บันทึกการผูก'}</span>
                         </button>
-                      )}
+                        {loginLink?.email && (
+                          <button
+                            type="button"
+                            disabled={savingGmail}
+                            onClick={handleUnlinkGmail}
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-100 dark:bg-rose-950/70 hover:bg-rose-200 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 text-[11px] font-bold transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                          >
+                            ยกเลิกการผูก
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {gmailNotice && (
                     <div
@@ -2693,16 +2733,22 @@ function EmployeeHRProfileModal({
               onClick={onClose}
               className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
             >
-              ยกเลิก
+              {readOnly ? 'ปิดหน้าต่าง' : 'ยกเลิก'}
             </button>
-            <button
-              type="submit"
-              disabled={isSaveBlocked}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>{isHrUnlocked ? 'บันทึกข้อมูลพื้นฐานและข้อมูลลับ' : 'บันทึกข้อมูลพื้นฐาน'}</span>
-            </button>
+            {readOnly ? (
+              <span className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-700">
+                โหมดดูอย่างเดียว (ผู้บริหาร)
+              </span>
+            ) : (
+              <button
+                type="submit"
+                disabled={isSaveBlocked}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{isHrUnlocked ? 'บันทึกข้อมูลพื้นฐานและข้อมูลลับ' : 'บันทึกข้อมูลพื้นฐาน'}</span>
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -2848,16 +2894,33 @@ function NotEmployeeSettingsModal({
 // ===============================================================
 
 function HrAdminUnlockModal({
+  googleLoginEmail,
   onClose,
   onSuccess,
 }: {
+  googleLoginEmail?: string | null;
   onClose: () => void;
   onSuccess: (email: string) => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleGoogleReverify = async () => {
+    if (!googleLoginEmail) return;
+    setGoogleSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const verifiedEmail = await reverifyGoogleSessionForUnlock(googleLoginEmail);
+      onSuccess(verifiedEmail || googleLoginEmail);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'เกิดข้อผิดพลาดในการยืนยันด้วย Google');
+    } finally {
+      setGoogleSubmitting(false);
+    }
+  };
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2922,6 +2985,27 @@ function HrAdminUnlockModal({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {googleLoginEmail && (
+          <div className="space-y-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={handleGoogleReverify}
+              disabled={googleSubmitting || submitting}
+              className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Unlock className="w-4 h-4" />
+              <span>
+                {googleSubmitting
+                  ? 'กำลังยืนยันด้วย Google...'
+                  : `ยืนยันด้วย Google (${maskEmailForDisplay(googleLoginEmail)})`}
+              </span>
+            </button>
+            <div className="text-center text-[10px] text-slate-400 font-semibold">
+              หรือ ยืนยันด้วยอีเมลแอดมิน + รหัสผ่าน (สำรอง)
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleUnlock} className="space-y-3.5 text-xs" autoComplete="off">
           <div>

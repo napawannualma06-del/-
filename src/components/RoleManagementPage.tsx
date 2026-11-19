@@ -1,10 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
   Clock,
+  Eye,
+  EyeOff,
   History,
+  KeyRound,
+  Lock,
+  Mail,
   RefreshCw,
   Save,
   Search,
@@ -19,22 +23,27 @@ import {
 } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import {
-  approveAccessRequestWithRole,
+  AccessRequestApproveMode,
+  approveAccessRequestBatch,
   countTotalSuperAdmins,
   fetchAllEmployeeLoginLinks,
   fetchAllUserRoles,
   fetchHRProfiles,
   fetchPendingAccessRequests,
   fetchRoleAuditLogs,
-  isHrAdminAuthUser,
+  HR_PRIVATE_IDLE_TIMEOUT_MS,
   isHrAdminEmail,
+  lockHrAdminEmailSession,
   maskEmailForDisplay,
   rejectAccessRequest,
+  reverifyGoogleSessionForUnlock,
   revokeUserRoleWithAudit,
   saveUserRoleWithAudit,
+  signInHrAdminEmail,
   SYSTEM_ROLE_LABELS,
   VALID_SYSTEM_ROLES,
 } from '../lib/hrService';
+import { usePermissions } from '../lib/permissions';
 import { useStore } from '../store/useStore';
 import {
   AccessRequestDoc,
@@ -89,13 +98,38 @@ export function formatRoleLabel(role: string): string {
 
 export function RoleManagementPage() {
   const { user, registeredUsers } = useStore();
+  const {
+    loading: permissionsLoading,
+    manageRoles: isSuperAdminAccess,
+    liveRole,
+    isHrAdminUnlocked,
+    authEmail,
+  } = usePermissions();
+
+  const [isGoogleRoleManuallyLocked, setIsGoogleRoleManuallyLocked] = useState<boolean>(false);
+  const lastRoleActivityRef = useRef<number>(Date.now());
+
+  const isFirebaseSuperVerified =
+    !permissionsLoading &&
+    isSuperAdminAccess &&
+    liveRole === 'super' &&
+    (isHrAdminUnlocked || !isGoogleRoleManuallyLocked);
+
+  const googleLoginEmail =
+    user?.authMethod === 'google' && user?.email ? user.email.trim().toLowerCase() : null;
+
   const [activeTab, setActiveTab] = useState<'manage' | 'audit'>('manage');
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [successMsg, setSuccessMsg] = useState<string>('');
 
-  const [authEmail, setAuthEmail] = useState<string>('');
-  const [isHrAdminUnlocked, setIsHrAdminUnlocked] = useState<boolean>(false);
+  // Inline HR Admin Unlock form state
+  const [unlockEmail, setUnlockEmail] = useState<string>('');
+  const [unlockPassword, setUnlockPassword] = useState<string>('');
+  const [showUnlockPassword, setShowUnlockPassword] = useState<boolean>(false);
+  const [unlockSubmitting, setUnlockSubmitting] = useState<boolean>(false);
+  const [googleUnlockSubmitting, setGoogleUnlockSubmitting] = useState<boolean>(false);
+  const [unlockErrorMsg, setUnlockErrorMsg] = useState<string | null>(null);
 
   const [userRolesMap, setUserRolesMap] = useState<Record<string, UserRoleDoc>>({});
   const [employeeLinksMap, setEmployeeLinksMap] = useState<Record<string, string>>({});
@@ -105,28 +139,17 @@ export function RoleManagementPage() {
 
   // Draft role selections per email in the main table
   const [draftRoles, setDraftRoles] = useState<Record<string, SystemRole>>({});
-  // Draft role selections per email in the pending requests box
+  // Draft approval settings per email in the pending requests box (3 modes)
+  const [requestModes, setRequestModes] = useState<Record<string, AccessRequestApproveMode>>({});
+  const [requestDisplayNames, setRequestDisplayNames] = useState<Record<string, string>>({});
+  const [requestTargetEmployeeIds, setRequestTargetEmployeeIds] = useState<Record<string, string>>({});
   const [requestRoles, setRequestRoles] = useState<Record<string, SystemRole>>({});
   // Saving indicator per email
   const [savingEmail, setSavingEmail] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (fbUser) => {
-      setIsHrAdminUnlocked(isHrAdminAuthUser(fbUser));
-      setAuthEmail((fbUser?.email || user?.email || '').trim().toLowerCase());
-    });
-    return () => unsub();
-  }, [user?.email]);
-
-  const isSuperAdminAccess = useMemo(() => {
-    if (isHrAdminUnlocked) return true;
-    if (user?.authMethod === 'google' && user?.systemRole === 'super') return true;
-    return false;
-  }, [isHrAdminUnlocked, user?.authMethod, user?.systemRole]);
-
   const loadAllData = useCallback(async () => {
-    if (!isSuperAdminAccess) {
+    if (!isFirebaseSuperVerified) {
       setLoading(false);
       return;
     }
@@ -147,7 +170,23 @@ export function RoleManagementPage() {
       setHrProfilesMap(hrDocRes.profiles || {});
       setEmployeeLinksMap(linksRes);
 
-      // Initialize draft role selections for pending requests
+      // Initialize draft state for pending requests
+      setRequestModes((prev) => {
+        const next = { ...prev };
+        pendingRes.forEach((req) => {
+          if (!next[req.email]) next[req.email] = 'new_employee';
+        });
+        return next;
+      });
+      setRequestDisplayNames((prev) => {
+        const next = { ...prev };
+        pendingRes.forEach((req) => {
+          if (next[req.email] === undefined) {
+            next[req.email] = (req.displayName || req.email.split('@')[0]).trim();
+          }
+        });
+        return next;
+      });
       setRequestRoles((prev) => {
         const next: Record<string, SystemRole> = { ...prev };
         pendingRes.forEach((req) => {
@@ -163,11 +202,100 @@ export function RoleManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [isSuperAdminAccess]);
+  }, [isFirebaseSuperVerified]);
 
   useEffect(() => {
     loadAllData();
   }, [loadAllData]);
+
+  const handleLockAdminSession = useCallback(async (isAutoTimeout = false) => {
+    await lockHrAdminEmailSession();
+    setIsGoogleRoleManuallyLocked(true);
+    setUserRolesMap({});
+    setPendingRequests([]);
+    setAuditLogs([]);
+    setEmployeeLinksMap({});
+    if (isAutoTimeout) {
+      setUnlockErrorMsg('ล็อกหน้าจัดการสิทธิ์อัตโนมัติเนื่องจากไม่มีการใช้งานเกิน 1 ชั่วโมง');
+    }
+  }, []);
+
+  // Auto-lock after 1 hour of inactivity when Role Management is unlocked
+  useEffect(() => {
+    if (!isFirebaseSuperVerified) return;
+
+    lastRoleActivityRef.current = Date.now();
+    const updateActivity = () => {
+      lastRoleActivityRef.current = Date.now();
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'click'];
+    events.forEach((ev) => window.addEventListener(ev, updateActivity, { passive: true }));
+
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastRoleActivityRef.current >= HR_PRIVATE_IDLE_TIMEOUT_MS) {
+        handleLockAdminSession(true);
+      }
+    }, 15000);
+
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, updateActivity));
+      window.clearInterval(timer);
+    };
+  }, [isFirebaseSuperVerified, handleLockAdminSession]);
+
+  const handleUnlockWithGoogle = async () => {
+    if (!googleLoginEmail) return;
+    setGoogleUnlockSubmitting(true);
+    setUnlockErrorMsg(null);
+    try {
+      await reverifyGoogleSessionForUnlock(googleLoginEmail);
+      setIsGoogleRoleManuallyLocked(false);
+      lastRoleActivityRef.current = Date.now();
+    } catch (err: any) {
+      const msg = err?.message || 'ไม่สามารถยืนยันตัวตนด้วย Google ได้';
+      if (msg !== 'ยกเลิกการยืนยันตัวตนด้วย Google') {
+        setUnlockErrorMsg(msg);
+      }
+    } finally {
+      setGoogleUnlockSubmitting(false);
+    }
+  };
+
+  const handleUnlockAdminSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!unlockEmail.trim() || !unlockPassword) {
+      setUnlockErrorMsg('กรุณากรอกอีเมลและรหัสผ่านให้ครบถ้วน');
+      return;
+    }
+    setUnlockSubmitting(true);
+    setUnlockErrorMsg(null);
+    try {
+      await signInHrAdminEmail(unlockEmail.trim(), unlockPassword);
+      setIsGoogleRoleManuallyLocked(false);
+      lastRoleActivityRef.current = Date.now();
+      setUnlockPassword('');
+      setUnlockEmail('');
+    } catch (err: any) {
+      console.error('Role Management Admin verification failed:', err);
+      setUnlockPassword('');
+      const code = err?.code || '';
+      if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/user-not-found' ||
+        code === 'auth/invalid-email'
+      ) {
+        setUnlockErrorMsg('อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง');
+      } else if (code === 'auth/too-many-requests') {
+        setUnlockErrorMsg('มีการลองผิดหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่');
+      } else {
+        setUnlockErrorMsg('ไม่สามารถยืนยันตัวตนได้ กรุณาตรวจสอบอีเมลและรหัสผ่าน');
+      }
+    } finally {
+      setUnlockSubmitting(false);
+    }
+  };
 
   // Build unified rows: linked employees + user_roles documents
   const unifiedRows = useMemo<UnifiedRoleRow[]>(() => {
@@ -346,22 +474,107 @@ export function RoleManagementPage() {
     }
   };
 
+  // รายชื่อพนักงานเดิมที่ยังไม่ได้ผูก Gmail (สำหรับตัวเลือก ข. ผูกกับพนักงานเดิม)
+  const unlinkedEmployees = useMemo(() => {
+    return (registeredUsers || [])
+      .filter((u) => {
+        if (u.accountStatus === 'rejected') return false;
+        if (hrProfilesMap[u.uid]?.notEmployee) return false;
+        const hasLinkedGmail = Boolean(
+          employeeLinksMap[u.uid] && employeeLinksMap[u.uid].trim()
+        );
+        return !hasLinkedGmail;
+      })
+      .map((u) => {
+        const hrProf = hrProfilesMap[u.uid];
+        const fullName = (hrProf?.fullName || '').trim();
+        const nickname = (hrProf?.nickname || '').trim();
+        const baseName = fullName || u.name || u.username || u.uid;
+        const label = nickname ? `${baseName} (${nickname}) - ${u.username || u.uid}` : `${baseName} (${u.username || u.uid})`;
+        return {
+          uid: u.uid,
+          name: fullName || u.name || u.uid,
+          label,
+        };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label, 'th'));
+  }, [registeredUsers, hrProfilesMap, employeeLinksMap]);
+
   const handleApproveRequest = async (req: AccessRequestDoc) => {
-    const selectedRole = requestRoles[req.email] || 'employee';
+    if (!isFirebaseSuperVerified) {
+      setErrorMsg('กรุณายืนยันตัวตนแอดมินสูงสุดก่อนดำเนินการ');
+      return;
+    }
+
+    const mode: AccessRequestApproveMode = requestModes[req.email] || 'new_employee';
+    const rawRole = requestRoles[req.email];
+    const selectedRole: SystemRole =
+      mode === 'new_employee'
+        ? rawRole === 'supervisor'
+          ? 'supervisor'
+          : 'employee'
+        : mode === 'existing_employee'
+        ? rawRole || 'employee'
+        : rawRole && rawRole !== 'employee'
+        ? rawRole
+        : 'hr';
+
+    const customName = (
+      requestDisplayNames[req.email] ??
+      req.displayName ??
+      req.email.split('@')[0]
+    ).trim();
+    const selectedEmpId = (requestTargetEmployeeIds[req.email] || '').trim();
+
+    if (mode === 'new_employee' && !customName) {
+      setErrorMsg('กรุณากรอกชื่อที่แสดงสำหรับพนักงานใหม่');
+      return;
+    }
+    if (mode === 'existing_employee' && !selectedEmpId) {
+      setErrorMsg('กรุณาเลือกพนักงานเดิมที่ต้องการผูก Gmail');
+      return;
+    }
+
+    const matchedEmp =
+      mode === 'existing_employee'
+        ? unlinkedEmployees.find((e) => e.uid === selectedEmpId)
+        : undefined;
+    const finalDisplayName =
+      mode === 'existing_employee'
+        ? matchedEmp?.name || req.displayName || req.email.split('@')[0]
+        : customName;
+
     setErrorMsg('');
     setSuccessMsg('');
     setSavingEmail(req.email);
     try {
       const currentActorEmail = (auth.currentUser?.email || authEmail || '').trim().toLowerCase();
-      await approveAccessRequestWithRole({
+      const res = await approveAccessRequestBatch({
+        mode,
         email: req.email,
         role: selectedRole,
-        displayName: req.displayName,
+        displayName: finalDisplayName,
+        employeeId: mode === 'existing_employee' ? selectedEmpId : undefined,
         actorEmail: currentActorEmail || 'super_admin',
       });
-      setSuccessMsg(
-        `อนุมัติคำขอของ ${req.displayName} (${maskEmailForDisplay(req.email)}) ด้วยสิทธิ์ "${SYSTEM_ROLE_LABELS[selectedRole]}" เรียบร้อยแล้ว`
-      );
+
+      if (mode === 'new_employee') {
+        setSuccessMsg(
+          `สร้างบัญชีพนักงานใหม่ "${finalDisplayName}" (รหัส: ${res.employeeId || '-'}) ผูกกับ ${maskEmailForDisplay(
+            req.email
+          )} ด้วยสิทธิ์ "${SYSTEM_ROLE_LABELS[selectedRole]}" เรียบร้อยแล้ว`
+        );
+      } else if (mode === 'existing_employee') {
+        setSuccessMsg(
+          `ผูก ${maskEmailForDisplay(req.email)} กับพนักงานเดิม "${finalDisplayName}" (${selectedEmpId}) ด้วยสิทธิ์ "${SYSTEM_ROLE_LABELS[selectedRole]}" เรียบร้อยแล้ว`
+        );
+      } else {
+        setSuccessMsg(
+          `อนุมัติสิทธิ์อย่างเดียว "${SYSTEM_ROLE_LABELS[selectedRole]}" ให้ ${finalDisplayName} (${maskEmailForDisplay(
+            req.email
+          )}) เรียบร้อยแล้ว`
+        );
+      }
       await loadAllData();
     } catch (err: any) {
       setErrorMsg(err?.message || 'เกิดข้อผิดพลาดในการอนุมัติคำขอ');
@@ -391,6 +604,14 @@ export function RoleManagementPage() {
     }
   };
 
+  if (permissionsLoading) {
+    return (
+      <div className="py-16 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-600" />
+      </div>
+    );
+  }
+
   if (!isSuperAdminAccess) {
     return (
       <div className="max-w-3xl mx-auto my-12 p-8 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm text-center">
@@ -403,6 +624,128 @@ export function RoleManagementPage() {
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           หน้านี้เปิดให้เฉพาะแอดมิน HR ที่ปลดล็อกยืนยันตัวตนแล้ว หรือผู้ใช้ที่มีสิทธิ์ &ldquo;แอดมินสูงสุด (super)&rdquo; ที่ล็อกอินด้วย Google เท่านั้น
         </p>
+      </div>
+    );
+  }
+
+  if (!isFirebaseSuperVerified) {
+    return (
+      <div className="max-w-md mx-auto my-10 p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-amber-300 dark:border-amber-800 shadow-sm space-y-4">
+        <div className="flex items-center gap-3 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+          <div className="w-11 h-11 rounded-xl bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <KeyRound className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+              ยืนยันตัวตนแอดมินเพื่อจัดการสิทธิ์
+            </h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {googleLoginEmail
+                ? 'กดยืนยันตัวตนด้วยบัญชี Google ที่ล็อกอินอยู่ หรือใช้อีเมลแอดมิน HR'
+                : 'เข้าสู่ระบบด้วยอีเมลแอดมินที่ได้รับสิทธิ์ (ไม่จำรหัสผ่านในเครื่อง)'}
+            </p>
+          </div>
+        </div>
+
+        {googleLoginEmail && (
+          <div className="space-y-2.5 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+            <button
+              type="button"
+              onClick={handleUnlockWithGoogle}
+              disabled={googleUnlockSubmitting || unlockSubmitting}
+              className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span className="w-5 h-5 rounded-md bg-white flex items-center justify-center shrink-0">
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                  />
+                </svg>
+              </span>
+              <span>
+                {googleUnlockSubmitting
+                  ? 'กำลังยืนยันด้วย Google...'
+                  : `ยืนยันด้วย Google (${maskEmailForDisplay(googleLoginEmail)})`}
+              </span>
+            </button>
+            <p className="text-[11px] text-zinc-400 text-center">
+              หรือใช้ช่องกรอกอีเมลแอดมิน + รหัสผ่านด้านล่าง (ทางสำรองสำหรับคนที่เข้าด้วย PIN)
+            </p>
+          </div>
+        )}
+
+        <form onSubmit={handleUnlockAdminSession} className="space-y-3.5 text-xs" autoComplete="off">
+          <div>
+            <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+              อีเมลแอดมิน HR
+            </label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="email"
+                required
+                value={unlockEmail}
+                onChange={(e) => setUnlockEmail(e.target.value)}
+                placeholder="admin@example.com"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+              รหัสผ่าน
+            </label>
+            <div className="relative">
+              <Lock className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type={showUnlockPassword ? 'text' : 'password'}
+                required
+                value={unlockPassword}
+                onChange={(e) => setUnlockPassword(e.target.value)}
+                placeholder="กรอกรหัสผ่านอีเมลแอดมิน"
+                className="w-full pl-9 pr-9 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowUnlockPassword((v) => !v)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1"
+                tabIndex={-1}
+              >
+                {showUnlockPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {unlockErrorMsg && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{unlockErrorMsg}</span>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={unlockSubmitting || googleUnlockSubmitting}
+            className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            <KeyRound className="w-4 h-4" />
+            <span>{unlockSubmitting ? 'กำลังตรวจสอบ...' : 'ยืนยันตัวตนด้วยอีเมลแอดมิน'}</span>
+          </button>
+        </form>
       </div>
     );
   }
@@ -433,6 +776,14 @@ export function RoleManagementPage() {
           </div>
 
           <div className="flex items-center gap-2 self-start md:self-center">
+            <button
+              type="button"
+              onClick={() => handleLockAdminSession(false)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/70 transition-colors"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              ล็อกสิทธิ์แอดมิน
+            </button>
             <button
               type="button"
               onClick={loadAllData}
@@ -542,82 +893,282 @@ export function RoleManagementPage() {
                 {pendingRequests.map((req) => {
                   const isSelf = Boolean(authEmail && req.email === authEmail);
                   const isBusy = savingEmail === req.email;
-                  const selectedRole = requestRoles[req.email] || 'employee';
+                  const mode: AccessRequestApproveMode = requestModes[req.email] || 'new_employee';
+                  const customName =
+                    requestDisplayNames[req.email] !== undefined
+                      ? requestDisplayNames[req.email]
+                      : req.displayName || req.email.split('@')[0];
+                  const selectedEmpId = requestTargetEmployeeIds[req.email] || '';
+                  const rawRole = requestRoles[req.email];
+                  const selectedRole: SystemRole =
+                    mode === 'new_employee'
+                      ? rawRole === 'supervisor'
+                        ? 'supervisor'
+                        : 'employee'
+                      : mode === 'existing_employee'
+                      ? rawRole || 'employee'
+                      : rawRole && rawRole !== 'employee'
+                      ? rawRole
+                      : 'hr';
+
+                  const localPart = (req.email.split('@')[0] || 'user')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]/g, '') || 'user';
 
                   return (
                     <div
                       key={req.email}
-                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-amber-50/30 dark:bg-amber-950/10"
+                      className="p-4 space-y-3.5 bg-amber-50/30 dark:bg-amber-950/10"
                     >
-                      <div className="flex items-center gap-3">
-                        {req.photoURL ? (
-                          <img
-                            src={req.photoURL}
-                            alt={req.displayName}
-                            className="w-10 h-10 rounded-full object-cover border border-zinc-200 dark:border-zinc-700"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200 flex items-center justify-center font-bold text-sm">
-                            {(req.displayName || req.email).slice(0, 1).toUpperCase()}
-                          </div>
-                        )}
-                        <div>
-                          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
-                            {req.displayName}
-                          </div>
-                          <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
-                            {maskEmailForDisplay(req.email)}
-                          </div>
-                          {req.createdAt > 0 && (
-                            <div className="text-[11px] text-zinc-400 dark:text-zinc-500 flex items-center gap-1 mt-0.5">
-                              <Clock className="w-3 h-3" />
-                              <span>
-                                ขอเมื่อ {new Date(req.createdAt).toLocaleString('th-TH')}
-                              </span>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          {req.photoURL ? (
+                            <img
+                              src={req.photoURL}
+                              alt={req.displayName}
+                              className="w-10 h-10 rounded-full object-cover border border-zinc-200 dark:border-zinc-700"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200 flex items-center justify-center font-bold text-sm">
+                              {(req.displayName || req.email).slice(0, 1).toUpperCase()}
                             </div>
                           )}
+                          <div>
+                            <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
+                              {req.displayName}
+                            </div>
+                            <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                              {maskEmailForDisplay(req.email)}
+                            </div>
+                            {req.createdAt > 0 && (
+                              <div className="text-[11px] text-zinc-400 dark:text-zinc-500 flex items-center gap-1 mt-0.5">
+                                <Clock className="w-3 h-3" />
+                                <span>
+                                  ขอเมื่อ {new Date(req.createdAt).toLocaleString('th-TH')}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* ตัวเลือก 3 รูปแบบการอนุมัติ */}
+                        <div className="inline-flex flex-wrap gap-1.5 bg-white dark:bg-zinc-800 p-1 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                          <button
+                            type="button"
+                            disabled={isBusy || isSelf}
+                            onClick={() => {
+                              setRequestModes((prev) => ({ ...prev, [req.email]: 'new_employee' }));
+                              setRequestRoles((prev) => ({
+                                ...prev,
+                                [req.email]:
+                                  prev[req.email] === 'supervisor' ? 'supervisor' : 'employee',
+                              }));
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              mode === 'new_employee'
+                                ? 'bg-purple-600 text-white shadow-2xs'
+                                : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700'
+                            }`}
+                          >
+                            ก. พนักงานใหม่
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy || isSelf}
+                            onClick={() => {
+                              setRequestModes((prev) => ({
+                                ...prev,
+                                [req.email]: 'existing_employee',
+                              }));
+                              setRequestRoles((prev) => ({
+                                ...prev,
+                                [req.email]: prev[req.email] || 'employee',
+                              }));
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              mode === 'existing_employee'
+                                ? 'bg-purple-600 text-white shadow-2xs'
+                                : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700'
+                            }`}
+                          >
+                            ข. ผูกกับพนักงานเดิม
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy || isSelf}
+                            onClick={() => {
+                              setRequestModes((prev) => ({ ...prev, [req.email]: 'role_only' }));
+                              setRequestRoles((prev) => ({
+                                ...prev,
+                                [req.email]:
+                                  prev[req.email] && prev[req.email] !== 'employee'
+                                    ? prev[req.email]
+                                    : 'hr',
+                              }));
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              mode === 'role_only'
+                                ? 'bg-purple-600 text-white shadow-2xs'
+                                : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700'
+                            }`}
+                          >
+                            ค. สิทธิ์อย่างเดียว (HR/ผู้บริหาร/super)
+                          </button>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <select
-                          value={selectedRole}
-                          disabled={isBusy || isSelf}
-                          onChange={(e) =>
-                            setRequestRoles((prev) => ({
-                              ...prev,
-                              [req.email]: e.target.value as SystemRole,
-                            }))
-                          }
-                          className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        >
-                          {VALID_SYSTEM_ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {SYSTEM_ROLE_LABELS[r]} ({r})
-                            </option>
-                          ))}
-                        </select>
+                      {/* ฟอร์มตามรูปแบบที่เลือก */}
+                      <div className="pt-2 border-t border-amber-200/60 dark:border-zinc-800 flex flex-col lg:flex-row lg:items-end justify-between gap-3">
+                        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {mode === 'new_employee' && (
+                            <>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 mb-1">
+                                  ชื่อพนักงานที่แสดง (รหัสอัตโนมัติ: emp_{localPart})
+                                </label>
+                                <input
+                                  type="text"
+                                  value={customName}
+                                  disabled={isBusy || isSelf}
+                                  onChange={(e) =>
+                                    setRequestDisplayNames((prev) => ({
+                                      ...prev,
+                                      [req.email]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="กรอกชื่อ-นามสกุล หรือชื่อเล่น"
+                                  className="w-full px-3 py-1.5 rounded-xl text-xs border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 mb-1">
+                                  ระดับสิทธิ์เริ่มต้น
+                                </label>
+                                <select
+                                  value={selectedRole}
+                                  disabled={isBusy || isSelf}
+                                  onChange={(e) =>
+                                    setRequestRoles((prev) => ({
+                                      ...prev,
+                                      [req.email]: e.target.value as SystemRole,
+                                    }))
+                                  }
+                                  className="w-full px-3 py-1.5 rounded-xl text-xs font-semibold border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                >
+                                  <option value="employee">
+                                    {SYSTEM_ROLE_LABELS.employee} (employee)
+                                  </option>
+                                  <option value="supervisor">
+                                    {SYSTEM_ROLE_LABELS.supervisor} (supervisor)
+                                  </option>
+                                </select>
+                              </div>
+                            </>
+                          )}
 
-                        <button
-                          type="button"
-                          disabled={isBusy || isSelf}
-                          onClick={() => handleApproveRequest(req)}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-colors disabled:opacity-50"
-                        >
-                          <UserCheck className="w-3.5 h-3.5" />
-                          <span>อนุมัติ</span>
-                        </button>
+                          {mode === 'existing_employee' && (
+                            <>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 mb-1">
+                                  เลือกพนักงานเดิมที่ยังไม่ได้ผูก Gmail ({unlinkedEmployees.length} คน)
+                                </label>
+                                <select
+                                  value={selectedEmpId}
+                                  disabled={isBusy || isSelf}
+                                  onChange={(e) =>
+                                    setRequestTargetEmployeeIds((prev) => ({
+                                      ...prev,
+                                      [req.email]: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full px-3 py-1.5 rounded-xl text-xs font-semibold border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                >
+                                  <option value="">-- เลือกพนักงานเดิม --</option>
+                                  {unlinkedEmployees.map((emp) => (
+                                    <option key={emp.uid} value={emp.uid}>
+                                      {emp.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 mb-1">
+                                  ระดับสิทธิ์ในระบบ
+                                </label>
+                                <select
+                                  value={selectedRole}
+                                  disabled={isBusy || isSelf}
+                                  onChange={(e) =>
+                                    setRequestRoles((prev) => ({
+                                      ...prev,
+                                      [req.email]: e.target.value as SystemRole,
+                                    }))
+                                  }
+                                  className="w-full px-3 py-1.5 rounded-xl text-xs font-semibold border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                >
+                                  {VALID_SYSTEM_ROLES.map((r) => (
+                                    <option key={r} value={r}>
+                                      {SYSTEM_ROLE_LABELS[r]} ({r})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </>
+                          )}
 
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => handleRejectRequest(req)}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition-colors disabled:opacity-50"
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>ปฏิเสธ</span>
-                        </button>
+                          {mode === 'role_only' && (
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 mb-1">
+                                เลือกสิทธิ์อย่างเดียว (ไม่สร้างและไม่ผูกบัญชีพนักงานคิวงาน)
+                              </label>
+                              <select
+                                value={selectedRole}
+                                disabled={isBusy || isSelf}
+                                onChange={(e) =>
+                                  setRequestRoles((prev) => ({
+                                    ...prev,
+                                    [req.email]: e.target.value as SystemRole,
+                                  }))
+                                }
+                                className="w-full sm:w-72 px-3 py-1.5 rounded-xl text-xs font-semibold border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              >
+                                {(['hr', 'executive', 'super', 'supervisor'] as const).map((r) => (
+                                  <option key={r} value={r}>
+                                    {SYSTEM_ROLE_LABELS[r]} ({r})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={
+                              isBusy ||
+                              isSelf ||
+                              (mode === 'new_employee' && !customName.trim()) ||
+                              (mode === 'existing_employee' && !selectedEmpId)
+                            }
+                            onClick={() => handleApproveRequest(req)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                          >
+                            <UserCheck className="w-3.5 h-3.5" />
+                            <span>อนุมัติ</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleRejectRequest(req)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>ปฏิเสธ</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );

@@ -22,7 +22,8 @@ import {
   EyeOff
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { ShiftTemplate, EmployeeShiftPref } from '../types';
 import { 
   getAvailableOTCycles, 
@@ -49,7 +50,7 @@ import { AnimalAvatar } from './AnimalAvatar';
 
 export function AdminShiftDashboard() {
   const { user, registeredUsers } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { viewShiftsAdmin, manageShifts: isAdmin } = usePermissions();
 
   // Available cycles
   const availableCycles = useMemo(() => getAvailableOTCycles(), []);
@@ -165,6 +166,7 @@ export function AdminShiftDashboard() {
 
   // Handle cell click / selection
   const handleSetCell = (empId: string, dateStr: string, value: string) => {
+    if (!isAdmin) return;
     setScheduleDays((prev) => {
       const empSchedule = { ...(prev[empId] || {}) };
       if (!value) {
@@ -420,29 +422,33 @@ export function AdminShiftDashboard() {
               </div>
             </div>
 
-            {/* Template Management Button */}
-            <button
-              type="button"
-              onClick={() => setShowTemplateModal(true)}
-              disabled={loadError || loading}
-              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              title="เพิ่ม แก้ไข หรือลบกะงาน"
-            >
-              <Clock className="w-4 h-4 text-indigo-500" />
-              <span>จัดการกะ ({templates.length})</span>
-            </button>
+            {isAdmin && (
+              <>
+                {/* Template Management Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowTemplateModal(true)}
+                  disabled={loadError || loading}
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="เพิ่ม แก้ไข หรือลบกะงาน"
+                >
+                  <Clock className="w-4 h-4 text-indigo-500" />
+                  <span>จัดการกะ ({templates.length})</span>
+                </button>
 
-            {/* Employee Prefs Button */}
-            <button
-              type="button"
-              onClick={() => setShowPrefModal(true)}
-              disabled={loadError || loading}
-              className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              title="ตั้งค่าวันหยุดประจำและกะประจำต่อพนักงาน"
-            >
-              <Settings className="w-4 h-4 text-slate-500" />
-              <span>ตั้งค่าพนักงาน</span>
-            </button>
+                {/* Employee Prefs Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowPrefModal(true)}
+                  disabled={loadError || loading}
+                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="ตั้งค่าวันหยุดประจำและกะประจำต่อพนักงาน"
+                >
+                  <Settings className="w-4 h-4 text-slate-500" />
+                  <span>ตั้งค่าพนักงาน</span>
+                </button>
+              </>
+            )}
 
             {/* Export Excel Button */}
             <button
@@ -457,61 +463,70 @@ export function AdminShiftDashboard() {
             </button>
 
             {/* Save Button */}
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving || !isDirty || loadError || loading}
-              className={clsx(
-                "px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95 whitespace-nowrap",
-                isDirty && !loadError && !loading
-                  ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/25 animate-pulse"
-                  : "bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed shadow-none"
-              )}
-            >
-              <Save className="w-4 h-4" />
-              <span>{isSaving ? 'กำลังบันทึก...' : isDirty ? 'บันทึกตารางกะ *' : 'บันทึกแล้ว'}</span>
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving || !isDirty || loadError || loading}
+                className={clsx(
+                  "px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95 whitespace-nowrap",
+                  isDirty && !loadError && !loading
+                    ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/25 animate-pulse"
+                    : "bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-600 cursor-not-allowed shadow-none"
+                )}
+              >
+                <Save className="w-4 h-4" />
+                <span>{isSaving ? 'กำลังบันทึก...' : isDirty ? 'บันทึกตารางกะ *' : 'บันทึกแล้ว'}</span>
+              </button>
+            )}
           </div>
         </div>
 
         {/* Quick Helper Tools Toolbar */}
         <div className="pt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              เครื่องมือช่วยกรอก:
-            </span>
+          {isAdmin ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                เครื่องมือช่วยกรอก:
+              </span>
 
-            <button
-              type="button"
-              onClick={() => setShowFillAutoModal(true)}
-              disabled={loadError || loading}
-              className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 transition cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              เติมทั้งรอบจากวันหยุดประจำ
-            </button>
+              <button
+                type="button"
+                onClick={() => setShowFillAutoModal(true)}
+                disabled={loadError || loading}
+                className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 transition cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                เติมทั้งรอบจากวันหยุดประจำ
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setShowCopyPrevModal(true)}
-              disabled={loadError || loading}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold border border-slate-200 dark:border-slate-700 transition cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Copy className="w-3.5 h-3.5 text-slate-500" />
-              คัดลอกจากรอบก่อน
-            </button>
+              <button
+                type="button"
+                onClick={() => setShowCopyPrevModal(true)}
+                disabled={loadError || loading}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold border border-slate-200 dark:border-slate-700 transition cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                คัดลอกจากรอบก่อน
+              </button>
 
-            <button
-              type="button"
-              onClick={() => setShowHolidayModal(true)}
-              disabled={loadError || loading}
-              className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold border border-rose-200 dark:border-rose-800 transition cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Flag className="w-3.5 h-3.5 text-rose-500" />
-              ตั้งวันนักขัตฤกษ์
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setShowHolidayModal(true)}
+                disabled={loadError || loading}
+                className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold border border-rose-200 dark:border-rose-800 transition cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Flag className="w-3.5 h-3.5 text-rose-500" />
+                ตั้งวันนักขัตฤกษ์
+              </button>
+            </div>
+          ) : (
+            <div className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5">
+              <Eye className="w-3.5 h-3.5 text-indigo-500" />
+              <span>โหมดดูอย่างเดียว (ผู้บริหาร)</span>
+            </div>
+          )}
 
           {/* Quick Legend */}
           <div className="flex items-center gap-2 flex-wrap text-[11px]">
@@ -725,12 +740,14 @@ export function AdminShiftDashboard() {
                           <td
                             key={col.dateStr}
                             onClick={() => {
+                              if (!isAdmin) return;
                               setActiveCellPicker(
                                 isPickingThis ? null : { empId: emp.uid, dateStr: col.dateStr }
                               );
                             }}
                             className={clsx(
-                              "p-1 text-center border-l border-slate-100 dark:border-slate-800/60 cursor-pointer transition relative group",
+                              "p-1 text-center border-l border-slate-100 dark:border-slate-800/60 transition relative group",
+                              isAdmin ? "cursor-pointer" : "cursor-default",
                               col.isWeekend && "bg-amber-50/30 dark:bg-amber-950/10",
                               isPickingThis && "ring-2 ring-indigo-500 z-30"
                             )}

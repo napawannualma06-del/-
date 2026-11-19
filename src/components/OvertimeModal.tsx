@@ -12,7 +12,8 @@ import {
   limit 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { OvertimeRequest, OvertimeStatus, OvertimeType, ShiftTemplate, EmployeeShiftPref } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { recordSystemAction } from '../lib/activityService';
@@ -91,7 +92,7 @@ export function OvertimeModal({
   defaultTab = 'my' 
 }: OvertimeModalProps) {
   const { user } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { viewOTAdmin: isAdmin, approveOT: canApproveOT } = usePermissions();
 
   const availableCycles = useMemo(() => getAvailableOTCycles(), []);
   const [selectedCycleKey, setSelectedCycleKey] = useState<string>(() => {
@@ -405,7 +406,7 @@ export function OvertimeModal({
 
   // Admin Change OT Type Handler
   const handleSaveOtType = async (newType: OvertimeType) => {
-    if (!editingOtTypeRequest || !isAdmin || !user) return;
+    if (!editingOtTypeRequest || !canApproveOT || !user) return;
     setIsSavingOtType(true);
     try {
       const reqRef = doc(db, 'overtime_requests', editingOtTypeRequest.id);
@@ -431,7 +432,7 @@ export function OvertimeModal({
 
   // Admin Approve / Reject
   const handleReviewAction = async (requestId: string, status: 'approved' | 'rejected') => {
-    if (!isAdmin || !user) return;
+    if (!canApproveOT || !user) return;
     setIsReviewing(true);
 
     try {
@@ -1296,10 +1297,10 @@ export function OvertimeModal({
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1.5 self-start">
-                              {!isReviewingThis ? (
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  {isAdmin && (
+                            {canApproveOT && (
+                              <div className="flex items-center gap-1.5 self-start">
+                                {!isReviewingThis ? (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -1311,40 +1312,40 @@ export function OvertimeModal({
                                     >
                                       เปลี่ยนประเภท
                                     </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => handleReviewAction(req.id, 'approved')}
-                                    disabled={isReviewing}
-                                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
-                                    title="อนุมัติคำขอ OT ทันที"
-                                  >
-                                    <Check className="w-3.5 h-3.5" />
-                                    อนุมัติ
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setReviewingId(req.id);
-                                      setAdminComment('');
-                                    }}
-                                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 text-xs font-bold border border-rose-300 dark:border-rose-800 transition flex items-center gap-1 cursor-pointer"
-                                    title="ไม่อนุมัติ หรือระบุเหตุผล"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                    ไม่อนุมัติ
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteRequest(req.id)}
-                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                                    title="ลบคำขอนี้"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              ) : null}
-                            </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleReviewAction(req.id, 'approved')}
+                                      disabled={isReviewing}
+                                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
+                                      title="อนุมัติคำขอ OT ทันที"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      อนุมัติ
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReviewingId(req.id);
+                                        setAdminComment('');
+                                      }}
+                                      className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 text-xs font-bold border border-rose-300 dark:border-rose-800 transition flex items-center gap-1 cursor-pointer"
+                                      title="ไม่อนุมัติ หรือระบุเหตุผล"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                      ไม่อนุมัติ
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteRequest(req.id)}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                      title="ลบคำขอนี้"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
                           </div>
 
                           {/* Review Comment Box for Rejection or Note */}
@@ -1566,7 +1567,7 @@ export function OvertimeModal({
                           {/* Right: Actions */}
                           <div className="flex items-center gap-1.5 self-start">
                             {/* Admin Change OT Type Button */}
-                            {isAdmin && activeTab === 'admin' && !isReviewingThis && (
+                            {canApproveOT && activeTab === 'admin' && !isReviewingThis && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1581,7 +1582,7 @@ export function OvertimeModal({
                             )}
 
                             {/* Admin Review Action Buttons */}
-                            {isAdmin && activeTab === 'admin' && req.status === 'pending' && !isReviewingThis && (
+                            {canApproveOT && activeTab === 'admin' && req.status === 'pending' && !isReviewingThis && (
                               <div className="flex items-center gap-1">
                                 <button
                                   type="button"
@@ -1607,8 +1608,8 @@ export function OvertimeModal({
                               </div>
                             )}
 
-                            {/* ลบคำขอ (ถ้าเป็นของตัวเองและยังรออนุมัติ หรือแอดมิน) */}
-                            {(isAdmin || (isMyOwn && req.status === 'pending')) && (
+                            {/* ลบคำขอ (ถ้าเป็นของตัวเองและยังรออนุมัติ หรือผู้มีสิทธิ์อนุมัติ OT) */}
+                            {(canApproveOT || (isMyOwn && req.status === 'pending')) && (
                               <button
                                 type="button"
                                 onClick={() => handleDeleteRequest(req.id)}

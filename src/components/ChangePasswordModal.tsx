@@ -10,7 +10,8 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { useStore, UserProfile, isUserAdmin } from '../store/useStore';
+import { useStore, UserProfile } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -25,9 +26,9 @@ export function ChangePasswordModal({
   targetUser,
 }: ChangePasswordModalProps) {
   const { user: currentUser, changeUserPassword } = useStore();
+  const { manageUsers: isAdmin } = usePermissions();
 
   const activeTarget = targetUser || currentUser;
-  const isAdmin = isUserAdmin(currentUser);
   const isEditingOther = Boolean(
     targetUser && currentUser && targetUser.uid !== currentUser.uid
   );

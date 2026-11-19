@@ -12,7 +12,8 @@ import {
   runTransaction 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, isQuotaExceededError } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { QuotaExceededBanner } from './QuotaExceededBanner';
 import { 
   Clock, 
@@ -292,7 +293,7 @@ export function Queue() {
     fetchHistoricalCases,
     fetchTotalCaseCounts,
   } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { manageCases: isAdmin } = usePermissions();
   const [activeFilter, setActiveFilter] = useState<'all' | 'new' | 'pending' | 'in_progress' | 'stuck' | 'remarks' | 'mine' | 'closed' | 'cancelled'>('all');
 
   // Merge active/today liveCases with any on-demand loaded historicalCases

@@ -14,7 +14,8 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { OvertimeRequest, OvertimeStatus, OvertimeType } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { 
@@ -72,7 +73,7 @@ const STATUS_CONFIG: Record<
 
 export function AdminOTDashboard() {
   const { user } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { viewOTAdmin, approveOT: isAdmin } = usePermissions();
 
   const availableCycles = useMemo(() => getAvailableOTCycles(), []);
   const [selectedCycleKey, setSelectedCycleKey] = useState<string>(() => {
@@ -103,7 +104,7 @@ export function AdminOTDashboard() {
   // Real-time listener for ALL pending requests across all cycles (Strictly real-time for admin)
   const [allPendingRequests, setAllPendingRequests] = useState<OvertimeRequest[]>([]);
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!viewOTAdmin) return;
     const qPending = query(
       collection(db, 'overtime_requests'),
       where('status', '==', 'pending'),
@@ -121,7 +122,7 @@ export function AdminOTDashboard() {
       (err) => console.warn('Pending OT listen error:', err)
     );
     return () => unsub();
-  }, [isAdmin]);
+  }, [viewOTAdmin]);
 
   // Load OT requests for current/selected cycle (26-25) via getDocs with limit(100)
   const fetchCycleRequests = async (isLoadMore = false) => {
@@ -762,95 +763,97 @@ export function AdminOTDashboard() {
                   </div>
 
                   {/* Actions */}
-                  <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/60 flex items-center justify-between gap-2">
-                    {!isReviewingThis ? (
-                      <div className="flex items-center gap-2 w-full justify-end flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingOtTypeRequest(req);
-                            setSelectedNewOtType((req.otType as OvertimeType) || 'workday');
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
-                          title="เปลี่ยนประเภท OT ของคำขอนี้"
-                        >
-                          <Tag className="w-3.5 h-3.5" />
-                          เปลี่ยนประเภท
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingDateRequest(req);
-                            setEditDateValue(req.date);
-                            setEditDateError(null);
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
-                          title="แก้ไขวันที่ของคำขอ OT"
-                        >
-                          <Calendar className="w-3.5 h-3.5" />
-                          แก้วันที่
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleReviewAction(req.id, 'approved')}
-                          disabled={isReviewing}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          อนุมัติ
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setReviewingId(req.id);
-                            setAdminComment('');
-                          }}
-                          className="px-3.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 text-xs font-bold border border-rose-300 dark:border-rose-800 transition flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                          ไม่อนุมัติ
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteRequest(req.id)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                          title="ลบคำขอนี้"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="w-full space-y-2">
-                        <textarea
-                          rows={2}
-                          value={adminComment}
-                          onChange={(e) => setAdminComment(e.target.value)}
-                          placeholder="ระบุเหตุผลที่ไม่อนุมัติหรือข้อความแจ้งเตือน..."
-                          className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
-                        />
-                        <div className="flex items-center justify-end gap-2">
+                  {isAdmin && (
+                    <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/60 flex items-center justify-between gap-2">
+                      {!isReviewingThis ? (
+                        <div className="flex items-center gap-2 w-full justify-end flex-wrap">
                           <button
                             type="button"
                             onClick={() => {
-                              setReviewingId(null);
-                              setAdminComment('');
+                              setEditingOtTypeRequest(req);
+                              setSelectedNewOtType((req.otType as OvertimeType) || 'workday');
                             }}
-                            className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                            title="เปลี่ยนประเภท OT ของคำขอนี้"
                           >
-                            ยกเลิก
+                            <Tag className="w-3.5 h-3.5" />
+                            เปลี่ยนประเภท
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleReviewAction(req.id, 'rejected')}
-                            disabled={isReviewing}
-                            className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                            onClick={() => {
+                              setEditingDateRequest(req);
+                              setEditDateValue(req.date);
+                              setEditDateError(null);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 transition flex items-center gap-1 cursor-pointer"
+                            title="แก้ไขวันที่ของคำขอ OT"
                           >
-                            ยืนยันไม่อนุมัติ
+                            <Calendar className="w-3.5 h-3.5" />
+                            แก้วันที่
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReviewAction(req.id, 'approved')}
+                            disabled={isReviewing}
+                            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            อนุมัติ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReviewingId(req.id);
+                              setAdminComment('');
+                            }}
+                            className="px-3.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 text-xs font-bold border border-rose-300 dark:border-rose-800 transition flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            ไม่อนุมัติ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRequest(req.id)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            title="ลบคำขอนี้"
+                          >
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      ) : (
+                        <div className="w-full space-y-2">
+                          <textarea
+                            rows={2}
+                            value={adminComment}
+                            onChange={(e) => setAdminComment(e.target.value)}
+                            placeholder="ระบุเหตุผลที่ไม่อนุมัติหรือข้อความแจ้งเตือน..."
+                            className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                          />
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReviewingId(null);
+                                setAdminComment('');
+                              }}
+                              className="px-3 py-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            >
+                              ยกเลิก
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleReviewAction(req.id, 'rejected')}
+                              disabled={isReviewing}
+                              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                            >
+                              ยืนยันไม่อนุมัติ
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -11,7 +11,8 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { AdminHRDashboard } from './AdminHRDashboard';
 import { AdminShiftDashboard } from './AdminShiftDashboard';
 import { AdminPayrollDashboard } from './AdminPayrollDashboard';
@@ -33,8 +34,27 @@ const VALID_TABS: HRTabKey[] = [
 ];
 
 export function HRPage() {
-  const { user, registeredUsers } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { registeredUsers } = useStore();
+  const {
+    loading: permissionsLoading,
+    canAccessHRPage,
+    viewHRPrivate,
+    viewShiftsAdmin,
+    viewOTAdmin,
+    viewAdvanceAdmin,
+    manageUsers,
+  } = usePermissions();
+
+  const allowedTabs = React.useMemo<HRTabKey[]>(() => {
+    const list: HRTabKey[] = [];
+    if (viewHRPrivate) list.push('employees_info');
+    if (viewShiftsAdmin) list.push('shifts');
+    if (viewHRPrivate) list.push('payroll');
+    if (viewOTAdmin) list.push('ot');
+    if (viewAdvanceAdmin) list.push('advance');
+    if (manageUsers) list.push('manage_users');
+    return list;
+  }, [viewHRPrivate, viewShiftsAdmin, viewOTAdmin, viewAdvanceAdmin, manageUsers]);
 
   const [activeTab, setActiveTab] = useState<HRTabKey>(() => {
     try {
@@ -50,18 +70,36 @@ export function HRPage() {
 
   const [showUserModal, setShowUserModal] = useState(false);
 
+  // แท็บที่จำไว้แต่ไม่มีสิทธิ์ให้เด้งไปแท็บแรกที่มีสิทธิ์
   useEffect(() => {
+    if (permissionsLoading || allowedTabs.length === 0) return;
+    if (!allowedTabs.includes(activeTab)) {
+      setActiveTab(allowedTabs[0]);
+    }
+  }, [permissionsLoading, allowedTabs, activeTab]);
+
+  useEffect(() => {
+    if (!allowedTabs.includes(activeTab)) return;
     try {
       localStorage.setItem(HR_TAB_STORAGE_KEY, activeTab);
     } catch (e) {
       console.warn(e);
     }
-  }, [activeTab]);
+  }, [activeTab, allowedTabs]);
 
-  if (!isAdmin) {
+  if (permissionsLoading) {
+    return (
+      <div className="py-16 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+
+  if (!canAccessHRPage || allowedTabs.length === 0) {
     return <Navigate to="/" replace />;
   }
 
+  const resolvedTab: HRTabKey = allowedTabs.includes(activeTab) ? activeTab : allowedTabs[0];
   const pendingUserCount = registeredUsers.filter((u) => u.accountStatus === 'pending').length;
 
   return (
@@ -78,15 +116,15 @@ export function HRPage() {
                 ระบบพนักงาน HR
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                {activeTab === 'employees_info'
+                {resolvedTab === 'employees_info'
                   ? 'จัดการข้อมูลพื้นฐานพนักงาน ข้อมูลลับ HR อายุงาน และสถานะการทดลองงาน'
-                  : activeTab === 'shifts'
+                  : resolvedTab === 'shifts'
                   ? 'จัดตารางกะงาน วันหยุด และวันลาตามรอบ 26 ถึง 25'
-                  : activeTab === 'payroll'
+                  : resolvedTab === 'payroll'
                   ? 'ตั้งค่าตัวคูณ OT รายการเงินได้/หัก คำนวณและดาวน์โหลดสลิปเงินเดือน PDF'
-                  : activeTab === 'ot'
+                  : resolvedTab === 'ot'
                   ? 'ตรวจอนุมัติ สรุปยอดชั่วโมง OT รายบุคคล และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
-                  : activeTab === 'advance'
+                  : resolvedTab === 'advance'
                   ? 'ตรวจอนุมัติเบิกเงินแอดวานซ์ โอนเงิน แนบสลิป และส่งออกไฟล์ Excel (ตัดรอบทุกวันที่ 25)'
                   : 'จัดการบัญชีพนักงาน อนุมัติผู้สมัครใหม่ และตั้งค่าสิทธิ์การใช้งาน'}
               </p>
@@ -95,106 +133,118 @@ export function HRPage() {
 
           {/* HR Navigation Tabs */}
           <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/70 dark:border-slate-700/60 overflow-x-auto max-w-full gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('employees_info')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
-                activeTab === 'employees_info'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              )}
-            >
-              <Briefcase className="w-3.5 h-3.5 shrink-0" />
-              <span>ข้อมูลพนักงาน</span>
-            </button>
+            {viewHRPrivate && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('employees_info')}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
+                  resolvedTab === 'employees_info'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                )}
+              >
+                <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                <span>ข้อมูลพนักงาน</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('shifts')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
-                activeTab === 'shifts'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              )}
-            >
-              <CalendarCheck className="w-3.5 h-3.5 shrink-0" />
-              <span>ตารางกะ</span>
-            </button>
+            {viewShiftsAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('shifts')}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
+                  resolvedTab === 'shifts'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                )}
+              >
+                <CalendarCheck className="w-3.5 h-3.5 shrink-0" />
+                <span>ตารางกะ</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('payroll')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
-                activeTab === 'payroll'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              )}
-            >
-              <FileText className="w-3.5 h-3.5 shrink-0" />
-              <span>สลิปเงินเดือน</span>
-            </button>
+            {viewHRPrivate && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('payroll')}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
+                  resolvedTab === 'payroll'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                )}
+              >
+                <FileText className="w-3.5 h-3.5 shrink-0" />
+                <span>สลิปเงินเดือน</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('ot')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
-                activeTab === 'ot'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              )}
-            >
-              <Clock className="w-3.5 h-3.5 shrink-0" />
-              <span>OT</span>
-            </button>
+            {viewOTAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('ot')}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
+                  resolvedTab === 'ot'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                )}
+              >
+                <Clock className="w-3.5 h-3.5 shrink-0" />
+                <span>OT</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('advance')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
-                activeTab === 'advance'
-                  ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              )}
-            >
-              <Banknote className="w-3.5 h-3.5 shrink-0" />
-              <span>แอดวานซ์</span>
-            </button>
+            {viewAdvanceAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('advance')}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
+                  resolvedTab === 'advance'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                )}
+              >
+                <Banknote className="w-3.5 h-3.5 shrink-0" />
+                <span>แอดวานซ์</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('manage_users')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
-                activeTab === 'manage_users'
-                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              )}
-            >
-              <Users className="w-3.5 h-3.5 shrink-0" />
-              <span>จัดการพนักงาน</span>
-              {pendingUserCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-bold tabular-nums">
-                  {pendingUserCount}
-                </span>
-              )}
-            </button>
+            {manageUsers && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('manage_users')}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
+                  resolvedTab === 'manage_users'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                )}
+              >
+                <Users className="w-3.5 h-3.5 shrink-0" />
+                <span>จัดการพนักงาน</span>
+                {pendingUserCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-bold tabular-nums">
+                    {pendingUserCount}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'employees_info' && <AdminHRDashboard />}
-      {activeTab === 'shifts' && <AdminShiftDashboard />}
-      {activeTab === 'payroll' && <AdminPayrollDashboard />}
-      {activeTab === 'ot' && <AdminOTDashboard />}
-      {activeTab === 'advance' && <AdminAdvanceDashboard />}
+      {resolvedTab === 'employees_info' && viewHRPrivate && <AdminHRDashboard />}
+      {resolvedTab === 'shifts' && viewShiftsAdmin && <AdminShiftDashboard />}
+      {resolvedTab === 'payroll' && viewHRPrivate && <AdminPayrollDashboard />}
+      {resolvedTab === 'ot' && viewOTAdmin && <AdminOTDashboard />}
+      {resolvedTab === 'advance' && viewAdvanceAdmin && <AdminAdvanceDashboard />}
 
-      {activeTab === 'manage_users' && (
+      {resolvedTab === 'manage_users' && manageUsers && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-8 shadow-xs space-y-5">
           {pendingUserCount > 0 && (
             <div className="p-4 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

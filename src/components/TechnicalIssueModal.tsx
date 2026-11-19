@@ -12,7 +12,8 @@ import {
   limit 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useStore, isUserAdmin } from '../store/useStore';
+import { useStore } from '../store/useStore';
+import { usePermissions } from '../lib/permissions';
 import { TechnicalIssue, TechnicalIssueStatus } from '../types';
 import { AnimalAvatar } from './AnimalAvatar';
 import { recordSystemAction } from '../lib/activityService';
@@ -71,7 +72,7 @@ export function TechnicalIssueModal({
   highlightIssueId 
 }: TechnicalIssueModalProps) {
   const { user } = useStore();
-  const isAdmin = isUserAdmin(user);
+  const { viewAllTechnicalIssues, manageTechnicalIssues: isAdmin } = usePermissions();
 
   const [activeTab, setActiveTab] = useState<'new' | 'list'>(defaultTab);
   const [issues, setIssues] = useState<TechnicalIssue[]>([]);
@@ -104,7 +105,7 @@ export function TechnicalIssueModal({
   useEffect(() => {
     if (!isOpen) return;
 
-    const q = isAdmin
+    const q = viewAllTechnicalIssues
       ? query(collection(db, 'technical_issues'), orderBy('createdAt', 'desc'), limit(80))
       : user?.uid
       ? query(collection(db, 'technical_issues'), where('reporterId', '==', user.uid), limit(50))
@@ -127,7 +128,7 @@ export function TechnicalIssueModal({
     );
 
     return () => unsubscribe();
-  }, [isOpen]);
+  }, [isOpen, viewAllTechnicalIssues, user?.uid]);
 
   useEffect(() => {
     if (isOpen) {
@@ -727,77 +728,79 @@ export function TechnicalIssueModal({
                           </div>
                         )}
 
-                        {/* Bottom: Status Changer Controls (กดเปลี่ยนสถานะ: รอแก้ / รับเรื่อง / เสร็จสิ้น) */}
-                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/80 text-xs">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[11px] text-slate-400 dark:text-slate-500 mr-1">
-                              เปลี่ยนสถานะ:
-                            </span>
+                        {/* Bottom: Status Changer Controls (กดเปลี่ยนสถานะ: รอแก้ / รับเรื่อง / เสร็จสิ้น) - เฉพาะผู้มีสิทธิ์ manageTechnicalIssues */}
+                        {isAdmin && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/80 text-xs">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[11px] text-slate-400 dark:text-slate-500 mr-1">
+                                เปลี่ยนสถานะ:
+                              </span>
 
-                            {/* ปุ่ม รอแก้ */}
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateStatus(issue.id, 'pending')}
-                              disabled={issue.status === 'pending'}
-                              className={clsx(
-                                "px-2 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 border",
-                                issue.status === 'pending'
-                                  ? "bg-amber-500 text-white border-amber-600 shadow-2xs font-bold"
-                                  : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-amber-50 dark:hover:bg-amber-950/50"
-                              )}
-                            >
-                              <Clock className="w-3 h-3" />
-                              <span>รอแก้</span>
-                            </button>
+                              {/* ปุ่ม รอแก้ */}
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStatus(issue.id, 'pending')}
+                                disabled={issue.status === 'pending'}
+                                className={clsx(
+                                  "px-2 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 border",
+                                  issue.status === 'pending'
+                                    ? "bg-amber-500 text-white border-amber-600 shadow-2xs font-bold"
+                                    : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-amber-50 dark:hover:bg-amber-950/50"
+                                )}
+                              >
+                                <Clock className="w-3 h-3" />
+                                <span>รอแก้</span>
+                              </button>
 
-                            {/* ปุ่ม รับเรื่อง */}
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateStatus(issue.id, 'in_progress')}
-                              disabled={issue.status === 'in_progress'}
-                              className={clsx(
-                                "px-2 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 border",
-                                issue.status === 'in_progress'
-                                  ? "bg-sky-500 text-white border-sky-600 shadow-2xs font-bold"
-                                  : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-sky-50 dark:hover:bg-sky-950/50"
-                              )}
-                            >
-                              <Wrench className="w-3 h-3" />
-                              <span>รับเรื่อง</span>
-                            </button>
+                              {/* ปุ่ม รับเรื่อง */}
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStatus(issue.id, 'in_progress')}
+                                disabled={issue.status === 'in_progress'}
+                                className={clsx(
+                                  "px-2 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 border",
+                                  issue.status === 'in_progress'
+                                    ? "bg-sky-500 text-white border-sky-600 shadow-2xs font-bold"
+                                    : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-sky-50 dark:hover:bg-sky-950/50"
+                                )}
+                              >
+                                <Wrench className="w-3 h-3" />
+                                <span>รับเรื่อง</span>
+                              </button>
 
-                            {/* ปุ่ม เสร็จสิ้น */}
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateStatus(issue.id, 'resolved')}
-                              disabled={issue.status === 'resolved'}
-                              className={clsx(
-                                "px-2 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 border",
-                                issue.status === 'resolved'
-                                  ? "bg-emerald-600 text-white border-emerald-700 shadow-2xs font-bold"
-                                  : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/50"
-                              )}
-                            >
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>เสร็จสิ้น</span>
-                            </button>
+                              {/* ปุ่ม เสร็จสิ้น */}
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateStatus(issue.id, 'resolved')}
+                                disabled={issue.status === 'resolved'}
+                                className={clsx(
+                                  "px-2 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 border",
+                                  issue.status === 'resolved'
+                                    ? "bg-emerald-600 text-white border-emerald-700 shadow-2xs font-bold"
+                                    : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/50"
+                                )}
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>เสร็จสิ้น</span>
+                              </button>
+                            </div>
+
+                            {/* Add Note Button for Admin if not yet set */}
+                            {!issue.adminNote && !isEditingNote && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingNoteId(issue.id);
+                                  setNoteInput('');
+                                }}
+                                className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                              >
+                                <MessageSquare className="w-3 h-3" />
+                                <span>+ เพิ่มหมายเหตุตอบกลับ</span>
+                              </button>
+                            )}
                           </div>
-
-                          {/* Add Note Button for Admin if not yet set */}
-                          {isAdmin && !issue.adminNote && !isEditingNote && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingNoteId(issue.id);
-                                setNoteInput('');
-                              }}
-                              className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-                            >
-                              <MessageSquare className="w-3 h-3" />
-                              <span>+ เพิ่มหมายเหตุตอบกลับ</span>
-                            </button>
-                          )}
-                        </div>
+                        )}
                       </div>
                     );
                   })}
