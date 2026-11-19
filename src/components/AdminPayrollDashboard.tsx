@@ -138,7 +138,9 @@ export function AdminPayrollDashboard() {
   const [rowsReloadCount, setRowsReloadCount] = useState<number>(0);
 
   // UI State
-  const [activeSubTab, setActiveSubTab] = useState<'slips' | 'summary_report' | 'tax_50tawi'>('slips');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'slips' | 'summary_report' | 'tax_50tawi' | 'annual_summary'
+  >('slips');
   const [summaryReloadTrigger, setSummaryReloadTrigger] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'not_created' | 'draft' | 'confirmed'>(
@@ -902,6 +904,20 @@ export function AdminPayrollDashboard() {
             <FileCheck2 className="w-3.5 h-3.5" />
             <span>50 ทวิ</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('annual_summary')}
+            className={clsx(
+              'px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer',
+              activeSubTab === 'annual_summary'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700'
+            )}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>สรุปรายปี (ภงด.1/ประกันสังคม)</span>
+          </button>
         </div>
 
         {/* Cycle Selector & Pay Date Selector */}
@@ -1088,6 +1104,14 @@ export function AdminPayrollDashboard() {
           isHrUnlocked={isHrUnlocked}
           actorName={hrUnlockedEmail || user?.name || user?.username || 'Admin'}
           onOpenSettings={() => setShowSettingsModal(true)}
+          reloadTrigger={summaryReloadTrigger}
+        />
+      ) : activeSubTab === 'annual_summary' ? (
+        <PayrollAnnualSummaryReportSection
+          settings={settings}
+          profiles={profiles}
+          visibleEmployees={visibleEmployees}
+          isHrUnlocked={isHrUnlocked}
           reloadTrigger={summaryReloadTrigger}
         />
       ) : (
@@ -6152,5 +6176,1579 @@ function TaxCertificate50TawiSection({
     </div>
   );
 }
+
+// ===============================================================
+// Sub-Tab 4: สรุปรายปี (ภงด.1/ประกันสังคม) - Read-Only Annual Payroll Summary Report
+// ===============================================================
+
+const THAI_SHORT_MONTHS = [
+  'ม.ค.',
+  'ก.พ.',
+  'มี.ค.',
+  'เม.ย.',
+  'พ.ค.',
+  'มิ.ย.',
+  'ก.ค.',
+  'ส.ค.',
+  'ก.ย.',
+  'ต.ค.',
+  'พ.ย.',
+  'ธ.ค.',
+];
+
+function getMonthNumberFromCycleKey(cycleKey: string): number | null {
+  const parts = (cycleKey || '').split('-').map(Number);
+  if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) {
+    return null;
+  }
+  const month = parts[1];
+  return month >= 1 && month <= 12 ? month : null;
+}
+
+interface AnnualMonthCellData {
+  salary: number;
+  otRegular: number; // เขียว + ฟ้า + ไม่ระบุ
+  otHolidayRed: number; // แดง
+  otherEarnings: number; // รวม earning payItems
+  earningByItemId: Record<string, number>;
+  totalEarnings: number; // รวมเงินได้ (ยื่น ภงด.1)
+  ssoAmount: number;
+  withholdingTax: number;
+  netPayBeforeAdvance: number; // รายรับสุทธิ (= รวมเงินได้ − ประกันสังคม − ภาษี; ไม่หักเงินเบิกล่วงหน้า)
+}
+
+interface AnnualEmployeeLoadedRecord {
+  uid: string;
+  fullName: string;
+  rawCitizenId: string;
+  maskedCitizenId: string;
+  openingIncome: number;
+  openingSso: number;
+  openingTax: number;
+  has50TawiDoc: boolean;
+  latestConfirmedMonth: number;
+  cert50TawiFullYearIncome: number;
+  cert50TawiFullYearSso: number;
+  cert50TawiFullYearTax: number;
+  monthsMap: Record<number, AnnualMonthCellData | undefined>;
+}
+
+interface AnnualEmployeeComputedRow {
+  seq: number;
+  uid: string;
+  fullName: string;
+  rawCitizenId: string;
+  maskedCitizenId: string;
+  openingIncome: number;
+  openingSso: number;
+  openingTax: number;
+  monthsMap: Record<number, AnnualMonthCellData | undefined>;
+  annualTotalIncome: number;
+  annualTotalSso: number;
+  annualTotalTax: number;
+  has50TawiDoc: boolean;
+  is50TawiMatched: boolean;
+  mismatchReasons: string[];
+}
+
+function PayrollAnnualSummaryReportSection({
+  settings,
+  profiles,
+  visibleEmployees,
+  isHrUnlocked,
+  reloadTrigger,
+}: {
+  settings: PayrollSettingsDoc;
+  profiles: Record<string, HRProfile>;
+  visibleEmployees: Array<{
+    uid: string;
+    name: string;
+    username?: string;
+    avatarEmoji?: string;
+  }>;
+  isHrUnlocked: boolean;
+  reloadTrigger: number;
+}) {
+  // 1) ตัวเลือกปีภาษี (ใช้กฎ default เดียวกับแท็บ 50 ทวิ)
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const month = now.getMonth() + 1;
+    return month <= 2 ? curYear - 1 : curYear;
+  });
+
+  const availableTaxYears = useMemo(() => {
+    const cur = new Date().getFullYear();
+    const years: number[] = [];
+    for (let y = cur + 1; y >= cur - 4; y--) {
+      years.push(y);
+    }
+    return years;
+  }, []);
+
+  // "ถึงเดือน" (1..12) default = เดือนล่าสุดที่มีสลิป confirmed ในปีที่เลือก
+  const [selectedToMonth, setSelectedToMonth] = useState<number>(() => {
+    return new Date().getMonth() + 1;
+  });
+  const syncedYearForDefaultMonthRef = useRef<number | null>(null);
+
+  const [loading, setLoading] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [localReloadCount, setLocalReloadCount] = useState<number>(0);
+
+  const [loadedRecords, setLoadedRecords] = useState<AnnualEmployeeLoadedRecord[]>([]);
+  const [confirmedSlipsInYear, setConfirmedSlipsInYear] = useState<PayrollSlip[]>([]);
+
+  // โหลดข้อมูลแบบอ่านอย่างเดียว (ห้ามเขียนข้อมูลใดๆ) เฉพาะเมื่อยืนยันตัวตนแอดมินแล้ว
+  useEffect(() => {
+    if (!isHrUnlocked) {
+      setLoadedRecords([]);
+      setConfirmedSlipsInYear([]);
+      setLoadError(null);
+      setLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadAnnualSummaryData() {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        // ดึง payroll_slips where year == ปีที่เลือก เฉพาะสลิป confirmed
+        const slipsQ = query(collection(db, 'payroll_slips'), where('year', '==', selectedYear));
+        const slipsSnap = await getDocs(slipsQ);
+        if (isCancelled) return;
+
+        const confirmedSlips: PayrollSlip[] = [];
+        let maxConfirmedMonth = 0;
+
+        slipsSnap.forEach((docSnap) => {
+          const data = docSnap.data() as PayrollSlip;
+          if (data && data.status === 'confirmed') {
+            const m = getMonthNumberFromCycleKey(data.cycleKey);
+            if (m !== null && m > maxConfirmedMonth) {
+              maxConfirmedMonth = m;
+            }
+            confirmedSlips.push({
+              ...data,
+              id: docSnap.id,
+            });
+          }
+        });
+
+        // ตั้งค่า default "ถึงเดือน" = เดือนล่าสุดที่มีสลิป confirmed เมื่อโหลดปีนั้นครั้งแรกหรือเปลี่ยนปี
+        if (syncedYearForDefaultMonthRef.current !== selectedYear) {
+          syncedYearForDefaultMonthRef.current = selectedYear;
+          if (maxConfirmedMonth >= 1 && maxConfirmedMonth <= 12) {
+            setSelectedToMonth(maxConfirmedMonth);
+          } else {
+            const now = new Date();
+            setSelectedToMonth(selectedYear === now.getFullYear() ? now.getMonth() + 1 : 12);
+          }
+        }
+
+        // จัดกลุ่มสลิป confirmed ตามพนักงาน + เดือนของรอบ (ใช้ month จาก cycleKey แบบเดียวกับรายงานสรุปรอบ)
+        const slipsByEmpAndMonth = new Map<string, Map<number, PayrollSlip[]>>();
+        const allSlipsByEmp = new Map<string, PayrollSlip[]>();
+
+        confirmedSlips.forEach((slip) => {
+          const empId = slip.employeeId;
+          if (!allSlipsByEmp.has(empId)) {
+            allSlipsByEmp.set(empId, []);
+          }
+          allSlipsByEmp.get(empId)!.push(slip);
+
+          const m = getMonthNumberFromCycleKey(slip.cycleKey);
+          if (m === null) return;
+          if (!slipsByEmpAndMonth.has(empId)) {
+            slipsByEmpAndMonth.set(empId, new Map());
+          }
+          const monthMap = slipsByEmpAndMonth.get(empId)!;
+          if (!monthMap.has(m)) {
+            monthMap.set(m, []);
+          }
+          monthMap.get(m)!.push(slip);
+        });
+
+        // เรียงตามรายชื่อใน HR (visibleEmployees) เป็นหลัก
+        const orderedEmployees = [...visibleEmployees];
+
+        // ดึง tax_certificates/{year}_{uid} และ hr_private/{uid} ของพนักงานแต่ละคน (อ่านอย่างเดียว)
+        const records = await Promise.all(
+          orderedEmployees.map(async (emp) => {
+            const prof = profiles[emp.uid] || getDefaultHRProfile(emp.name);
+            const empAllSlips = allSlipsByEmp.get(emp.uid) || [];
+            const fallbackName = (
+              prof.fullName ||
+              empAllSlips[0]?.snapshot?.fullName ||
+              empAllSlips[0]?.employeeName ||
+              emp.name ||
+              emp.uid
+            ).trim();
+
+            const [certSnap, privData] = await Promise.all([
+              getDoc(doc(db, 'tax_certificates', `${selectedYear}_${emp.uid}`)),
+              fetchHRPrivateEmployee(emp.uid, fallbackName),
+            ]);
+
+            const certData = certSnap.exists() ? (certSnap.data() as TaxCertificateDoc) : null;
+            const openingIncome = round2(Math.max(0, Number(certData?.openingIncome) || 0));
+            const openingSso = round2(Math.max(0, Number(certData?.openingSso) || 0));
+            const openingTax = round2(Math.max(0, Number(certData?.openingTax) || 0));
+
+            // คำนวณยอดรวมทั้งปีใน 50 ทวิ (ยอดยกมา + สลิป confirmed ทั้งปีของคนนั้น)
+            let fullYearSlipIncome = 0;
+            let fullYearSlipSso = 0;
+            let fullYearSlipTax = 0;
+            empAllSlips.forEach((s) => {
+              fullYearSlipIncome = round2(fullYearSlipIncome + (Number(s.totalEarnings) || 0));
+              fullYearSlipSso = round2(fullYearSlipSso + (Number(s.ssoAmount) || 0));
+              fullYearSlipTax = round2(fullYearSlipTax + (Number(s.withholdingTax) || 0));
+            });
+
+            const cert50TawiFullYearIncome = round2(openingIncome + fullYearSlipIncome);
+            const cert50TawiFullYearSso = round2(openingSso + fullYearSlipSso);
+            const cert50TawiFullYearTax = round2(openingTax + fullYearSlipTax);
+
+            // สร้างข้อมูลรายเดือน 1..12 (เดือนที่ไม่มีสลิป จะเป็น undefined เพื่อเว้นว่าง)
+            const empMonthMap = slipsByEmpAndMonth.get(emp.uid);
+            const monthsMap: Record<number, AnnualMonthCellData | undefined> = {};
+            let latestConfirmedMonth = 0;
+
+            for (let m = 1; m <= 12; m++) {
+              const monthSlips = empMonthMap?.get(m);
+              if (!monthSlips || monthSlips.length === 0) {
+                monthsMap[m] = undefined;
+                continue;
+              }
+
+              if (m > latestConfirmedMonth) {
+                latestConfirmedMonth = m;
+              }
+
+              let salary = 0;
+              let otRegular = 0;
+              let otHolidayRed = 0;
+              let otherEarnings = 0;
+              const earningByItemId: Record<string, number> = {};
+              let totalEarnings = 0;
+              let ssoAmount = 0;
+              let withholdingTax = 0;
+
+              monthSlips.forEach((slip) => {
+                salary = round2(salary + (Number(slip.salary) || 0));
+
+                const amtGreen = Number(slip.otLines?.holiday_after_hours?.amount) || 0;
+                const amtBlue = Number(slip.otLines?.workday?.amount) || 0;
+                const amtUnspecified = Number(slip.otLines?.unspecified?.amount) || 0;
+                otRegular = round2(otRegular + amtGreen + amtBlue + amtUnspecified);
+
+                const amtRed = Number(slip.otLines?.holiday_in_hours?.amount) || 0;
+                otHolidayRed = round2(otHolidayRed + amtRed);
+
+                (slip.items || []).forEach((it) => {
+                  if (!it || it.type !== 'earning') return;
+                  const amt = round2(Number(it.amount) || 0);
+                  otherEarnings = round2(otherEarnings + amt);
+                  if (it.id) {
+                    earningByItemId[it.id] = round2((earningByItemId[it.id] || 0) + amt);
+                  }
+                });
+
+                totalEarnings = round2(totalEarnings + (Number(slip.totalEarnings) || 0));
+                ssoAmount = round2(ssoAmount + (Number(slip.ssoAmount) || 0));
+                withholdingTax = round2(withholdingTax + (Number(slip.withholdingTax) || 0));
+              });
+
+              const netPayBeforeAdvance = round2(totalEarnings - ssoAmount - withholdingTax);
+
+              monthsMap[m] = {
+                salary,
+                otRegular,
+                otHolidayRed,
+                otherEarnings,
+                earningByItemId,
+                totalEarnings,
+                ssoAmount,
+                withholdingTax,
+                netPayBeforeAdvance,
+              };
+            }
+
+            const rawCitizenId = (privData.ssoNumber || '').trim();
+            const maskedCitizenId = rawCitizenId ? maskSensitiveNumber(rawCitizenId) : '-';
+
+            return {
+              uid: emp.uid,
+              fullName: fallbackName,
+              rawCitizenId,
+              maskedCitizenId,
+              openingIncome,
+              openingSso,
+              openingTax,
+              has50TawiDoc: certData !== null,
+              latestConfirmedMonth,
+              cert50TawiFullYearIncome,
+              cert50TawiFullYearSso,
+              cert50TawiFullYearTax,
+              monthsMap,
+            } as AnnualEmployeeLoadedRecord;
+          })
+        );
+
+        if (isCancelled) return;
+        setConfirmedSlipsInYear(confirmedSlips);
+        setLoadedRecords(records);
+      } catch (err: any) {
+        console.error('Error loading annual payroll summary report:', err);
+        if (!isCancelled) {
+          setLoadError('ไม่สามารถดึงข้อมูลรายงานสรุปรายปีได้ กรุณากดโหลดใหม่');
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadAnnualSummaryData();
+    return () => {
+      isCancelled = true;
+    };
+  }, [isHrUnlocked, selectedYear, visibleEmployees, profiles, reloadTrigger, localReloadCount]);
+
+  const activeMonths = useMemo(() => {
+    const arr: number[] = [];
+    for (let m = 1; m <= selectedToMonth; m++) {
+      arr.push(m);
+    }
+    return arr;
+  }, [selectedToMonth]);
+
+  // คำนวณแต่ละแถวตามช่วงเดือน ม.ค. ถึงเดือนที่เลือก + ตรวจสอบกับ 50 ทวิ
+  const computedRows = useMemo<AnnualEmployeeComputedRow[]>(() => {
+    return loadedRecords.map((rec, idx) => {
+      let sumMonthsIncome = 0;
+      let sumMonthsSso = 0;
+      let sumMonthsTax = 0;
+
+      for (let m = 1; m <= selectedToMonth; m++) {
+        const cell = rec.monthsMap[m];
+        if (cell) {
+          sumMonthsIncome = round2(sumMonthsIncome + cell.totalEarnings);
+          sumMonthsSso = round2(sumMonthsSso + cell.ssoAmount);
+          sumMonthsTax = round2(sumMonthsTax + cell.withholdingTax);
+        }
+      }
+
+      const annualTotalIncome = round2(rec.openingIncome + sumMonthsIncome);
+      const annualTotalSso = round2(rec.openingSso + sumMonthsSso);
+      const annualTotalTax = round2(rec.openingTax + sumMonthsTax);
+
+      const mismatchReasons: string[] = [];
+      // ตรวจเทียบ 50 ทวิ เฉพาะเมื่อ selectedToMonth >= เดือนล่าสุดที่คนนั้นมีสลิป confirmed ในปีนั้น
+      if (rec.has50TawiDoc && selectedToMonth >= rec.latestConfirmedMonth) {
+        if (Math.abs(annualTotalIncome - rec.cert50TawiFullYearIncome) > 0.01) {
+          mismatchReasons.push(
+            `รวมเงินได้ทั้งปี (${formatReportMoney(annualTotalIncome)}) ไม่ตรงกับ 50 ทวิ (${formatReportMoney(rec.cert50TawiFullYearIncome)})`
+          );
+        }
+        if (Math.abs(annualTotalSso - rec.cert50TawiFullYearSso) > 0.01) {
+          mismatchReasons.push(
+            `รวมประกันสังคมทั้งปี (${formatReportMoney(annualTotalSso)}) ไม่ตรงกับ 50 ทวิ (${formatReportMoney(rec.cert50TawiFullYearSso)})`
+          );
+        }
+        if (Math.abs(annualTotalTax - rec.cert50TawiFullYearTax) > 0.01) {
+          mismatchReasons.push(
+            `รวมหักภาษีทั้งปี (${formatReportMoney(annualTotalTax)}) ไม่ตรงกับ 50 ทวิ (${formatReportMoney(rec.cert50TawiFullYearTax)})`
+          );
+        }
+      }
+
+      return {
+        seq: idx + 1,
+        uid: rec.uid,
+        fullName: rec.fullName,
+        rawCitizenId: rec.rawCitizenId,
+        maskedCitizenId: rec.maskedCitizenId,
+        openingIncome: rec.openingIncome,
+        openingSso: rec.openingSso,
+        openingTax: rec.openingTax,
+        monthsMap: rec.monthsMap,
+        annualTotalIncome,
+        annualTotalSso,
+        annualTotalTax,
+        has50TawiDoc: rec.has50TawiDoc,
+        is50TawiMatched: mismatchReasons.length === 0,
+        mismatchReasons,
+      };
+    });
+  }, [loadedRecords, selectedToMonth]);
+
+  const isSelectedBeforeLatestConfirmedMonth = useMemo(() => {
+    return loadedRecords.some(
+      (rec) => rec.latestConfirmedMonth > 0 && selectedToMonth < rec.latestConfirmedMonth
+    );
+  }, [loadedRecords, selectedToMonth]);
+
+  const mismatchedRows = useMemo(
+    () => computedRows.filter((r) => !r.is50TawiMatched),
+    [computedRows]
+  );
+
+  // สำหรับ Excel: แยก "เงินได้อื่น" ออกเป็นคอลัมน์ตามชื่อ payItem จริงที่มีในปีนั้น เฉพาะเดือนที่มีคนได้รายการนั้น (amount > 0)
+  const excelEarningColumnsByMonth = useMemo(() => {
+    // รวบรวม metadata ของ earning payItems ทั้งหมดในระบบ + ที่ปรากฏในสลิปปีนั้น
+    const metaById = new Map<string, { id: string; name: string }>();
+    const orderedIds: string[] = [];
+
+    (settings.payItems || []).forEach((def) => {
+      if (def.type === 'earning') {
+        metaById.set(def.id, { id: def.id, name: def.name });
+        orderedIds.push(def.id);
+      }
+    });
+
+    confirmedSlipsInYear.forEach((slip) => {
+      (slip.items || []).forEach((it) => {
+        if (!it || it.type !== 'earning' || !it.id) return;
+        if (!metaById.has(it.id)) {
+          metaById.set(it.id, { id: it.id, name: it.name || it.id });
+          orderedIds.push(it.id);
+        }
+      });
+    });
+
+    const byMonth: Record<number, Array<{ id: string; name: string }>> = {};
+    for (let m = 1; m <= 12; m++) {
+      const usedInMonth = new Set<string>();
+      computedRows.forEach((row) => {
+        const mCell = row.monthsMap[m];
+        if (!mCell) return;
+        Object.entries(mCell.earningByItemId).forEach(([itemId, amt]) => {
+          if (round2(Number(amt) || 0) > 0) {
+            usedInMonth.add(itemId);
+          }
+        });
+      });
+
+      byMonth[m] = orderedIds
+        .filter((id) => usedInMonth.has(id))
+        .map((id) => metaById.get(id)!);
+    }
+
+    return byMonth;
+  }, [settings.payItems, confirmedSlipsInYear, computedRows]);
+
+  // คำนวณแถวล่าง "ยอดรวมสุทธิ" ทุกคอลัมน์
+  const footerTotals = useMemo(() => {
+    let openingIncome = 0;
+    let openingSso = 0;
+    let openingTax = 0;
+
+    const monthsTotals: Record<
+      number,
+      {
+        hasAnySlip: boolean;
+        salary: number;
+        otRegular: number;
+        otHolidayRed: number;
+        otherEarnings: number;
+        earningByItemId: Record<string, number>;
+        totalEarnings: number;
+        ssoAmount: number;
+        withholdingTax: number;
+        netPayBeforeAdvance: number;
+      }
+    > = {};
+
+    for (let m = 1; m <= 12; m++) {
+      monthsTotals[m] = {
+        hasAnySlip: false,
+        salary: 0,
+        otRegular: 0,
+        otHolidayRed: 0,
+        otherEarnings: 0,
+        earningByItemId: {},
+        totalEarnings: 0,
+        ssoAmount: 0,
+        withholdingTax: 0,
+        netPayBeforeAdvance: 0,
+      };
+    }
+
+    let annualTotalIncome = 0;
+    let annualTotalSso = 0;
+    let annualTotalTax = 0;
+
+    computedRows.forEach((r) => {
+      openingIncome = round2(openingIncome + r.openingIncome);
+      openingSso = round2(openingSso + r.openingSso);
+      openingTax = round2(openingTax + r.openingTax);
+
+      for (let m = 1; m <= 12; m++) {
+        const cell = r.monthsMap[m];
+        if (!cell) continue;
+        const mt = monthsTotals[m];
+        mt.hasAnySlip = true;
+        mt.salary = round2(mt.salary + cell.salary);
+        mt.otRegular = round2(mt.otRegular + cell.otRegular);
+        mt.otHolidayRed = round2(mt.otHolidayRed + cell.otHolidayRed);
+        mt.otherEarnings = round2(mt.otherEarnings + cell.otherEarnings);
+        Object.entries(cell.earningByItemId).forEach(([itemId, amt]) => {
+          mt.earningByItemId[itemId] = round2((mt.earningByItemId[itemId] || 0) + amt);
+        });
+        mt.totalEarnings = round2(mt.totalEarnings + cell.totalEarnings);
+        mt.ssoAmount = round2(mt.ssoAmount + cell.ssoAmount);
+        mt.withholdingTax = round2(mt.withholdingTax + cell.withholdingTax);
+        mt.netPayBeforeAdvance = round2(mt.netPayBeforeAdvance + cell.netPayBeforeAdvance);
+      }
+
+      annualTotalIncome = round2(annualTotalIncome + r.annualTotalIncome);
+      annualTotalSso = round2(annualTotalSso + r.annualTotalSso);
+      annualTotalTax = round2(annualTotalTax + r.annualTotalTax);
+    });
+
+    return {
+      openingIncome,
+      openingSso,
+      openingTax,
+      monthsTotals,
+      annualTotalIncome,
+      annualTotalSso,
+      annualTotalTax,
+    };
+  }, [computedRows]);
+
+  // 3) ดาวน์โหลด Excel (ExcelJS สไตล์เดียวกับรายงานสรุปรอบ)
+  const handleDownloadAnnualExcel = async () => {
+    if (computedRows.length === 0) return;
+
+    const yearBE = selectedYear + 543;
+    const toMonthShort = THAI_SHORT_MONTHS[selectedToMonth - 1] || '';
+    const toMonthFull = THAI_FULL_MONTHS[selectedToMonth - 1] || '';
+    const legalName = (
+      settings.legalCompanyName ||
+      settings.companyName ||
+      'Thunder Cloud'
+    ).trim();
+
+    // สร้างโครงสร้างคอลัมน์ทั้งหมดใน Excel
+    type ExcelColMeta = {
+      colIndex: number; // 1-based
+      topHeader: string;
+      subHeader: string;
+      isVerticalMerge: boolean; // ลำดับ, ชื่อ-สกุล, เลขบัตรประชาชน
+      isHighlightYellow: boolean; // รวมเงินได้ (ยื่น ภงด.1) และ รวมทั้งปี
+      kind: 'seq' | 'name' | 'citizenId' | 'money';
+      width: number;
+      getValue: (row: AnnualEmployeeComputedRow) => string | number | null;
+      getTotalValue: () => string | number | null;
+    };
+
+    const cols: ExcelColMeta[] = [];
+    const pushCol = (meta: Omit<ExcelColMeta, 'colIndex'>) => {
+      cols.push({ ...meta, colIndex: cols.length + 1 });
+    };
+
+    // คอลัมน์ซ้าย 1..3
+    pushCol({
+      topHeader: 'ลำดับ',
+      subHeader: 'ลำดับ',
+      isVerticalMerge: true,
+      isHighlightYellow: false,
+      kind: 'seq',
+      width: 8,
+      getValue: (r) => r.seq,
+      getTotalValue: () => 'ยอดรวมสุทธิ',
+    });
+    pushCol({
+      topHeader: 'ชื่อ-สกุล',
+      subHeader: 'ชื่อ-สกุล',
+      isVerticalMerge: true,
+      isHighlightYellow: false,
+      kind: 'name',
+      width: 28,
+      getValue: (r) => r.fullName,
+      getTotalValue: () => '',
+    });
+    pushCol({
+      topHeader: 'เลขบัตรประชาชน',
+      subHeader: 'เลขบัตรประชาชน',
+      isVerticalMerge: true,
+      isHighlightYellow: false,
+      kind: 'citizenId',
+      width: 20,
+      getValue: (r) => String(r.rawCitizenId || ''),
+      getTotalValue: () => '',
+    });
+
+    // ยอดยกมา (ก่อนเข้าระบบ): เงินได้ | ประกันสังคม | ภาษี
+    const openingTopLabel = 'ยอดยกมา (ก่อนเข้าระบบ)';
+    pushCol({
+      topHeader: openingTopLabel,
+      subHeader: 'เงินได้',
+      isVerticalMerge: false,
+      isHighlightYellow: false,
+      kind: 'money',
+      width: 15,
+      getValue: (r) => round2(r.openingIncome),
+      getTotalValue: () => round2(footerTotals.openingIncome),
+    });
+    pushCol({
+      topHeader: openingTopLabel,
+      subHeader: 'ประกันสังคม',
+      isVerticalMerge: false,
+      isHighlightYellow: false,
+      kind: 'money',
+      width: 14,
+      getValue: (r) => round2(r.openingSso),
+      getTotalValue: () => round2(footerTotals.openingSso),
+    });
+    pushCol({
+      topHeader: openingTopLabel,
+      subHeader: 'ภาษี',
+      isVerticalMerge: false,
+      isHighlightYellow: false,
+      kind: 'money',
+      width: 14,
+      getValue: (r) => round2(r.openingTax),
+      getTotalValue: () => round2(footerTotals.openingTax),
+    });
+
+    // แต่ละเดือน (ม.ค. ถึงเดือนที่เลือก)
+    for (let m = 1; m <= selectedToMonth; m++) {
+      const monthTopLabel = `${THAI_FULL_MONTHS[m - 1]} ${yearBE}`;
+      const monthEarnCols = excelEarningColumnsByMonth[m] || [];
+
+      pushCol({
+        topHeader: monthTopLabel,
+        subHeader: 'ฐานเงินเดือน',
+        isVerticalMerge: false,
+        isHighlightYellow: false,
+        kind: 'money',
+        width: 15,
+        getValue: (r) => {
+          const c = r.monthsMap[m];
+          return c ? round2(c.salary) : null;
+        },
+        getTotalValue: () => {
+          const mt = footerTotals.monthsTotals[m];
+          return mt.hasAnySlip ? round2(mt.salary) : null;
+        },
+      });
+
+      pushCol({
+        topHeader: monthTopLabel,
+        subHeader: 'ค่าล่วงเวลา',
+        isVerticalMerge: false,
+        isHighlightYellow: false,
+        kind: 'money',
+        width: 14,
+        getValue: (r) => {
+          const c = r.monthsMap[m];
+          return c ? round2(c.otRegular) : null;
+        },
+        getTotalValue: () => {
+          const mt = footerTotals.monthsTotals[m];
+          return mt.hasAnySlip ? round2(mt.otRegular) : null;
+        },
+      });
+
+      pushCol({
+        topHeader: monthTopLabel,
+        subHeader: 'ทำงานวันหยุด',
+        isVerticalMerge: false,
+        isHighlightYellow: false,
+        kind: 'money',
+        width: 14,
+        getValue: (r) => {
+          const c = r.monthsMap[m];
+          return c ? round2(c.otHolidayRed) : null;
+        },
+        getTotalValue: () => {
+          const mt = footerTotals.monthsTotals[m];
+          return mt.hasAnySlip ? round2(mt.otHolidayRed) : null;
+        },
+      });
+
+      // แยก "เงินได้อื่น" ออกเป็นคอลัมน์ตามชื่อ payItem จริงที่มีในปีนั้น เฉพาะเดือนที่มีคนได้รายการนั้น
+      monthEarnCols.forEach((earnCol) => {
+        pushCol({
+          topHeader: monthTopLabel,
+          subHeader: earnCol.name,
+          isVerticalMerge: false,
+          isHighlightYellow: false,
+          kind: 'money',
+          width: 14,
+          getValue: (r) => {
+            const c = r.monthsMap[m];
+            return c ? round2(c.earningByItemId[earnCol.id] || 0) : null;
+          },
+          getTotalValue: () => {
+            const mt = footerTotals.monthsTotals[m];
+            return mt.hasAnySlip ? round2(mt.earningByItemId[earnCol.id] || 0) : null;
+          },
+        });
+      });
+
+      pushCol({
+        topHeader: monthTopLabel,
+        subHeader: 'รวมเงินได้ (ยื่น ภงด.1)',
+        isVerticalMerge: false,
+        isHighlightYellow: true,
+        kind: 'money',
+        width: 16,
+        getValue: (r) => {
+          const c = r.monthsMap[m];
+          return c ? round2(c.totalEarnings) : null;
+        },
+        getTotalValue: () => {
+          const mt = footerTotals.monthsTotals[m];
+          return mt.hasAnySlip ? round2(mt.totalEarnings) : null;
+        },
+      });
+
+      pushCol({
+        topHeader: monthTopLabel,
+        subHeader: 'ประกันสังคม',
+        isVerticalMerge: false,
+        isHighlightYellow: false,
+        kind: 'money',
+        width: 14,
+        getValue: (r) => {
+          const c = r.monthsMap[m];
+          return c ? round2(c.ssoAmount) : null;
+        },
+        getTotalValue: () => {
+          const mt = footerTotals.monthsTotals[m];
+          return mt.hasAnySlip ? round2(mt.ssoAmount) : null;
+        },
+      });
+
+      pushCol({
+        topHeader: monthTopLabel,
+        subHeader: 'หักภาษี ณ ที่จ่าย',
+        isVerticalMerge: false,
+        isHighlightYellow: false,
+        kind: 'money',
+        width: 14,
+        getValue: (r) => {
+          const c = r.monthsMap[m];
+          return c ? round2(c.withholdingTax) : null;
+        },
+        getTotalValue: () => {
+          const mt = footerTotals.monthsTotals[m];
+          return mt.hasAnySlip ? round2(mt.withholdingTax) : null;
+        },
+      });
+
+      pushCol({
+        topHeader: monthTopLabel,
+        subHeader: 'รายรับสุทธิ',
+        isVerticalMerge: false,
+        isHighlightYellow: false,
+        kind: 'money',
+        width: 15,
+        getValue: (r) => {
+          const c = r.monthsMap[m];
+          return c ? round2(c.netPayBeforeAdvance) : null;
+        },
+        getTotalValue: () => {
+          const mt = footerTotals.monthsTotals[m];
+          return mt.hasAnySlip ? round2(mt.netPayBeforeAdvance) : null;
+        },
+      });
+    }
+
+    // ขวาสุด "รวมทั้งปี": รวมเงินได้ ยื่น ภงด.1 | ประกันสังคม | หักภาษี ณ ที่จ่าย
+    const annualTopLabel = 'รวมทั้งปี';
+    pushCol({
+      topHeader: annualTopLabel,
+      subHeader: 'รวมเงินได้ ยื่น ภงด.1',
+      isVerticalMerge: false,
+      isHighlightYellow: true,
+      kind: 'money',
+      width: 17,
+      getValue: (r) => round2(r.annualTotalIncome),
+      getTotalValue: () => round2(footerTotals.annualTotalIncome),
+    });
+    pushCol({
+      topHeader: annualTopLabel,
+      subHeader: 'ประกันสังคม',
+      isVerticalMerge: false,
+      isHighlightYellow: true,
+      kind: 'money',
+      width: 15,
+      getValue: (r) => round2(r.annualTotalSso),
+      getTotalValue: () => round2(footerTotals.annualTotalSso),
+    });
+    pushCol({
+      topHeader: annualTopLabel,
+      subHeader: 'หักภาษี ณ ที่จ่าย',
+      isVerticalMerge: false,
+      isHighlightYellow: true,
+      kind: 'money',
+      width: 15,
+      getValue: (r) => round2(r.annualTotalTax),
+      getTotalValue: () => round2(footerTotals.annualTotalTax),
+    });
+
+    const totalCols = cols.length;
+    const workbook = new ExcelJS.Workbook();
+    // freeze ที่คอลัมน์ชื่อ (xSplit: 2) + แถวหัวตาราง (ySplit: 5), A4 แนวนอน fitToWidth 1
+    const ws = workbook.addWorksheet('สรุปรายปี', {
+      views: [{ state: 'frozen', xSplit: 2, ySplit: 5 }],
+      pageSetup: {
+        paperSize: 9, // A4
+        orientation: 'landscape',
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0,
+        margins: {
+          left: 0.25,
+          right: 0.25,
+          top: 0.5,
+          bottom: 0.5,
+          header: 0.3,
+          footer: 0.3,
+        },
+      },
+    });
+
+    ws.columns = cols.map((c) => ({ width: c.width }));
+
+    // แถว 1: หัวกระดาษ ชื่อบริษัท (legalCompanyName)
+    const row1 = ws.getRow(1);
+    row1.getCell(1).value = legalName;
+    ws.mergeCells(1, 1, 1, totalCols);
+    row1.height = 26;
+    row1.getCell(1).font = { name: 'Tahoma', size: 15, bold: true };
+    row1.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // แถว 2: "ข้อมูลจ่ายพนักงาน ประจำปี {ปี พ.ศ.} (ม.ค. – {เดือนที่เลือก})"
+    const row2 = ws.getRow(2);
+    row2.getCell(1).value = `ข้อมูลจ่ายพนักงาน ประจำปี ${yearBE} (ม.ค. – ${toMonthShort})`;
+    ws.mergeCells(2, 1, 2, totalCols);
+    row2.height = 24;
+    row2.getCell(1).font = { name: 'Tahoma', size: 13, bold: true };
+    row2.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // แถว 3: เว้นว่าง
+    ws.getRow(3).values = [];
+
+    const thinBorder: Partial<ExcelJS.Borders> = {
+      top: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+      left: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+      bottom: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+      right: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+    };
+
+    const moneyNumFmt = '#,##0.00;-#,##0.00;"-"';
+
+    // แถว 4 และ 5: หัวตาราง 2 ชั้น (#23AEE7 ตัวขาวหนา)
+    const headerRow1 = ws.getRow(4);
+    const headerRow2 = ws.getRow(5);
+    headerRow1.height = 26;
+    headerRow2.height = 34;
+
+    cols.forEach((c) => {
+      const cell1 = headerRow1.getCell(c.colIndex);
+      const cell2 = headerRow2.getCell(c.colIndex);
+
+      cell1.value = c.topHeader;
+      cell2.value = c.subHeader;
+
+      [cell1, cell2].forEach((cell) => {
+        cell.font = {
+          name: 'Tahoma',
+          size: 11,
+          bold: true,
+          color: { argb: 'FFFFFFFF' },
+        };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FF23AEE7' },
+        };
+        cell.alignment = {
+          horizontal: 'center',
+          vertical: 'middle',
+          wrapText: true,
+        };
+        cell.border = thinBorder;
+      });
+    });
+
+    // Merge หัวตาราง:
+    // 1) คอลัมน์ซ้าย 1..3 merge แนวตั้ง (row 4..5)
+    cols.forEach((c) => {
+      if (c.isVerticalMerge) {
+        ws.mergeCells(4, c.colIndex, 5, c.colIndex);
+      }
+    });
+
+    // 2) คอลัมน์กลุ่ม (ยอดยกมา, แต่ละเดือน, รวมทั้งปี) merge แนวนอนบนแถว 4
+    let groupStartCol = 4;
+    while (groupStartCol <= totalCols) {
+      const groupTitle = cols[groupStartCol - 1].topHeader;
+      let groupEndCol = groupStartCol;
+      while (
+        groupEndCol + 1 <= totalCols &&
+        cols[groupEndCol].topHeader === groupTitle &&
+        !cols[groupEndCol].isVerticalMerge
+      ) {
+        groupEndCol++;
+      }
+      if (groupEndCol > groupStartCol) {
+        ws.mergeCells(4, groupStartCol, 4, groupEndCol);
+      }
+      groupStartCol = groupEndCol + 1;
+    }
+
+    // แถว 6 เป็นต้นไป: ข้อมูลพนักงานแต่ละคน
+    const dataStartRow = 6;
+    computedRows.forEach((r, rowIdx) => {
+      const excelRowNum = dataStartRow + rowIdx;
+      const row = ws.getRow(excelRowNum);
+
+      cols.forEach((colMeta) => {
+        const cell = row.getCell(colMeta.colIndex);
+        const val = colMeta.getValue(r);
+
+        if (colMeta.kind === 'citizenId') {
+          // เลขบัตรประชาชนใน Excel แสดงเต็ม (เป็น text ห้ามกลายเป็นตัวเลขวิทยาศาสตร์)
+          cell.value = val ? String(val) : '';
+          cell.numFmt = '@';
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else if (colMeta.kind === 'seq') {
+          cell.value = val;
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else if (colMeta.kind === 'name') {
+          cell.value = val ? String(val) : '';
+          cell.numFmt = '@';
+          cell.alignment = { horizontal: 'left', vertical: 'middle' };
+        } else {
+          // money: เดือนที่ไม่มีสลิปให้เว้นว่าง (ไม่ใส่ 0)
+          if (val === null || val === undefined) {
+            cell.value = null;
+          } else {
+            cell.value = round2(Number(val) || 0);
+            cell.numFmt = moneyNumFmt;
+          }
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        }
+
+        cell.border = thinBorder;
+        cell.font = {
+          name: 'Tahoma',
+          size: 11,
+          bold: colMeta.isHighlightYellow,
+        };
+
+        if (!r.is50TawiMatched) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFDE2E2' },
+          };
+        } else if (colMeta.isHighlightYellow) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFFF4CC' },
+          };
+        } else if (rowIdx % 2 === 1) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFF2F9FD' },
+          };
+        }
+      });
+    });
+
+    // แถวล่าง "ยอดรวมสุทธิ" (#E7E6E6 เส้นบนคู่)
+    const totalExcelRowNum = dataStartRow + computedRows.length;
+    const totalRow = ws.getRow(totalExcelRowNum);
+    totalRow.height = 24;
+
+    cols.forEach((colMeta) => {
+      const cell = totalRow.getCell(colMeta.colIndex);
+      const val = colMeta.getTotalValue();
+
+      if (colMeta.colIndex <= 3) {
+        cell.value = colMeta.colIndex === 1 ? 'ยอดรวมสุทธิ' : '';
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else {
+        if (val === null || val === undefined) {
+          cell.value = null;
+        } else {
+          cell.value = round2(Number(val) || 0);
+          cell.numFmt = moneyNumFmt;
+        }
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+      }
+
+      cell.font = {
+        name: 'Tahoma',
+        size: 11,
+        bold: true,
+      };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE7E6E6' },
+      };
+      cell.border = {
+        top: { style: 'double', color: { argb: 'FF595959' } },
+        left: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+        bottom: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+        right: { style: 'thin', color: { argb: 'FFBFBFBF' } },
+      };
+    });
+
+    ws.mergeCells(totalExcelRowNum, 1, totalExcelRowNum, 3);
+
+    // ใต้ตาราง: กล่องสรุป "หักภาษีรวม / หักประกันสังคมรวม / รวมรายได้ยื่น ภงด.1" และช่องลงชื่อ "ผู้จัดทำ" "ผู้อนุมัติ"
+    const summaryStartRow = totalExcelRowNum + 2;
+
+    const summaryHeaderRow = ws.getRow(summaryStartRow);
+    summaryHeaderRow.height = 22;
+    ws.mergeCells(summaryStartRow, 2, summaryStartRow, 3);
+    const sumHeaderCell = summaryHeaderRow.getCell(2);
+    sumHeaderCell.value = `สรุปยอดรวมทั้งปี (ม.ค. – ${toMonthShort} ${yearBE})`;
+    sumHeaderCell.font = { name: 'Tahoma', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+    sumHeaderCell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF23AEE7' },
+    };
+    sumHeaderCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    summaryHeaderRow.getCell(2).border = thinBorder;
+    summaryHeaderRow.getCell(3).border = thinBorder;
+
+    const summaryItems: Array<{ label: string; amount: number; highlight?: boolean }> = [
+      { label: 'หักภาษีรวม', amount: round2(footerTotals.annualTotalTax) },
+      { label: 'หักประกันสังคมรวม', amount: round2(footerTotals.annualTotalSso) },
+      {
+        label: 'รวมรายได้ยื่น ภงด.1',
+        amount: round2(footerTotals.annualTotalIncome),
+        highlight: true,
+      },
+    ];
+
+    summaryItems.forEach((item, idx) => {
+      const rNum = summaryStartRow + 1 + idx;
+      const r = ws.getRow(rNum);
+      r.height = 22;
+      const lblCell = r.getCell(2);
+      const valCell = r.getCell(3);
+
+      lblCell.value = item.label;
+      lblCell.font = { name: 'Tahoma', size: 11, bold: true };
+      lblCell.alignment = { horizontal: 'left', vertical: 'middle' };
+      lblCell.border = thinBorder;
+
+      valCell.value = item.amount;
+      valCell.numFmt = moneyNumFmt;
+      valCell.font = { name: 'Tahoma', size: 11, bold: true };
+      valCell.alignment = { horizontal: 'right', vertical: 'middle' };
+      valCell.border = thinBorder;
+
+      const bgColor = item.highlight ? 'FFFFF4CC' : 'FFF2F9FD';
+      lblCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+      valCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+    });
+
+    // ช่องลงชื่อ "ผู้จัดทำ" และ "ผู้อนุมัติ"
+    const signRow1 = ws.getRow(summaryStartRow + 1);
+    const signRow2 = ws.getRow(summaryStartRow + 2);
+    const signRow3 = ws.getRow(summaryStartRow + 3);
+
+    ws.mergeCells(summaryStartRow + 1, 5, summaryStartRow + 1, 7);
+    ws.mergeCells(summaryStartRow + 2, 5, summaryStartRow + 2, 7);
+    ws.mergeCells(summaryStartRow + 3, 5, summaryStartRow + 3, 7);
+
+    signRow1.getCell(5).value = 'ผู้จัดทำ .........................................................';
+    signRow2.getCell(5).value = '(                                                         )';
+    signRow3.getCell(5).value = 'วันที่ ........../........../..........';
+
+    ws.mergeCells(summaryStartRow + 1, 9, summaryStartRow + 1, 11);
+    ws.mergeCells(summaryStartRow + 2, 9, summaryStartRow + 2, 11);
+    ws.mergeCells(summaryStartRow + 3, 9, summaryStartRow + 3, 11);
+
+    signRow1.getCell(9).value = 'ผู้อนุมัติ .........................................................';
+    signRow2.getCell(9).value = '(                                                         )';
+    signRow3.getCell(9).value = 'วันที่ ........../........../..........';
+
+    [signRow1, signRow2, signRow3].forEach((sr) => {
+      [5, 9].forEach((cIdx) => {
+        const cell = sr.getCell(cIdx);
+        cell.font = { name: 'Tahoma', size: 11, bold: false };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+    });
+
+    // ชื่อไฟล์: รายงานสรุปเงินเดือน-ประกันสังคม-ภงด1_ปี{พ.ศ.}_ถึง{เดือน}.xlsx
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const fileName = `รายงานสรุปเงินเดือน-ประกันสังคม-ภงด1_ปี${yearBE}_ถึง${toMonthFull}.xlsx`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const yearBE = selectedYear + 543;
+  const toMonthShort = THAI_SHORT_MONTHS[selectedToMonth - 1] || '';
+  const legalCompanyDisplay = (
+    settings.legalCompanyName ||
+    settings.companyName ||
+    'Thunder Cloud'
+  ).trim();
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden space-y-4 p-4 sm:p-5">
+      {/* Header & Filters */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+        <div>
+          <h3 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>
+              ข้อมูลจ่ายพนักงาน ประจำปี {yearBE} (ม.ค. – {toMonthShort})
+            </span>
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            บริษัท: <strong>{legalCompanyDisplay}</strong> • สรุปรายปี (ภงด.1 / ประกันสังคม) เฉพาะสลิปที่ยืนยันแล้ว (อ่านอย่างเดียว)
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* ตัวเลือกปีภาษี */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300">ปีภาษี:</span>
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+            >
+              {availableTaxYears.map((y) => (
+                <option key={y} value={y}>
+                  พ.ศ. {y + 543} (ค.ศ. {y})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* ตัวเลือก "ถึงเดือน" */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-300">ถึงเดือน:</span>
+            <select
+              value={selectedToMonth}
+              onChange={(e) => setSelectedToMonth(Number(e.target.value))}
+              className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+            >
+              {THAI_FULL_MONTHS.map((mName, idx) => (
+                <option key={idx + 1} value={idx + 1}>
+                  {mName} ({THAI_SHORT_MONTHS[idx]})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => setLocalReloadCount((c) => c + 1)}
+            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={clsx('w-3.5 h-3.5', loading && 'animate-spin')} />
+            <span>รีเฟรช</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={loading || Boolean(loadError) || computedRows.length === 0}
+            onClick={handleDownloadAnnualExcel}
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>ดาวน์โหลด Excel (.xlsx)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ข้อความเทาเล็กๆ ด้านบนตารางเมื่อเลือกเดือนก่อนหน้าเดือนล่าสุดที่มีสลิป */}
+      {!loading && !loadError && isSelectedBeforeLatestConfirmedMonth && (
+        <div className="text-xs text-slate-400 dark:text-slate-500">
+          การตรวจเทียบกับ 50 ทวิ จะทำเมื่อเลือกถึงเดือนล่าสุดที่มีสลิป
+        </div>
+      )}
+
+      {/* แจ้งเตือนกรณีมียอดรวมทั้งปีไม่ตรงกับเอกสาร 50 ทวิ (คลาดเกิน 0.01) */}
+      {!loading && !loadError && mismatchedRows.length > 0 && (
+        <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs space-y-1.5">
+          <div className="font-bold flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+            <span>
+              พบพนักงานที่มียอดรวมทั้งปี (ม.ค. – {toMonthShort}) ไม่ตรงกับเอกสาร 50 ทวิ จำนวน{' '}
+              {mismatchedRows.length} คน (แถวที่ไฮไลต์สีแดง):
+            </span>
+          </div>
+          <ul className="list-disc pl-8 space-y-1 text-[11px] font-semibold">
+            {mismatchedRows.map((r) => (
+              <li key={r.uid}>
+                <strong>{r.fullName}:</strong> {r.mismatchReasons.join(' | ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* ตารางแสดงผล */}
+      {loading ? (
+        <div className="p-12 text-center text-slate-400 dark:text-slate-500 text-sm">
+          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+          กำลังโหลดรายงานสรุปรายปี (ภงด.1/ประกันสังคม)...
+        </div>
+      ) : loadError ? (
+        <div className="p-10 text-center space-y-3">
+          <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+          <div className="text-sm font-bold text-rose-700 dark:text-rose-400">{loadError}</div>
+          <button
+            type="button"
+            onClick={() => setLocalReloadCount((c) => c + 1)}
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>โหลดใหม่</span>
+          </button>
+        </div>
+      ) : computedRows.length === 0 ? (
+        <div className="p-12 text-center text-slate-400 dark:text-slate-500 text-sm">
+          ไม่พบรายชื่อพนักงานในระบบ HR
+        </div>
+      ) : (
+        <>
+          <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+            <table className="w-full border-collapse text-xs whitespace-nowrap">
+              <thead>
+                {/* หัวตารางชั้นบน */}
+                <tr className="bg-sky-600 text-white font-bold border-b border-sky-500">
+                  <th
+                    rowSpan={2}
+                    className="px-2.5 py-2.5 text-center border-r border-sky-500 align-middle"
+                  >
+                    ลำดับ
+                  </th>
+                  <th
+                    rowSpan={2}
+                    className="px-3 py-2.5 text-left border-r border-sky-500 min-w-[170px] align-middle"
+                  >
+                    ชื่อ-สกุล
+                  </th>
+                  <th
+                    rowSpan={2}
+                    className="px-3 py-2.5 text-center border-r border-sky-500 min-w-[140px] align-middle"
+                  >
+                    เลขบัตรประชาชน
+                  </th>
+                  <th
+                    colSpan={3}
+                    className="px-3 py-2 text-center border-r border-sky-500 bg-sky-700/60"
+                  >
+                    ยอดยกมา (ก่อนเข้าระบบ)
+                  </th>
+                  {activeMonths.map((m) => (
+                    <th
+                      key={`month-top-${m}`}
+                      colSpan={8}
+                      className="px-3 py-2 text-center border-r border-sky-500"
+                    >
+                      เดือน{THAI_FULL_MONTHS[m - 1]} ({THAI_SHORT_MONTHS[m - 1]})
+                    </th>
+                  ))}
+                  <th
+                    colSpan={3}
+                    className="px-3 py-2 text-center bg-amber-600 text-white"
+                  >
+                    รวมทั้งปี
+                  </th>
+                </tr>
+
+                {/* หัวตารางชั้นล่าง */}
+                <tr className="bg-sky-600/95 text-white font-bold border-b border-slate-200 dark:border-slate-700 text-[11px]">
+                  {/* ยอดยกมา 3 ช่อง */}
+                  <th className="px-2.5 py-2 text-right border-r border-sky-500 bg-sky-700/40">
+                    เงินได้
+                  </th>
+                  <th className="px-2.5 py-2 text-right border-r border-sky-500 bg-sky-700/40">
+                    ประกันสังคม
+                  </th>
+                  <th className="px-2.5 py-2 text-right border-r border-sky-500 bg-sky-700/40">
+                    ภาษี
+                  </th>
+
+                  {/* แต่ละเดือน 8 ช่อง */}
+                  {activeMonths.map((m) => (
+                    <React.Fragment key={`month-sub-${m}`}>
+                      <th className="px-2.5 py-2 text-right border-r border-sky-500">
+                        ฐานเงินเดือน
+                      </th>
+                      <th className="px-2.5 py-2 text-right border-r border-sky-500">
+                        ค่าล่วงเวลา
+                      </th>
+                      <th className="px-2.5 py-2 text-right border-r border-sky-500">
+                        ทำงานวันหยุด
+                      </th>
+                      <th className="px-2.5 py-2 text-right border-r border-sky-500">
+                        เงินได้อื่น
+                      </th>
+                      <th className="px-2.5 py-2 text-right border-r border-sky-500 bg-amber-500/90 text-white">
+                        รวมเงินได้ (ยื่น ภงด.1)
+                      </th>
+                      <th className="px-2.5 py-2 text-right border-r border-sky-500">
+                        ประกันสังคม
+                      </th>
+                      <th className="px-2.5 py-2 text-right border-r border-sky-500">
+                        หักภาษี ณ ที่จ่าย
+                      </th>
+                      <th className="px-2.5 py-2 text-right border-r border-sky-500">
+                        รายรับสุทธิ
+                      </th>
+                    </React.Fragment>
+                  ))}
+
+                  {/* รวมทั้งปี 3 ช่อง */}
+                  <th className="px-2.5 py-2 text-right border-r border-amber-500 bg-amber-600/90">
+                    รวมเงินได้ ยื่น ภงด.1
+                  </th>
+                  <th className="px-2.5 py-2 text-right border-r border-amber-500 bg-amber-600/90">
+                    ประกันสังคม
+                  </th>
+                  <th className="px-2.5 py-2 text-right bg-amber-600/90">
+                    หักภาษี ณ ที่จ่าย
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 tabular-nums">
+                {computedRows.map((row, rowIdx) => (
+                  <tr
+                    key={row.uid}
+                    className={clsx(
+                      'transition',
+                      !row.is50TawiMatched
+                        ? 'bg-rose-100/90 dark:bg-rose-950/60 text-rose-950 dark:text-rose-100 hover:bg-rose-200/70'
+                        : rowIdx % 2 === 1
+                        ? 'bg-sky-50/40 dark:bg-slate-800/30 hover:bg-slate-100/70 dark:hover:bg-slate-800/60'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                    )}
+                  >
+                    <td className="px-2.5 py-2.5 text-center font-mono border-r border-slate-100 dark:border-slate-800">
+                      {row.seq}
+                    </td>
+                    <td className="px-3 py-2.5 text-left font-bold border-r border-slate-100 dark:border-slate-800">
+                      <div>{row.fullName}</div>
+                      {!row.is50TawiMatched && (
+                        <div className="mt-0.5 text-[10px] font-semibold text-rose-700 dark:text-rose-300 whitespace-normal max-w-xs">
+                          {row.mismatchReasons.map((msg, i) => (
+                            <div key={i}>• {msg}</div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-center font-mono border-r border-slate-100 dark:border-slate-800">
+                      {row.maskedCitizenId}
+                    </td>
+
+                    {/* ยอดยกมา: เงินได้ | ประกันสังคม | ภาษี */}
+                    <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                      {formatReportMoney(row.openingIncome)}
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                      {formatReportMoney(row.openingSso)}
+                    </td>
+                    <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                      {formatReportMoney(row.openingTax)}
+                    </td>
+
+                    {/* แต่ละเดือน (เดือนที่ไม่มีสลิป: เว้นว่าง ไม่ใส่ 0) */}
+                    {activeMonths.map((m) => {
+                      const cell = row.monthsMap[m];
+                      return (
+                        <React.Fragment key={`row-${row.uid}-m-${m}`}>
+                          <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                            {cell ? formatReportMoney(cell.salary) : ''}
+                          </td>
+                          <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                            {cell ? formatReportMoney(cell.otRegular) : ''}
+                          </td>
+                          <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                            {cell ? formatReportMoney(cell.otHolidayRed) : ''}
+                          </td>
+                          <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                            {cell ? formatReportMoney(cell.otherEarnings) : ''}
+                          </td>
+                          <td
+                            className={clsx(
+                              'px-2.5 py-2.5 text-right font-mono font-bold border-r border-slate-100 dark:border-slate-800',
+                              row.is50TawiMatched &&
+                                'bg-amber-50/70 dark:bg-amber-950/20 text-amber-950 dark:text-amber-200'
+                            )}
+                          >
+                            {cell ? formatReportMoney(cell.totalEarnings) : ''}
+                          </td>
+                          <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                            {cell ? formatReportMoney(cell.ssoAmount) : ''}
+                          </td>
+                          <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-100 dark:border-slate-800">
+                            {cell ? formatReportMoney(cell.withholdingTax) : ''}
+                          </td>
+                          <td className="px-2.5 py-2.5 text-right font-mono border-r border-slate-200 dark:border-slate-700">
+                            {cell ? formatReportMoney(cell.netPayBeforeAdvance) : ''}
+                          </td>
+                        </React.Fragment>
+                      );
+                    })}
+
+                    {/* รวมทั้งปี: รวมเงินได้ ยื่น ภงด.1 | ประกันสังคม | หักภาษี ณ ที่จ่าย */}
+                    <td
+                      className={clsx(
+                        'px-2.5 py-2.5 text-right font-mono font-bold border-r border-slate-100 dark:border-slate-800',
+                        row.is50TawiMatched &&
+                          'bg-amber-50/90 dark:bg-amber-950/30 text-amber-950 dark:text-amber-200'
+                      )}
+                    >
+                      {formatReportMoney(row.annualTotalIncome)}
+                    </td>
+                    <td
+                      className={clsx(
+                        'px-2.5 py-2.5 text-right font-mono font-bold border-r border-slate-100 dark:border-slate-800',
+                        row.is50TawiMatched &&
+                          'bg-amber-50/90 dark:bg-amber-950/30 text-amber-950 dark:text-amber-200'
+                      )}
+                    >
+                      {formatReportMoney(row.annualTotalSso)}
+                    </td>
+                    <td
+                      className={clsx(
+                        'px-2.5 py-2.5 text-right font-mono font-bold',
+                        row.is50TawiMatched &&
+                          'bg-amber-50/90 dark:bg-amber-950/30 text-amber-950 dark:text-amber-200'
+                      )}
+                    >
+                      {formatReportMoney(row.annualTotalTax)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+
+              {/* แถวล่าง "ยอดรวมสุทธิ" ทุกคอลัมน์ */}
+              <tfoot>
+                <tr className="bg-slate-200/90 dark:bg-slate-800 font-extrabold text-slate-900 dark:text-white border-t-2 border-slate-400 dark:border-slate-600 tabular-nums">
+                  <td
+                    colSpan={3}
+                    className="px-3 py-3 text-center border-r border-slate-300 dark:border-slate-700"
+                  >
+                    ยอดรวมสุทธิ
+                  </td>
+                  <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                    {formatReportMoney(footerTotals.openingIncome)}
+                  </td>
+                  <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                    {formatReportMoney(footerTotals.openingSso)}
+                  </td>
+                  <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                    {formatReportMoney(footerTotals.openingTax)}
+                  </td>
+
+                  {activeMonths.map((m) => {
+                    const mt = footerTotals.monthsTotals[m];
+                    return (
+                      <React.Fragment key={`foot-m-${m}`}>
+                        <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                          {mt.hasAnySlip ? formatReportMoney(mt.salary) : ''}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                          {mt.hasAnySlip ? formatReportMoney(mt.otRegular) : ''}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                          {mt.hasAnySlip ? formatReportMoney(mt.otHolidayRed) : ''}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                          {mt.hasAnySlip ? formatReportMoney(mt.otherEarnings) : ''}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700 bg-amber-100/80 dark:bg-amber-950/50 text-amber-950 dark:text-amber-200">
+                          {mt.hasAnySlip ? formatReportMoney(mt.totalEarnings) : ''}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                          {mt.hasAnySlip ? formatReportMoney(mt.ssoAmount) : ''}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                          {mt.hasAnySlip ? formatReportMoney(mt.withholdingTax) : ''}
+                        </td>
+                        <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700">
+                          {mt.hasAnySlip ? formatReportMoney(mt.netPayBeforeAdvance) : ''}
+                        </td>
+                      </React.Fragment>
+                    );
+                  })}
+
+                  <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700 bg-amber-100/80 dark:bg-amber-950/50 text-amber-950 dark:text-amber-200">
+                    {formatReportMoney(footerTotals.annualTotalIncome)}
+                  </td>
+                  <td className="px-2.5 py-3 text-right font-mono border-r border-slate-300 dark:border-slate-700 bg-amber-100/80 dark:bg-amber-950/50 text-amber-950 dark:text-amber-200">
+                    {formatReportMoney(footerTotals.annualTotalSso)}
+                  </td>
+                  <td className="px-2.5 py-3 text-right font-mono bg-amber-100/80 dark:bg-amber-950/50 text-amber-950 dark:text-amber-200">
+                    {formatReportMoney(footerTotals.annualTotalTax)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {/* กล่องสรุปใต้ตารางบนหน้าจอ */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                หักภาษีรวม
+              </span>
+              <span className="text-sm font-black font-mono text-rose-600 dark:text-rose-400">
+                {formatReportMoney(footerTotals.annualTotalTax)} บาท
+              </span>
+            </div>
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                หักประกันสังคมรวม
+              </span>
+              <span className="text-sm font-black font-mono text-indigo-600 dark:text-indigo-400">
+                {formatReportMoney(footerTotals.annualTotalSso)} บาท
+              </span>
+            </div>
+            <div className="p-3.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/40 flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                รวมรายได้ยื่น ภงด.1
+              </span>
+              <span className="text-sm font-black font-mono text-amber-900 dark:text-amber-200">
+                {formatReportMoney(footerTotals.annualTotalIncome)} บาท
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 
 
