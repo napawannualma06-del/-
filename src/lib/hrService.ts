@@ -1,4 +1,5 @@
 import {
+  addDoc,
   collection,
   deleteDoc,
   deleteField,
@@ -24,6 +25,8 @@ import {
 } from 'firebase/auth';
 import { auth, db } from './firebase';
 import {
+  AccessRequestDoc,
+  AccessRequestStatus,
   EmployeeLoginDoc,
   EmployeeSelfSubmittedFields,
   HRPrivateData,
@@ -32,6 +35,9 @@ import {
   ProfileMaskedSummary,
   ProfileRequestDoc,
   ProfileStatusDoc,
+  RoleAuditDoc,
+  SystemRole,
+  UserRoleDoc,
 } from '../types';
 
 export const DEFAULT_PROBATION_DAYS = 119;
@@ -1397,5 +1403,455 @@ export async function signOutEmployeeGoogleSession(): Promise<void> {
   }
 }
 
+// ===============================================================
+// Role Management & Access Requests (Round A: user_roles, access_requests, role_audit)
+// ===============================================================
 
+const USER_ROLES_COLLECTION = 'user_roles';
+const ACCESS_REQUESTS_COLLECTION = 'access_requests';
+const ROLE_AUDIT_COLLECTION = 'role_audit';
 
+export const SYSTEM_ROLE_LABELS: Record<SystemRole, string> = {
+  employee: 'พนักงาน',
+  supervisor: 'หัวหน้างาน',
+  hr: 'HR',
+  executive: 'ผู้บริหาร',
+  super: 'แอดมินสูงสุด',
+};
+
+export const VALID_SYSTEM_ROLES: readonly SystemRole[] = [
+  'employee',
+  'supervisor',
+  'hr',
+  'executive',
+  'super',
+];
+
+export function isValidSystemRole(val: unknown): val is SystemRole {
+  return typeof val === 'string' && (VALID_SYSTEM_ROLES as readonly string[]).includes(val);
+}
+
+/**
+ * ปิดบังอีเมลบางส่วน เช่น abcdef@gmail.com -> ab***@gmail.com
+ */
+export function maskEmailForDisplay(email?: string | null): string {
+  if (!email) return '-';
+  const clean = email.trim().toLowerCase();
+  const atIdx = clean.indexOf('@');
+  if (atIdx <= 0) return clean;
+  const local = clean.slice(0, atIdx);
+  const domain = clean.slice(atIdx + 1);
+  const prefix = local.length <= 2 ? local.slice(0, 1) : local.slice(0, 2);
+  return `${prefix}***@${domain}`;
+}
+
+/**
+ * ดึงสิทธิ์ของผู้ใช้จาก user_roles/{emailตัวพิมพ์เล็ก}
+ */
+export async function fetchUserRoleByEmail(email: string): Promise<UserRoleDoc | null> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail) return null;
+  const ref = doc(db, USER_ROLES_COLLECTION, cleanEmail);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  const data = snap.data() as Partial<UserRoleDoc>;
+  const role: SystemRole = isValidSystemRole(data.role) ? data.role : 'employee';
+  return {
+    email: cleanEmail,
+    role,
+    displayName: typeof data.displayName === 'string' ? data.displayName : '',
+    employeeId: typeof data.employeeId === 'string' && data.employeeId ? data.employeeId : undefined,
+    updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : 0,
+    updatedBy: typeof data.updatedBy === 'string' ? data.updatedBy : '',
+  };
+}
+
+/**
+ * ดึงรายการ user_roles ทั้งหมด (เฉพาะแอดมินสูงสุด)
+ */
+export async function fetchAllUserRoles(): Promise<Record<string, UserRoleDoc>> {
+  const snap = await getDocs(collection(db, USER_ROLES_COLLECTION));
+  const result: Record<string, UserRoleDoc> = {};
+  snap.forEach((d) => {
+    const cleanEmail = d.id.trim().toLowerCase();
+    const data = d.data() as Partial<UserRoleDoc>;
+    const role: SystemRole = isValidSystemRole(data.role) ? data.role : 'employee';
+    result[cleanEmail] = {
+      email: cleanEmail,
+      role,
+      displayName: typeof data.displayName === 'string' ? data.displayName : '',
+      employeeId: typeof data.employeeId === 'string' && data.employeeId ? data.employeeId : undefined,
+      updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : 0,
+      updatedBy: typeof data.updatedBy === 'string' ? data.updatedBy : '',
+    };
+  });
+  return result;
+}
+
+/**
+ * บันทึกประวัติการเปลี่ยนสิทธิ์ลง role_audit/{autoId}
+ */
+export async function recordRoleAudit(params: {
+  targetEmail: string;
+  fromRole: string;
+  toRole: string;
+  byEmail: string;
+}): Promise<void> {
+  const payload: RoleAuditDoc = {
+    targetEmail: params.targetEmail.trim().toLowerCase(),
+    fromRole: params.fromRole,
+    toRole: params.toRole,
+    byEmail: params.byEmail.trim().toLowerCase(),
+    at: Date.now(),
+  };
+  await addDoc(collection(db, ROLE_AUDIT_COLLECTION), payload);
+}
+
+/**
+ * ดึงประวัติการเปลี่ยนสิทธิ์ทั้งหมดจาก role_audit เรียงจากล่าสุดไปเก่าสุด
+ */
+export async function fetchRoleAuditLogs(): Promise<RoleAuditDoc[]> {
+  const snap = await getDocs(collection(db, ROLE_AUDIT_COLLECTION));
+  const list: RoleAuditDoc[] = [];
+  snap.forEach((d) => {
+    const data = d.data() as Partial<RoleAuditDoc>;
+    list.push({
+      id: d.id,
+      targetEmail: typeof data.targetEmail === 'string' ? data.targetEmail : '',
+      fromRole: typeof data.fromRole === 'string' ? data.fromRole : '',
+      toRole: typeof data.toRole === 'string' ? data.toRole : '',
+      byEmail: typeof data.byEmail === 'string' ? data.byEmail : '',
+      at: typeof data.at === 'number' ? data.at : 0,
+    });
+  });
+  list.sort((a, b) => b.at - a.at);
+  return list;
+}
+
+/**
+ * นับจำนวนแอดมินสูงสุดทั้งหมด (นับอีเมลแอดมินหลัก = 1 เสมอ + คนใน user_roles ที่ role === 'super')
+ */
+export function countTotalSuperAdmins(userRolesMap: Record<string, UserRoleDoc>): number {
+  let count = HR_ADMIN_EMAILS.length; // อีเมลแอดมินหลักนับ = 1 เสมอ
+  for (const [email, docData] of Object.entries(userRolesMap)) {
+    const clean = email.trim().toLowerCase();
+    if (!isHrAdminEmail(clean) && docData.role === 'super') {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * บันทึกหรือเปลี่ยนสิทธิ์ใน user_roles/{email} พร้อมตรวจเงื่อนไขความปลอดภัยและบันทึก role_audit
+ * - ห้ามแก้สิทธิ์ของตัวเอง
+ * - ห้ามลบหรือลดสิทธิ์อีเมลแอดมินหลัก
+ * - ห้ามเปลี่ยนหรือลบจนเหลือแอดมินสูงสุดน้อยกว่า 2 คน (นับอีเมลแอดมินหลัก = 1 เสมอ)
+ */
+export async function saveUserRoleWithAudit(params: {
+  targetEmail: string;
+  newRole: SystemRole;
+  displayName: string;
+  employeeId?: string;
+  actorEmail: string;
+}): Promise<UserRoleDoc> {
+  const cleanTargetEmail = (params.targetEmail || '').trim().toLowerCase();
+  const cleanActorEmail = (
+    auth.currentUser?.email ||
+    params.actorEmail ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
+
+  if (!cleanTargetEmail) {
+    throw new Error('ไม่พบอีเมลเป้าหมาย');
+  }
+  if (!isValidSystemRole(params.newRole)) {
+    throw new Error('สิทธิ์ที่เลือกไม่ถูกต้อง');
+  }
+  if (cleanActorEmail && cleanTargetEmail === cleanActorEmail) {
+    throw new Error('ห้ามแก้สิทธิ์ของตัวเอง');
+  }
+  if (isHrAdminEmail(cleanTargetEmail)) {
+    throw new Error('ห้ามแก้ไขหรือลบสิทธิ์ของอีเมลแอดมินหลัก');
+  }
+
+  // โหลด user_roles ทั้งหมดเพื่อตรวจจำนวนแอดมินสูงสุด
+  const allRoles = await fetchAllUserRoles();
+  const existingDoc = allRoles[cleanTargetEmail];
+  const fromRole: string = existingDoc ? existingDoc.role : 'employee';
+
+  // ถ้าเดิมเป็น 'super' แล้วจะเปลี่ยนเป็นสิทธิ์อื่น ต้องตรวจว่าเหลือแอดมินสูงสุดอย่างน้อย 2 คนหรือไม่
+  if (existingDoc?.role === 'super' && params.newRole !== 'super') {
+    const simulatedMap: Record<string, UserRoleDoc> = { ...allRoles };
+    simulatedMap[cleanTargetEmail] = {
+      ...existingDoc,
+      role: params.newRole,
+    };
+    const remainingSuperCount = countTotalSuperAdmins(simulatedMap);
+    if (remainingSuperCount < 2) {
+      throw new Error('ห้ามเปลี่ยนหรือลบจนเหลือแอดมินสูงสุดน้อยกว่า 2 คน');
+    }
+  }
+
+  const now = Date.now();
+  const payload: Record<string, unknown> = {
+    role: params.newRole,
+    displayName: (params.displayName || existingDoc?.displayName || cleanTargetEmail.split('@')[0]).trim(),
+    updatedAt: now,
+    updatedBy: cleanActorEmail || params.actorEmail || 'super_admin',
+  };
+  const finalEmployeeId = params.employeeId ?? existingDoc?.employeeId;
+  if (finalEmployeeId) {
+    payload.employeeId = finalEmployeeId;
+  }
+
+  await setDoc(doc(db, USER_ROLES_COLLECTION, cleanTargetEmail), payload);
+
+  await recordRoleAudit({
+    targetEmail: cleanTargetEmail,
+    fromRole,
+    toRole: params.newRole,
+    byEmail: cleanActorEmail || params.actorEmail || 'super_admin',
+  });
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('role-access-requests-updated'));
+  }
+
+  return {
+    email: cleanTargetEmail,
+    role: params.newRole,
+    displayName: String(payload.displayName),
+    employeeId: finalEmployeeId,
+    updatedAt: now,
+    updatedBy: String(payload.updatedBy),
+  };
+}
+
+/**
+ * ถอนสิทธิ์ (ลบเอกสาร user_roles/{email}) พร้อมตรวจเงื่อนไขความปลอดภัยและบันทึก role_audit
+ */
+export async function revokeUserRoleWithAudit(params: {
+  targetEmail: string;
+  actorEmail: string;
+}): Promise<void> {
+  const cleanTargetEmail = (params.targetEmail || '').trim().toLowerCase();
+  const cleanActorEmail = (
+    auth.currentUser?.email ||
+    params.actorEmail ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
+
+  if (!cleanTargetEmail) {
+    throw new Error('ไม่พบอีเมลเป้าหมาย');
+  }
+  if (cleanActorEmail && cleanTargetEmail === cleanActorEmail) {
+    throw new Error('ห้ามแก้สิทธิ์ของตัวเอง');
+  }
+  if (isHrAdminEmail(cleanTargetEmail)) {
+    throw new Error('ห้ามลบอีเมลแอดมินหลัก');
+  }
+
+  const allRoles = await fetchAllUserRoles();
+  const existingDoc = allRoles[cleanTargetEmail];
+  if (!existingDoc) return;
+
+  if (existingDoc.role === 'super') {
+    const simulatedMap: Record<string, UserRoleDoc> = { ...allRoles };
+    delete simulatedMap[cleanTargetEmail];
+    const remainingSuperCount = countTotalSuperAdmins(simulatedMap);
+    if (remainingSuperCount < 2) {
+      throw new Error('ห้ามเปลี่ยนหรือลบจนเหลือแอดมินสูงสุดน้อยกว่า 2 คน');
+    }
+  }
+
+  await deleteDoc(doc(db, USER_ROLES_COLLECTION, cleanTargetEmail));
+
+  await recordRoleAudit({
+    targetEmail: cleanTargetEmail,
+    fromRole: existingDoc.role,
+    toRole: 'revoked',
+    byEmail: cleanActorEmail || params.actorEmail || 'super_admin',
+  });
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('role-access-requests-updated'));
+  }
+}
+
+/**
+ * ดึงคำขอสิทธิ์ตามอีเมลจาก access_requests/{emailตัวพิมพ์เล็ก}
+ */
+export async function fetchAccessRequestByEmail(
+  email: string
+): Promise<AccessRequestDoc | null> {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail) return null;
+  const ref = doc(db, ACCESS_REQUESTS_COLLECTION, cleanEmail);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  const data = snap.data() as Partial<AccessRequestDoc>;
+  const status: AccessRequestStatus =
+    data.status === 'approved' || data.status === 'rejected' ? data.status : 'pending';
+  return {
+    email: cleanEmail,
+    displayName: typeof data.displayName === 'string' ? data.displayName : cleanEmail.split('@')[0],
+    photoURL: typeof data.photoURL === 'string' ? data.photoURL : '',
+    status,
+    createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
+    decidedAt: typeof data.decidedAt === 'number' ? data.decidedAt : null,
+    decidedBy: typeof data.decidedBy === 'string' ? data.decidedBy : null,
+  };
+}
+
+/**
+ * สร้างคำขอสิทธิ์ใหม่ (status = 'pending') ใน access_requests/{emailตัวพิมพ์เล็ก}
+ */
+export async function createPendingAccessRequest(params: {
+  email: string;
+  displayName: string;
+  photoURL?: string;
+}): Promise<AccessRequestDoc> {
+  const cleanEmail = (params.email || '').trim().toLowerCase();
+  if (!cleanEmail) throw new Error('ไม่พบอีเมลสำหรับส่งคำขอสิทธิ์');
+  const now = Date.now();
+  const payload: AccessRequestDoc = {
+    email: cleanEmail,
+    displayName: (params.displayName || cleanEmail.split('@')[0]).trim(),
+    photoURL: (params.photoURL || '').trim(),
+    status: 'pending',
+    createdAt: now,
+    decidedAt: null,
+    decidedBy: null,
+  };
+  await setDoc(doc(db, ACCESS_REQUESTS_COLLECTION, cleanEmail), payload);
+  return payload;
+}
+
+/**
+ * ดึงคำขอสิทธิ์ที่ยังรออนุมัติ (status === 'pending') ทั้งหมด
+ */
+export async function fetchPendingAccessRequests(): Promise<AccessRequestDoc[]> {
+  const q = query(
+    collection(db, ACCESS_REQUESTS_COLLECTION),
+    where('status', '==', 'pending')
+  );
+  const snap = await getDocs(q);
+  const list: AccessRequestDoc[] = [];
+  snap.forEach((d) => {
+    const cleanEmail = d.id.trim().toLowerCase();
+    const data = d.data() as Partial<AccessRequestDoc>;
+    list.push({
+      email: cleanEmail,
+      displayName: typeof data.displayName === 'string' ? data.displayName : cleanEmail.split('@')[0],
+      photoURL: typeof data.photoURL === 'string' ? data.photoURL : '',
+      status: 'pending',
+      createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
+      decidedAt: typeof data.decidedAt === 'number' ? data.decidedAt : null,
+      decidedBy: typeof data.decidedBy === 'string' ? data.decidedBy : null,
+    });
+  });
+  list.sort((a, b) => b.createdAt - a.createdAt);
+  return list;
+}
+
+/**
+ * นับจำนวนคำขอสิทธิ์ที่รออนุมัติ (status === 'pending')
+ */
+export async function fetchPendingAccessRequestsCount(): Promise<number> {
+  const list = await fetchPendingAccessRequests();
+  return list.length;
+}
+
+/**
+ * อนุมัติคำขอสิทธิ์ใน access_requests/{email} พร้อมกำหนดสิทธิ์ใน user_roles/{email} และบันทึก role_audit
+ */
+export async function approveAccessRequestWithRole(params: {
+  email: string;
+  role: SystemRole;
+  displayName: string;
+  employeeId?: string;
+  actorEmail: string;
+}): Promise<void> {
+  const cleanEmail = (params.email || '').trim().toLowerCase();
+  const cleanActorEmail = (
+    auth.currentUser?.email ||
+    params.actorEmail ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
+
+  if (!cleanEmail) throw new Error('ไม่พบอีเมลคำขอสิทธิ์');
+  if (cleanActorEmail && cleanEmail === cleanActorEmail) {
+    throw new Error('ห้ามแก้สิทธิ์ของตัวเอง');
+  }
+
+  // บันทึก user_roles และ role_audit
+  await saveUserRoleWithAudit({
+    targetEmail: cleanEmail,
+    newRole: params.role,
+    displayName: params.displayName,
+    employeeId: params.employeeId,
+    actorEmail: cleanActorEmail || params.actorEmail,
+  });
+
+  // อัปเดตสถานะใน access_requests/{email} เป็น approved
+  await setDoc(
+    doc(db, ACCESS_REQUESTS_COLLECTION, cleanEmail),
+    {
+      status: 'approved',
+      decidedAt: Date.now(),
+      decidedBy: cleanActorEmail || params.actorEmail || 'super_admin',
+    },
+    { merge: true }
+  );
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('role-access-requests-updated'));
+  }
+}
+
+/**
+ * ปฏิเสธคำขอสิทธิ์ใน access_requests/{email} พร้อมบันทึก role_audit
+ */
+export async function rejectAccessRequest(params: {
+  email: string;
+  actorEmail: string;
+}): Promise<void> {
+  const cleanEmail = (params.email || '').trim().toLowerCase();
+  const cleanActorEmail = (
+    auth.currentUser?.email ||
+    params.actorEmail ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
+
+  if (!cleanEmail) throw new Error('ไม่พบอีเมลคำขอสิทธิ์');
+
+  await setDoc(
+    doc(db, ACCESS_REQUESTS_COLLECTION, cleanEmail),
+    {
+      status: 'rejected',
+      decidedAt: Date.now(),
+      decidedBy: cleanActorEmail || params.actorEmail || 'super_admin',
+    },
+    { merge: true }
+  );
+
+  await recordRoleAudit({
+    targetEmail: cleanEmail,
+    fromRole: 'pending_request',
+    toRole: 'rejected',
+    byEmail: cleanActorEmail || params.actorEmail || 'super_admin',
+  });
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('role-access-requests-updated'));
+  }
+}

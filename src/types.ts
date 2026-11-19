@@ -25,6 +25,9 @@ export interface UserProfile {
   passwordResetRequested?: boolean;
   passwordResetRequestedAt?: number;
   authMethod?: 'google' | 'pin';
+  systemRole?: SystemRole;
+  isRoleOnlyUser?: boolean;
+  photoURL?: string;
 }
 
 export interface DutyWorker {
@@ -575,6 +578,38 @@ export interface TaxCertificateDoc {
   updatedBy: string;
 }
 
+// ===============================================================
+// Role & Access Request Types (Round A: user_roles, access_requests, role_audit)
+// ===============================================================
 
+export type SystemRole = 'employee' | 'supervisor' | 'hr' | 'executive' | 'super';
 
+export interface UserRoleDoc {
+  email?: string; // docId = email ตัวพิมพ์เล็ก
+  role: SystemRole;
+  displayName: string;
+  employeeId?: string;
+  updatedAt: number;
+  updatedBy: string;
+}
 
+export type AccessRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AccessRequestDoc {
+  email: string; // docId = email ตัวพิมพ์เล็ก
+  displayName: string;
+  photoURL: string;
+  status: AccessRequestStatus;
+  createdAt: number;
+  decidedAt?: number | null;
+  decidedBy?: string | null;
+}
+
+export interface RoleAuditDoc {
+  id?: string;
+  targetEmail: string;
+  fromRole: string;
+  toRole: string;
+  byEmail: string;
+  at: number;
+}

@@ -12,6 +12,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { AgentManagement } from './components/AgentManagement';
 import { HRPage } from './components/HRPage';
 import { MyProfilePage } from './components/MyProfilePage';
+import { RoleManagementPage } from './components/RoleManagementPage';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/hr" element={<HRPage />} />
             <Route path="/me" element={<MyProfilePage />} />
+            <Route path="/roles" element={<RoleManagementPage />} />
           </Route>
         </Routes>
       </HashRouter>

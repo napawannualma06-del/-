@@ -8,7 +8,8 @@ import { AvatarSelectorModal } from './AvatarSelectorModal';
 import { TechnicalIssueModal } from './TechnicalIssueModal';
 import { NotificationCenter, TechNotificationItem } from './NotificationCenter';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth, db } from '../lib/firebase';
 import { playNotificationChime } from '../lib/sound';
 import { 
   LogOut, 
@@ -34,7 +35,8 @@ import {
   KeyRound,
   CalendarCheck,
   Users,
-  User
+  User,
+  Shield
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { RefinanceGuideModal } from './RefinanceGuideModal';
@@ -49,7 +51,16 @@ import { isUserAdmin } from '../store/useStore';
 import { useInactivityTracker } from '../hooks/useInactivityTracker';
 import { InactivityWarningModal } from './InactivityWarningModal';
 import { QuotaExceededBanner } from './QuotaExceededBanner';
-import { fetchPendingProfileRequestsCount } from '../lib/hrService';
+import {
+  fetchPendingAccessRequestsCount,
+  fetchPendingProfileRequestsCount,
+  fetchUserRoleByEmail,
+  isEmployeeGoogleAuthUser,
+  isHrAdminAuthUser,
+  SYSTEM_ROLE_LABELS,
+} from '../lib/hrService';
+import { SystemRole } from '../types';
+import { getRoleBadgeStyle } from './RoleManagementPage';
 
 interface TechStatusToast {
   id: string;
@@ -141,6 +152,9 @@ export function Layout() {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [pendingTechCount, setPendingTechCount] = useState(0);
   const [pendingProfileReqCount, setPendingProfileReqCount] = useState(0);
+  const [pendingAccessReqCount, setPendingAccessReqCount] = useState(0);
+  const [isHrAdminUnlocked, setIsHrAdminUnlocked] = useState(false);
+  const [liveGoogleRole, setLiveGoogleRole] = useState<SystemRole | null>(null);
   const [activeTechToast, setActiveTechToast] = useState<TechStatusToast | null>(null);
   const [techNotifications, setTechNotifications] = useState<TechNotificationItem[]>([]);
   const [highlightTechIssueId, setHighlightTechIssueId] = useState<string | undefined>(undefined);
@@ -149,6 +163,53 @@ export function Layout() {
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastBadgeLoadTimeRef = useRef<number>(0);
   const isOffWork = user?.workStatus === 'off_work';
+
+  // ตรวจสถานะแอดมินสูงสุด (แอดมิน HR ที่ปลดล็อกแล้ว หรือคนที่ role = 'super' ล็อกอินด้วย Google)
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      const hrUnlocked = isHrAdminAuthUser(fbUser);
+      setIsHrAdminUnlocked(hrUnlocked);
+      if (fbUser && isEmployeeGoogleAuthUser(fbUser) && fbUser.email) {
+        try {
+          const rDoc = await fetchUserRoleByEmail(fbUser.email);
+          setLiveGoogleRole(rDoc?.role || 'employee');
+        } catch {
+          setLiveGoogleRole(null);
+        }
+      } else {
+        setLiveGoogleRole(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const effectiveSystemRole: SystemRole = isHrAdminUnlocked
+    ? 'super'
+    : liveGoogleRole || user?.systemRole || 'employee';
+
+  const isSuperAdmin =
+    isHrAdminUnlocked ||
+    (user?.authMethod === 'google' && (effectiveSystemRole === 'super' || user?.systemRole === 'super'));
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setPendingAccessReqCount(0);
+      return;
+    }
+    const loadAccessReqBadge = async () => {
+      try {
+        const count = await fetchPendingAccessRequestsCount();
+        setPendingAccessReqCount(count);
+      } catch {
+        // ignore permission error if auth is transitioning
+      }
+    };
+    loadAccessReqBadge();
+    window.addEventListener('role-access-requests-updated', loadAccessReqBadge);
+    return () => {
+      window.removeEventListener('role-access-requests-updated', loadAccessReqBadge);
+    };
+  }, [isSuperAdmin]);
 
   // Read notification keys tracking
   const [readNotifKeys, setReadNotifKeys] = useState<Set<string>>(() => {
@@ -477,6 +538,27 @@ export function Layout() {
                     {pendingProfileReqCount > 0 && (
                       <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white tabular-nums">
                         {pendingProfileReqCount}
+                      </span>
+                    )}
+                  </Link>
+                )}
+
+                {isSuperAdmin && (
+                  <Link
+                    to="/roles"
+                    className={clsx(
+                      'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                      location.pathname === '/roles'
+                        ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs font-bold'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    )}
+                    title="จัดการสิทธิ์ผู้ใช้งาน (เฉพาะแอดมินสูงสุด)"
+                  >
+                    <Shield className="w-4 h-4 shrink-0" />
+                    <span>จัดการสิทธิ์</span>
+                    {pendingAccessReqCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white tabular-nums">
+                        {pendingAccessReqCount}
                       </span>
                     )}
                   </Link>
@@ -858,7 +940,7 @@ export function Layout() {
               </button>
  
               {/* Current Member Badge */}
-              <div className="flex items-center pl-1.5 sm:pl-2 border-l border-slate-200/80 dark:border-slate-800 shrink-0 gap-1">
+              <div className="flex items-center pl-1.5 sm:pl-2 border-l border-slate-200/80 dark:border-slate-800 shrink-0 gap-1.5">
                 <button
                   id="open-avatar-selector-btn"
                   type="button"
@@ -875,28 +957,70 @@ export function Layout() {
                     />
                   </div>
                   <div className="hidden lg:block text-left mr-1 shrink-0">
-                    <span className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[100px] block leading-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                      {user?.name}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[100px] block leading-tight group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                        {user?.name}
+                      </span>
+                      <span
+                        className={clsx(
+                          'inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold border leading-tight shrink-0',
+                          getRoleBadgeStyle(effectiveSystemRole)
+                        )}
+                      >
+                        {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
+                      </span>
+                    </div>
                     <span className="text-[10px] text-slate-400 dark:text-slate-500 block leading-tight">
                       @{user?.username || 'member'}
                     </span>
                   </div>
                 </button>
- 
-                <Link
-                  to="/me"
+
+                {/* Mobile/Tablet Role Badge next to avatar */}
+                <span
                   className={clsx(
-                    'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer shrink-0',
-                    location.pathname === '/me'
-                      ? 'bg-indigo-600 text-white shadow-2xs'
-                      : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200/70 dark:border-indigo-800/70'
+                    'lg:hidden inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border shrink-0',
+                    getRoleBadgeStyle(effectiveSystemRole)
                   )}
-                  title="ข้อมูลของฉัน (โปรไฟล์พนักงาน)"
                 >
-                  <User className="w-3.5 h-3.5 shrink-0" />
-                  <span className="hidden sm:inline">ข้อมูลของฉัน</span>
-                </Link>
+                  {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
+                </span>
+
+                {isSuperAdmin && (
+                  <Link
+                    to="/roles"
+                    className={clsx(
+                      'md:hidden inline-flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer shrink-0',
+                      location.pathname === '/roles'
+                        ? 'bg-purple-600 text-white shadow-2xs'
+                        : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200/70 dark:border-purple-800/70'
+                    )}
+                    title="จัดการสิทธิ์"
+                  >
+                    <Shield className="w-3.5 h-3.5 shrink-0" />
+                    {pendingAccessReqCount > 0 && (
+                      <span className="px-1 rounded-full text-[10px] font-bold bg-rose-500 text-white">
+                        {pendingAccessReqCount}
+                      </span>
+                    )}
+                  </Link>
+                )}
+
+                {!user?.isRoleOnlyUser && (
+                  <Link
+                    to="/me"
+                    className={clsx(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer shrink-0',
+                      location.pathname === '/me'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200/70 dark:border-indigo-800/70'
+                    )}
+                    title="ข้อมูลของฉัน (โปรไฟล์พนักงาน)"
+                  >
+                    <User className="w-3.5 h-3.5 shrink-0" />
+                    <span className="hidden sm:inline">ข้อมูลของฉัน</span>
+                  </Link>
+                )}
 
                 <button
                   type="button"
@@ -929,7 +1053,52 @@ export function Layout() {
             <QuotaExceededBanner />
           </div>
         )}
-        <Outlet />
+        {user?.isRoleOnlyUser && !(isSuperAdmin && location.pathname === '/roles') ? (
+          <div className="max-w-xl mx-auto my-12 p-8 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm text-center space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
+              <Shield className="w-7 h-7" />
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                สวัสดีคุณ <span className="font-bold text-slate-900 dark:text-white">{user.name}</span>
+              </div>
+              <h1 className="text-xl font-bold text-slate-900 dark:text-white">
+                ยินดีต้อนรับ สิทธิ์ของคุณ: {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
+              </h1>
+            </div>
+            <div className="flex items-center justify-center">
+              <span
+                className={clsx(
+                  'inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold border',
+                  getRoleBadgeStyle(effectiveSystemRole)
+                )}
+              >
+                {SYSTEM_ROLE_LABELS[effectiveSystemRole]}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              เมนูตามสิทธิ์ของคุณจะเปิดให้ใช้งานในรอบถัดไป
+            </p>
+            {isSuperAdmin && (
+              <div className="pt-2">
+                <Link
+                  to="/roles"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition-colors"
+                >
+                  <Shield className="w-4 h-4" />
+                  <span>เปิดหน้าจัดการสิทธิ์</span>
+                  {pendingAccessReqCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white">
+                      {pendingAccessReqCount}
+                    </span>
+                  )}
+                </Link>
+              </div>
+            )}
+          </div>
+        ) : (
+          <Outlet />
+        )}
       </main>
 
       {/* Avatar Customization Modal */}

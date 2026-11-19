@@ -19,6 +19,9 @@ import { UserProfile, Role, WorkStatus, AccountStatus, Case, Agent } from '../ty
 import { ANIMAL_LIST } from '../components/AnimalAvatar';
 import { clockOutEmployeeAndReturnCases, ShiftActionResult } from '../lib/shiftService';
 import {
+  createPendingAccessRequest,
+  fetchAccessRequestByEmail,
+  fetchUserRoleByEmail,
   findEmployeeIdByGoogleEmail,
   isHrAdminEmail,
   signInEmployeeWithGoogle,
@@ -1039,99 +1042,179 @@ export const useStore = create<AppState>((set, get) => {
           };
         }
 
-        const employeeId = await findEmployeeIdByGoogleEmail(email);
-        if (!employeeId) {
-          await signOutEmployeeGoogleSession();
-          return {
-            success: false,
-            message: 'Gmail นี้ยังไม่ได้ผูกกับพนักงาน กรุณาติดต่อ HR',
-          };
-        }
+        const [employeeId, roleDoc] = await Promise.all([
+          findEmployeeIdByGoogleEmail(email).catch(() => null),
+          fetchUserRoleByEmail(email).catch(() => null),
+        ]);
 
-        const userRef = doc(db, 'users', employeeId);
-        const userSnap = await getDoc(userRef);
-        let foundData: Record<string, any> | null = userSnap.exists() ? userSnap.data() : null;
+        // 1) กรณี Gmail ผูกกับพนักงาน → เข้าระบบเป็นพนักงานคนนั้นเหมือนเดิม (พร้อมแนบ systemRole ถ้ามีใน user_roles มิฉะนั้น = 'employee')
+        if (employeeId) {
+          const userRef = doc(db, 'users', employeeId);
+          const userSnap = await getDoc(userRef);
+          let foundData: Record<string, any> | null = userSnap.exists() ? userSnap.data() : null;
 
-        if (!foundData) {
-          const cached = get().registeredUsers.find((u) => u.uid === employeeId);
-          if (cached) {
-            foundData = { ...cached };
+          if (!foundData) {
+            const cached = get().registeredUsers.find((u) => u.uid === employeeId);
+            if (cached) {
+              foundData = { ...cached };
+            }
+          }
+
+          if (foundData) {
+            if (foundData.accountStatus === 'pending') {
+              await signOutEmployeeGoogleSession();
+              return {
+                success: false,
+                message: 'บัญชีของคุณอยู่ระหว่างรอแอดมินอนุมัติ กรุณาแจ้งผู้ดูแลระบบเพื่อเปิดใช้งาน',
+              };
+            }
+
+            if (foundData.accountStatus === 'rejected') {
+              await signOutEmployeeGoogleSession();
+              return {
+                success: false,
+                message: 'บัญชีของคุณไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ',
+              };
+            }
+
+            const now = Date.now();
+            const cleanUsername = String(foundData.username || '').trim().toLowerCase();
+            const assignedEmoji =
+              foundData.avatarEmoji || getDeterministicAnimalEmoji(cleanUsername || employeeId);
+            const isNapawanAdmin =
+              cleanUsername === 'napawan' ||
+              (foundData.name && String(foundData.name).toLowerCase().includes('napawan'));
+            const resolvedRole: Role = isNapawanAdmin ? 'admin' : (foundData.role || 'employee');
+            const resolvedSystemRole = roleDoc?.role || 'employee';
+
+            const updates: Record<string, any> = {
+              role: resolvedRole,
+              workStatus: 'working',
+              lastActiveAt: now,
+              lastActionAt: now,
+              clockedInAt: now,
+              autoClockOutReason: '',
+              avatarEmoji: assignedEmoji,
+            };
+
+            try {
+              await updateDoc(userRef, updates);
+            } catch (err) {
+              console.warn('Update user workStatus after Google login warning:', err);
+            }
+
+            const loggedInUser = sanitizeUserProfile(
+              {
+                ...foundData,
+                ...updates,
+                email,
+                authMethod: 'google',
+                systemRole: resolvedSystemRole,
+                isRoleOnlyUser: false,
+              },
+              employeeId
+            );
+
+            localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(loggedInUser));
+            localStorage.setItem(
+              'thaiplus_login_mode',
+              isPersonalDevice ? 'google_personal' : 'google_shared'
+            );
+            if (isPersonalDevice) {
+              sessionStorage.removeItem('thaiplus_shared_device_session');
+            } else {
+              sessionStorage.setItem('thaiplus_shared_device_session', 'true');
+            }
+
+            set({ user: loggedInUser });
+            get().startRealtimeListeners();
+            return { success: true };
           }
         }
 
-        if (!foundData) {
-          await signOutEmployeeGoogleSession();
-          return {
-            success: false,
-            message: 'Gmail นี้ยังไม่ได้ผูกกับพนักงาน กรุณาติดต่อ HR',
-          };
-        }
-
-        if (foundData.accountStatus === 'pending') {
-          await signOutEmployeeGoogleSession();
-          return {
-            success: false,
-            message: 'บัญชีของคุณอยู่ระหว่างรอแอดมินอนุมัติ กรุณาแจ้งผู้ดูแลระบบเพื่อเปิดใช้งาน',
-          };
-        }
-
-        if (foundData.accountStatus === 'rejected') {
-          await signOutEmployeeGoogleSession();
-          return {
-            success: false,
-            message: 'บัญชีของคุณไม่ได้รับการอนุมัติให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ',
-          };
-        }
-
-        const now = Date.now();
-        const cleanUsername = String(foundData.username || '').trim().toLowerCase();
-        const assignedEmoji =
-          foundData.avatarEmoji || getDeterministicAnimalEmoji(cleanUsername || employeeId);
-        const isNapawanAdmin =
-          cleanUsername === 'napawan' ||
-          (foundData.name && String(foundData.name).toLowerCase().includes('napawan'));
-        const resolvedRole: Role = isNapawanAdmin ? 'admin' : (foundData.role || 'employee');
-
-        const updates: Record<string, any> = {
-          role: resolvedRole,
-          workStatus: 'working',
-          lastActiveAt: now,
-          lastActionAt: now,
-          clockedInAt: now,
-          autoClockOutReason: '',
-          avatarEmoji: assignedEmoji,
-        };
-
-        try {
-          await updateDoc(userRef, updates);
-        } catch (err) {
-          console.warn('Update user workStatus after Google login warning:', err);
-        }
-
-        const loggedInUser = sanitizeUserProfile(
-          {
-            ...foundData,
-            ...updates,
+        // 2) กรณีไม่ได้ผูกกับพนักงาน แต่มี user_roles (hr / executive / super / supervisor) → เข้าระบบได้
+        if (
+          roleDoc &&
+          (roleDoc.role === 'hr' ||
+            roleDoc.role === 'executive' ||
+            roleDoc.role === 'super' ||
+            roleDoc.role === 'supervisor')
+        ) {
+          const now = Date.now();
+          const displayName = (
+            roleDoc.displayName ||
+            fbUser.displayName ||
+            email.split('@')[0]
+          ).trim();
+          const assignedEmoji = getDeterministicAnimalEmoji(email);
+          const roleOnlyUser: UserProfile = {
+            uid: roleDoc.employeeId || `role_${email}`,
+            username: email.split('@')[0],
+            name: displayName,
             email,
+            role: 'employee',
+            systemRole: roleDoc.role,
+            isRoleOnlyUser: true,
+            photoURL: fbUser.photoURL || '',
+            avatarEmoji: assignedEmoji,
+            workStatus: 'working',
+            lastActiveAt: now,
+            lastActionAt: now,
+            clockedInAt: now,
+            accountStatus: 'approved',
+            createdAt: now,
             authMethod: 'google',
-          },
-          employeeId
-        );
+          };
 
-        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(loggedInUser));
-        localStorage.setItem(
-          'thaiplus_login_mode',
-          isPersonalDevice ? 'google_personal' : 'google_shared'
-        );
-        if (isPersonalDevice) {
-          sessionStorage.removeItem('thaiplus_shared_device_session');
-        } else {
-          sessionStorage.setItem('thaiplus_shared_device_session', 'true');
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(roleOnlyUser));
+          localStorage.setItem(
+            'thaiplus_login_mode',
+            isPersonalDevice ? 'google_personal' : 'google_shared'
+          );
+          if (isPersonalDevice) {
+            sessionStorage.removeItem('thaiplus_shared_device_session');
+          } else {
+            sessionStorage.setItem('thaiplus_shared_device_session', 'true');
+          }
+
+          set({ user: roleOnlyUser });
+          get().startRealtimeListeners();
+          return { success: true };
         }
 
-        set({ user: loggedInUser });
-        get().startRealtimeListeners();
-        return { success: true };
+        // 3) กรณีไม่ได้ผูกกับพนักงาน และไม่มีสิทธิ์ใน user_roles → ตรวจ access_requests
+        let existingReq = null;
+        try {
+          existingReq = await fetchAccessRequestByEmail(email);
+        } catch (err) {
+          console.warn('Fetch access request warning:', err);
+        }
+
+        if (existingReq?.status === 'rejected') {
+          await signOutEmployeeGoogleSession();
+          return {
+            success: false,
+            message: 'คำขอถูกปฏิเสธ กรุณาติดต่อแอดมิน',
+          };
+        }
+
+        if (!existingReq) {
+          try {
+            await createPendingAccessRequest({
+              email,
+              displayName: (fbUser.displayName || email.split('@')[0]).trim(),
+              photoURL: fbUser.photoURL || '',
+            });
+          } catch (err) {
+            console.warn('Create pending access request warning:', err);
+          }
+        }
+
+        await signOutEmployeeGoogleSession();
+        return {
+          success: false,
+          message: 'ส่งคำขอสิทธิ์แล้ว รอแอดมินอนุมัติ',
+        };
       } catch (error: any) {
         console.error('Google login error:', error);
         const code = error?.code || '';

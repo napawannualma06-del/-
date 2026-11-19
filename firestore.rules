@@ -354,5 +354,31 @@ service cloud.firestore {
       allow read, create, update: if isAuthenticatedOrPinSession();
       allow delete: if isHrAdmin();
     }
+
+    function hasRole(roles) {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/user_roles/$(request.auth.token.email.lower()))
+        && get(/databases/$(database)/documents/user_roles/$(request.auth.token.email.lower())).data.role in roles;
+    }
+    function isSuperAdmin() { return isHrAdmin() || hasRole(['super']); }
+
+    match /user_roles/{email} {
+      allow read: if isSuperAdmin() || (request.auth != null && request.auth.token.email.lower() == email);
+      allow write: if isSuperAdmin();
+    }
+    match /access_requests/{email} {
+      allow create: if request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.token.email.lower() == email
+        && request.resource.data.status == 'pending';
+      allow read: if isSuperAdmin() || (request.auth != null && request.auth.token.email.lower() == email);
+      allow update, delete: if isSuperAdmin();
+    }
+    match /role_audit/{id} {
+      allow create, read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
   }
 }
