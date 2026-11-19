@@ -504,21 +504,34 @@ export function Layout() {
                   <span className="hidden xl:inline">คิวงาน</span>
                 </Link>
  
-                {viewAdminDashboard && (
-                  <Link
-                    to="/admin"
-                    className={clsx(
-                      'inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
-                      location.pathname === '/admin' 
-                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                    )}
-                    title="แดชบอร์ด & สถิติ"
-                  >
-                    <BarChart3 className="w-4 h-4 shrink-0" />
-                    <span className="hidden xl:inline">แดชบอร์ด</span>
-                  </Link>
-                )}
+                <Link
+                  to="/admin"
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                    location.pathname === '/admin' 
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' 
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  )}
+                  title="แดชบอร์ด & สถิติ"
+                >
+                  <BarChart3 className="w-4 h-4 shrink-0" />
+                  <span className="hidden xl:inline">แดชบอร์ด</span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => setShowShiftModal(true)}
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer',
+                    showShiftModal
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  )}
+                  title="ตารางกะการทำงาน"
+                >
+                  <CalendarCheck className="w-4 h-4 shrink-0" />
+                  <span className="hidden xl:inline">ตารางกะ</span>
+                </button>
 
                 {canAccessHRPage && (
                   <Link
@@ -681,30 +694,6 @@ export function Layout() {
                             {pendingOTCount}
                           </span>
                         )}
-                      </button>
-
-                      {/* 3. ตารางกะการทำงาน */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowToolsDropdown(false);
-                          setShowShiftModal(true);
-                        }}
-                        className="w-full px-3.5 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group cursor-pointer"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 shrink-0">
-                            <CalendarCheck className="w-4 h-4" />
-                          </span>
-                          <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block group-hover:text-indigo-600 dark:group-hover:text-indigo-400">
-                              ตารางกะการทำงาน
-                            </span>
-                            <span className="text-[11px] text-slate-400 block truncate">
-                              เช็คกะงาน วันหยุด และวันนักขัตฤกษ์
-                            </span>
-                          </div>
-                        </div>
                       </button>
 
                       {/* 4. ตารางรีไฟแนนซ์ iPhone */}

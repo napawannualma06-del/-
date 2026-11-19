@@ -83,8 +83,7 @@ export function MobileBottomNav({
   } = usePermissions();
 
   const dockColCount =
-    2 +
-    (viewAdminDashboard ? 1 : 0) +
+    3 +
     (canAccessHRPage ? 1 : 0) +
     (manageRoles ? 1 : 0);
   const gridColsClass =
@@ -135,31 +134,29 @@ export function MobileBottomNav({
           </Link>
 
           {/* Tab 2: แดชบอร์ด */}
-          {viewAdminDashboard && (
-            <Link
-              to="/admin"
-              onClick={() => setShowDrawer(false)}
-              className={clsx(
-                "flex flex-col items-center justify-center h-full min-h-[44px] rounded-xl transition-all cursor-pointer relative",
-                isActive('/admin')
-                  ? "text-indigo-600 dark:text-indigo-400 font-bold"
-                  : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              <div className={clsx(
-                "relative p-1 rounded-xl transition-all",
-                isActive('/admin') && "bg-indigo-50 dark:bg-indigo-950/60"
-              )}>
-                <BarChart3 className="w-5 h-5 shrink-0" />
-              </div>
-              <span className="text-[11px] font-medium tracking-tight mt-0.5">
-                แดชบอร์ด
-              </span>
-              {isActive('/admin') && (
-                <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-indigo-600 dark:bg-indigo-400" />
-              )}
-            </Link>
-          )}
+          <Link
+            to="/admin"
+            onClick={() => setShowDrawer(false)}
+            className={clsx(
+              "flex flex-col items-center justify-center h-full min-h-[44px] rounded-xl transition-all cursor-pointer relative",
+              isActive('/admin')
+                ? "text-indigo-600 dark:text-indigo-400 font-bold"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            )}
+          >
+            <div className={clsx(
+              "relative p-1 rounded-xl transition-all",
+              isActive('/admin') && "bg-indigo-50 dark:bg-indigo-950/60"
+            )}>
+              <BarChart3 className="w-5 h-5 shrink-0" />
+            </div>
+            <span className="text-[11px] font-medium tracking-tight mt-0.5">
+              แดชบอร์ด
+            </span>
+            {isActive('/admin') && (
+              <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-indigo-600 dark:bg-indigo-400" />
+            )}
+          </Link>
 
           {/* Tab 3: HR (แสดงตามสิทธิ์ canAccessHRPage) */}
           {canAccessHRPage && (

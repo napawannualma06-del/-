@@ -110,8 +110,8 @@ export function AdminDashboard() {
     fetchTotalCaseCounts,
   } = useStore();
   const {
-    loading: permissionsLoading,
     viewAdminDashboard,
+    manageCases,
     manageApiIntegration,
     manageUsers,
     viewAllTechnicalIssues,
@@ -172,12 +172,12 @@ export function AdminDashboard() {
   const [leaderboardSortBy, setLeaderboardSortBy] = useState<'closed' | 'speed_fast' | 'speed_slow'>('closed');
   const [showTimeAnalytics, setShowTimeAnalytics] = useState(false);
 
-  // Ensure users without API integration permission can only view the cases section
+  // Ensure users without viewAdminDashboard or API integration permission can only view the cases section
   useEffect(() => {
-    if (!manageApiIntegration && mainTab !== 'cases') {
+    if ((!viewAdminDashboard || !manageApiIntegration) && mainTab !== 'cases') {
       setMainTab('cases');
     }
-  }, [manageApiIntegration, mainTab]);
+  }, [viewAdminDashboard, manageApiIntegration, mainTab]);
 
   // Fetch total case counts aggregation once on mount
   useEffect(() => {
@@ -235,7 +235,11 @@ export function AdminDashboard() {
     }
     lastAdminBadgeLoadRef.current = now;
 
-    const qTech = viewAllTechnicalIssues
+    const canQueryAllTech = viewAdminDashboard && viewAllTechnicalIssues;
+    const canQueryAllOT = viewAdminDashboard && viewOTAdmin;
+    const canQueryAllAdv = viewAdminDashboard && viewAdvanceAdmin;
+
+    const qTech = canQueryAllTech
       ? query(
           collection(db, 'technical_issues'),
           where('status', 'in', ['pending', 'in_progress'])
@@ -245,11 +249,11 @@ export function AdminDashboard() {
           where('reporterId', '==', user.uid)
         );
 
-    const qOT = viewOTAdmin
+    const qOT = canQueryAllOT
       ? query(collection(db, 'overtime_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'overtime_requests'), where('employeeId', '==', user.uid));
 
-    const qAdv = viewAdvanceAdmin
+    const qAdv = canQueryAllAdv
       ? query(collection(db, 'advance_requests'), where('status', '==', 'pending'))
       : query(collection(db, 'advance_requests'), where('employeeId', '==', user.uid));
 
@@ -284,7 +288,7 @@ export function AdminDashboard() {
     };
 
     loadBadges();
-  }, [user?.uid, viewAllTechnicalIssues, viewOTAdmin, viewAdvanceAdmin]);
+  }, [user?.uid, viewAdminDashboard, viewAllTechnicalIssues, viewOTAdmin, viewAdvanceAdmin]);
 
   if (loading) {
     return (
@@ -538,18 +542,6 @@ export function AdminDashboard() {
     return (a.timeStats.averageMs || 0) - (b.timeStats.averageMs || 0);
   });
 
-  if (permissionsLoading) {
-    return (
-      <div className="py-16 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
-      </div>
-    );
-  }
-
-  if (!viewAdminDashboard) {
-    return <Navigate to="/" replace />;
-  }
-
   return (
     <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto">
       {/* Top Header - Clean Card Surface */}
@@ -571,7 +563,7 @@ export function AdminDashboard() {
           {/* Action Modals and Tab Switchers */}
           <div className="flex items-center gap-2 flex-wrap">
             {/* Main Section Switcher (Super Admin Only for API tab) */}
-            {manageApiIntegration ? (
+            {viewAdminDashboard && manageApiIntegration ? (
               <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/70 dark:border-slate-700/60 overflow-x-auto max-w-full">
                 <button
                   type="button"
@@ -757,7 +749,7 @@ export function AdminDashboard() {
       </div>
 
       {/* Pending Approvals Alert Banner for HR / Super Admins */}
-      {manageUsers && registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
+      {viewAdminDashboard && manageUsers && registeredUsers.filter(u => u.accountStatus === 'pending').length > 0 && (
         <div className="p-4 bg-amber-50/80 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/60 border border-amber-300 dark:border-amber-700 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
@@ -787,7 +779,7 @@ export function AdminDashboard() {
       )}
 
       {/* Conditional Rendering based on Main Tab */}
-      {manageApiIntegration && mainTab === 'api' ? (
+      {viewAdminDashboard && manageApiIntegration && mainTab === 'api' ? (
         <AdminApiIntegration currentAdminName={user?.name || 'Admin'} cases={cases} />
       ) : (
         <>
@@ -1216,7 +1208,7 @@ export function AdminDashboard() {
       )}
 
       {/* Clock Out Confirm Modal for Admin */}
-      {clockOutTarget && (
+      {viewAdminDashboard && manageCases && clockOutTarget && (
         <ClockOutConfirmModal
           isOpen={!!clockOutTarget}
           onClose={() => setClockOutTarget(null)}
@@ -1231,7 +1223,7 @@ export function AdminDashboard() {
       )}
 
       {/* Transfer Case Modal */}
-      {activeReassignCase && (
+      {viewAdminDashboard && manageCases && activeReassignCase && (
         <TransferCaseModal
           isOpen={!!activeReassignCase}
           onClose={() => setActiveReassignCase(null)}
@@ -1243,7 +1235,7 @@ export function AdminDashboard() {
       )}
 
       {/* Return Case to Pending Modal */}
-      {activeReturnCase && (
+      {viewAdminDashboard && manageCases && activeReturnCase && (
         <ReturnCaseModal
           isOpen={!!activeReturnCase}
           onClose={() => setActiveReturnCase(null)}
@@ -1254,7 +1246,7 @@ export function AdminDashboard() {
       )}
 
       {/* Close Case Modal */}
-      {activeCloseCase && (
+      {viewAdminDashboard && manageCases && activeCloseCase && (
         <CloseCaseModal
           isOpen={!!activeCloseCase}
           onClose={() => setActiveCloseCase(null)}
@@ -1274,7 +1266,7 @@ export function AdminDashboard() {
       )}
 
       {/* User Management & Approvals Modal */}
-      {showUserModal && (
+      {viewAdminDashboard && manageUsers && showUserModal && (
         <UserManagementModal
           isOpen={showUserModal}
           onClose={() => setShowUserModal(false)}
